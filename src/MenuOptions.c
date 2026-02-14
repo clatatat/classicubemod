@@ -113,7 +113,7 @@ static void Menu_SwitchPause(void* a, void* b)     { Gui_ShowPauseMenu(); }
 *#########################################################################################################################*/
 struct MenuOptionsScreen;
 typedef void (*InitMenuOptions)(struct MenuOptionsScreen* s);
-#define MENUOPTS_MAX_OPTS 13
+#define MENUOPTS_MAX_OPTS 14
 static void MenuOptionsScreen_Layout(void* screen);
 
 static struct MenuOptionsScreen {
@@ -798,6 +798,13 @@ static void GrO_SetChunkUpdates(int v) {
 	Options_SetInt(OPT_MAX_CHUNK_UPDATES, v);
 }
 
+static cc_bool GrO_GetOcclusion(void) { return MapRenderer_OcclusionCulling; }
+static void    GrO_SetOcclusion(cc_bool v) {
+	MapRenderer_OcclusionCulling = v;
+	Options_SetBool(OPT_OCCLUSION_CULLING, v);
+	MapRenderer_InvalidateSortOrder();
+}
+
 static const char* const RenderMode_Names[] = { "Normal", "Legacy", "Fast", "LegacyFast" };
 #define RENDER_MODE_COUNT 4
 
@@ -869,6 +876,11 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			GrO_GetSmooth,     GrO_SetSmooth,
 			"&eSmoothes lighting, adds glow to blocks.\n" \
 			"&cMay reduce performance.");
+		MenuOptionsScreen_AddBool(s, "Occlusion cull",
+			GrO_GetOcclusion,  GrO_SetOcclusion,
+			"&eHides chunks behind solid chunks.\n" \
+			"&fHelps in caves/tunnels.\n" \
+			"&cMinor CPU cost per frame.");
 		MenuOptionsScreen_AddEnum(s, "Names",   NameMode_Names,   NAME_MODE_COUNT,
 			GrO_GetNames,      GrO_SetNames,
 			"&eNone: &fNo names drawn.\n" \

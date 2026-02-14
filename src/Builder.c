@@ -408,7 +408,16 @@ void Builder_MakeChunk(struct ChunkInfo* info) {
 	}
 
 	info->allAir = allAir;
-	if (allAir || allSolid) return;
+	if (allAir) {
+		info->occlusionFlags = 0x3F; /* All faces can see through */
+		return;
+	}
+	if (allSolid) {
+		info->occlusionFlags = 0; /* No faces can see through */
+		return;
+	}
+	/* Mixed chunk - conservatively assume all faces can see through */
+	info->occlusionFlags = 0x3F;
 	Lighting.LightHint(x1 - 1, y1 - 1, z1 - 1);
 
 	Mem_Set(counts, 1, CHUNK_SIZE_3 * FACE_COUNT);
@@ -423,10 +432,6 @@ void Builder_MakeChunk(struct ChunkInfo* info) {
 	if (!totalVerts) return;
 	
 	OutputChunkPartsMeta(x1, y1, z1, info);
-#ifdef OCCLUSION
-	if (info.NormalParts != null || info.TranslucentParts != null)
-		info.occlusionFlags = (cc_uint8)ComputeOcclusion();
-#endif
 
 #if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
 	/* add an extra element to fix crashing on some GPUs */

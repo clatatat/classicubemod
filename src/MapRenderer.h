@@ -51,11 +51,10 @@ struct ChunkInfo {
 	cc_uint8 drawZMax : 1;
 	cc_uint8 drawYMin : 1;
 	cc_uint8 drawYMax : 1;
+	cc_uint8 occluded : 1;  /* Whether chunk is hidden behind other solid chunks */
 	cc_uint8 : 0;          /* pad to next byte */
-#ifdef OCCLUSION
-	public cc_bool Visited = false, Occluded = false;
-	public byte OcclusionFlags, OccludedFlags, DistanceFlags;
-#endif
+	
+	cc_uint8 occlusionFlags; /* Bitmask of faces that can "see through" */
 #if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
 	GfxResourceID vb;
 #endif
@@ -79,6 +78,10 @@ void MapRenderer_RefreshChunk(int cx, int cy, int cz);
 void MapRenderer_OnBlockChanged(int x, int y, int z, BlockID block);
 /* Deletes all chunks and resets internal state. */
 void MapRenderer_Refresh(void);
+/* Forces recalculation of chunk sort order and occlusion. */
+void MapRenderer_InvalidateSortOrder(void);
+/* Whether occlusion culling is enabled. */
+extern cc_bool MapRenderer_OcclusionCulling;
 
 CC_END_HEADER
 #endif

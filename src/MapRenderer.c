@@ -44,8 +44,13 @@ static int renderChunksCount;
 static cc_uint32* distances;
 /* Maximum number of chunk updates that can be performed in one frame. */
 int MapRenderer_MaxChunkUpdates;
+/* Whether occlusion culling is enabled. */
+cc_bool MapRenderer_OcclusionCulling;
 /* Cached number of chunks in the world */
 static int chunksCount;
+/* Queue for occlusion culling flood-fill */
+static int* occlusionQueue;
+static int occlusionQueueSize;
 
 static void ChunkInfo_Init(struct ChunkInfo* chunk, int x, int y, int z) {
 	chunk->centreX = x + HALF_CHUNK_SIZE; chunk->centreY = y + HALF_CHUNK_SIZE; 
@@ -59,6 +64,8 @@ static void ChunkInfo_Init(struct ChunkInfo* chunk, int x, int y, int z) {
 	chunk->allAir  = false;
 	chunk->noData  = true;
 	chunk->dirty   = true;
+	chunk->occluded = false;
+	chunk->occlusionFlags = 0x3F; /* Assume can see through until built */
 
 	chunk->drawXMin = false; chunk->drawXMax = false; chunk->drawZMin = false;
 	chunk->drawZMax = false; chunk->drawYMin = false; chunk->drawYMax = false;
@@ -407,11 +414,13 @@ static void FreeChunks(void) {
 	Mem_Free(sortedChunks);
 	Mem_Free(renderChunks);
 	Mem_Free(distances);
+	Mem_Free(occlusionQueue);
 
-	mapChunks    = NULL;
-	sortedChunks = NULL;
-	renderChunks = NULL;
-	distances    = NULL;
+	mapChunks      = NULL;
+	sortedChunks   = NULL;
+	renderChunks   = NULL;
+	distances      = NULL;
+	occlusionQueue = NULL;
 }
 
 static void AllocateParts(void) {
@@ -428,6 +437,7 @@ static void AllocateChunks(void) {
 	sortedChunks = (struct ChunkInfo**)Mem_Alloc(chunksCount, sizeof(struct ChunkInfo*), "sorted chunk info");
 	renderChunks = (struct ChunkInfo**)Mem_Alloc(chunksCount, sizeof(struct ChunkInfo*), "render chunk info");
 	distances    = (cc_uint32*)Mem_Alloc(chunksCount, 4, "chunk distances");
+	occlusionQueue = (int*)Mem_Alloc(chunksCount, sizeof(int), "occlusion queue");
 }
 
 static void ResetPartFlags(void) {
@@ -503,6 +513,10 @@ void MapRenderer_Refresh(void) {
 }
 
 /* Refreshes chunks on the border of the map whose y is less than 'maxHeight'. */
+void MapRenderer_InvalidateSortOrder(void) {
+	chunkPos = IVec3_MaxValue();
+}
+
 static void RefreshBorderChunks(int maxHeight) {
 	int cx, cy, cz;
 	cc_bool onBorder;
@@ -573,6 +587,7 @@ static int UpdateChunksAndVisibility(int* chunkUpdates) {
 		}
 
 		info->visible = distSqr <= renderDistSqr &&
+			!info->occluded &&
 			FrustumCulling_SphereInFrustum(info->centreX, info->centreY, info->centreZ, 14); /* 14 ~ sqrt(3 * 8^2) */
 		if (info->visible && !info->empty) { renderChunks[j] = info; j++; }
 	}
@@ -603,9 +618,10 @@ static int UpdateChunksStill(int* chunkUpdates) {
 
 			/* only need to update the visibility of chunks in range. */
 			info->visible = distSqr <= renderDistSqr &&
+				!info->occluded &&
 				FrustumCulling_SphereInFrustum(info->centreX, info->centreY, info->centreZ, 14); /* 14 ~ sqrt(3 * 8^2) */
 			if (info->visible && !info->empty) { renderChunks[j] = info; j++; }
-		} else if (info->visible) {
+		} else if (info->visible && !info->occluded) {
 			renderChunks[j] = info; j++;
 		}
 	}
@@ -655,6 +671,80 @@ static void SortMapChunks(int left, int right) {
 	}
 }
 
+/* Occlusion culling via flood-fill from camera chunk */
+/* Chunks behind fully solid chunks are marked as occluded */
+static void SimpleOcclusionCulling(void) {
+	IVec3 camChunk;
+	int cx, cy, cz, idx, head, tail;
+	int nx, ny, nz, nidx;
+	struct ChunkInfo* info;
+	struct ChunkInfo* neighbor;
+	
+	if (!MapRenderer_OcclusionCulling) return;
+	
+	/* Mark all chunks as occluded initially */
+	for (idx = 0; idx < chunksCount; idx++) {
+		mapChunks[idx].occluded = true;
+	}
+	
+	/* Find camera chunk coordinates */
+	IVec3_Floor(&camChunk, &Camera.CurrentPos);
+	cx = camChunk.x >> CHUNK_SHIFT;
+	cy = camChunk.y >> CHUNK_SHIFT;
+	cz = camChunk.z >> CHUNK_SHIFT;
+	
+	/* Clamp to valid range */
+	if (cx < 0) cx = 0; if (cx >= World.ChunksX) cx = World.ChunksX - 1;
+	if (cy < 0) cy = 0; if (cy >= World.ChunksY) cy = World.ChunksY - 1;
+	if (cz < 0) cz = 0; if (cz >= World.ChunksZ) cz = World.ChunksZ - 1;
+	
+	/* Start BFS from camera chunk */
+	idx = World_ChunkPack(cx, cy, cz);
+	mapChunks[idx].occluded = false;
+	occlusionQueue[0] = idx;
+	head = 0;
+	tail = 1;
+	
+	while (head < tail) {
+		idx = occlusionQueue[head++];
+		info = &mapChunks[idx];
+		
+		/* Decode chunk coordinates from index */
+		cx = idx % World.ChunksX;
+		cy = (idx / World.ChunksX) % World.ChunksY;
+		cz = idx / (World.ChunksX * World.ChunksY);
+		
+		/* Check each of the 6 neighbors */
+		/* If this chunk can see through a face (occlusionFlags) or is empty/air, propagate */
+		/* For simplicity: chunks with allAir or noData always propagate visibility */
+		
+		#define CHECK_NEIGHBOR(dcx, dcy, dcz, faceBit) \
+			nx = cx + (dcx); ny = cy + (dcy); nz = cz + (dcz); \
+			if (nx >= 0 && nx < World.ChunksX && \
+			    ny >= 0 && ny < World.ChunksY && \
+			    nz >= 0 && nz < World.ChunksZ) { \
+				nidx = World_ChunkPack(nx, ny, nz); \
+				neighbor = &mapChunks[nidx]; \
+				if (neighbor->occluded && \
+				    (info->allAir || info->noData || (info->occlusionFlags & (faceBit)))) { \
+					neighbor->occluded = false; \
+					occlusionQueue[tail++] = nidx; \
+				} \
+			}
+		
+		CHECK_NEIGHBOR(-1, 0, 0, (1 << FACE_XMIN))
+		CHECK_NEIGHBOR(+1, 0, 0, (1 << FACE_XMAX))
+		CHECK_NEIGHBOR(0, -1, 0, (1 << FACE_YMIN))
+		CHECK_NEIGHBOR(0, +1, 0, (1 << FACE_YMAX))
+		CHECK_NEIGHBOR(0, 0, -1, (1 << FACE_ZMIN))
+		CHECK_NEIGHBOR(0, 0, +1, (1 << FACE_ZMAX))
+		
+		#undef CHECK_NEIGHBOR
+	}
+	
+	occlusionQueueSize = tail;
+}
+
 static void UpdateSortOrder(void) {
 	struct ChunkInfo* info;
 	IVec3 pos;
@@ -692,7 +782,7 @@ static void UpdateSortOrder(void) {
 
 	SortMapChunks(0, chunksCount - 1);
 	ResetPartFlags();
-	/*SimpleOcclusionCulling();*/
+	SimpleOcclusionCulling();
 }
 
 void MapRenderer_Update(float delta) {
@@ -800,6 +890,7 @@ static void OnInit(void) {
 	MapRenderer_1DUsedCount = 87; /* Atlas1D_UsedAtlasesCount(); */
 	chunkPos   = IVec3_MaxValue();
 	MapRenderer_MaxChunkUpdates = Options_GetInt(OPT_MAX_CHUNK_UPDATES, 4, 1024, 30);
+	MapRenderer_OcclusionCulling = Options_GetBool(OPT_OCCLUSION_CULLING, false);
 	CalcViewDists();
 }
 
