@@ -94,14 +94,10 @@ void Inventory_PickBlock(BlockID block) {
 
 /* Returns default block that should go in the given inventory slot */
 static BlockID DefaultMapping(int slot) {
-	BlockID block;
 	if (Game_ClassicMode) {
 		if (slot < Game_Version.InventorySize) return Game_Version.Inventory[slot];
 	} else if (slot < Game_Version.MaxCoreBlock) {
-		block = (BlockID)(slot + 1);
-		/* Skip non-placeable blocks in 200+ range */
-		if (block >= 200) return BLOCK_AIR;
-		return block;
+		return (BlockID)(slot + 1);
 	}
 	return BLOCK_AIR;
 }

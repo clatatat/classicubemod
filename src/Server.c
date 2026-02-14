@@ -222,9 +222,6 @@ static void SPConnection_Init(void) {
 	Server.SupportsFullCP437       = !Game_ClassicMode;
 	Server.SupportsPartialMessages = true;
 	Server.IsSinglePlayer          = true;
-
-	Blocks.CanPlace[BLOCK_BEDROCK] = false;
-	Blocks.CanDelete[BLOCK_BEDROCK] = false;
 }
 
 

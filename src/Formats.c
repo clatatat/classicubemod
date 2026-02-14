@@ -1810,9 +1810,9 @@ static cc_result WriteLevelBlocks(struct Stream* stream) {
 	{
 		b = World_GetRawBlock(i);
 		/* TODO: Better fallback decision (e.g. air if custom block is 'gas' type) */
-		if (b > BLOCK_DOOR_EW_TOP) b = BLOCK_STONE;
+		if (b > BLOCK_STONE_BRICK) b = BLOCK_STONE;
 		/* TODO: Move to GameVersion.c and account for game version */
-		if (b > BLOCK_OBSIDIAN) b = cpe_fallback[b - BLOCK_DIAMOND_BLOCK];
+		if (b > BLOCK_OBSIDIAN) b = cpe_fallback[b - BLOCK_COBBLE_SLAB];
 
 		buffer[bIndex] = (cc_uint8)b;
 		bIndex++;

@@ -28,12 +28,6 @@ void Physics_OnBlockChanged(int x, int y, int z, BlockID old, BlockID now);
 void Physics_Init(void);
 void Physics_Free(void);
 void Physics_Tick(void);
-/* Schedule a TNT block to explode after a 5-second fuse */
-void TNT_ScheduleFuse(int x, int y, int z);
-/* Immediately explode at the given world position (no fuse) */
-void TNT_Explode(int x, int y, int z);
-/* Immediately explode at the given world position with custom radius */
-void TNT_ExplodeRadius(int x, int y, int z, int power);
 
 CC_END_HEADER
 #endif

@@ -70,10 +70,10 @@ ifeq ($(PLAT),web)
 endif
 
 ifeq ($(PLAT),mingw)
-	CC      =  C:/msys64/mingw32/bin/gcc.exe
+	CC      =  gcc
 	OEXT    =  .exe
-	CFLAGS  += -DUNICODE -D_WIN32_WINNT=0x0500 -DWINVER=0x0500 -march=i686
-	LDFLAGS =  -g -Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,0
+	CFLAGS  += -DUNICODE
+	LDFLAGS =  -g
 	LIBS    =  -mwindows -lwinmm
 	BUILD_DIR = build/win
 endif
@@ -227,7 +227,6 @@ linux:
 	$(MAKE) $(TARGET) PLAT=linux
 mingw:
 	$(MAKE) $(TARGET) PLAT=mingw
-	cp ./ClassiCube.exe "classicube executables/v1.2.0-pre0/ClassiCube.exe"
 sunos:
 	$(MAKE) $(TARGET) PLAT=sunos
 hp-ux:

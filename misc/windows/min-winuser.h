@@ -2,7 +2,8 @@
 #define CC_USER32_FUNC
 #endif
 
-/* Not available on older SDKs */
+/* Not available on older SDKs - define unconditionally to avoid MinGW issues */
+#undef _SIZE_T
 typedef cc_uintptr _SIZE_T;
 
 /* Only present if WIN32_WINNT >= 0x0500 */

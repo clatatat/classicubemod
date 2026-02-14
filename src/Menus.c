@@ -225,7 +225,7 @@ static void Menu_SwitchGui(void* a, void* b)       { GuiOptionsScreen_Show(); }
 static void Menu_SwitchGfx(void* a, void* b)       { GraphicsOptionsScreen_Show(); }
 static void Menu_SwitchHacks(void* a, void* b)     { HacksSettingsScreen_Show(); }
 static void Menu_SwitchEnv(void* a, void* b)       { EnvSettingsScreen_Show(); }
-static void Menu_SwitchGameplay(void* a, void* b)  { GameplayOptionsScreen_Show(); }
+static void Menu_SwitchNostalgia(void* a, void* b) { NostalgiaMenuScreen_Show(); }
 
 static void Menu_SwitchGenLevel(void* a, void* b)        { GenLevelScreen_Show(); }
 static void Menu_SwitchClassicGenLevel(void* a, void* b) { ClassicGenScreen_Show(); }
@@ -616,7 +616,7 @@ static void ClassicPauseScreen_Init(void* screen) {
 		{    0,  -50, "Generate new level...",  Menu_SwitchClassicGenLevel },
 		{    0,    0, "Save level..",           Menu_SwitchSaveLevel },
 		{    0,   50, "Load level..",           Menu_SwitchLoadLevel },
-		{    0,  100, "Gameplay Options...",   Menu_SwitchGameplay }
+		{    0,  100, "Nostalgia options...",   Menu_SwitchNostalgia }
 	};
 	s->widgets    = classicPause_widgets;
 	s->numWidgets = 0;
@@ -672,7 +672,7 @@ static const char* const optsGroup_descs[8] = {
 	"&eChat options",
 	"&eHacks allowed, jump settings, and more",
 	"&eEnv colours, water level, weather, and more",
-	"&eEnemy spawning, passive spawning, survival mode",
+	"&eSettings for resembling the original classic",
 };
 static const struct SimpleButtonDesc optsGroup_btns[8] = {
 	{ -160, -100, "Misc options...",      Menu_SwitchMisc        },
@@ -682,7 +682,7 @@ static const struct SimpleButtonDesc optsGroup_btns[8] = {
 	{  160, -100, "Chat options...",      Menu_SwitchChat        },
 	{  160,  -50, "Hacks settings...",    Menu_SwitchHacks       },
 	{  160,    0, "Env settings...",      Menu_SwitchEnv         },
-	{  160,   50, "Gameplay Options...",  Menu_SwitchGameplay    }
+	{  160,   50, "Nostalgia options...", Menu_SwitchNostalgia   }
 };
 
 static void OptionsGroupScreen_CheckHacksAllowed(void* screen) {
@@ -1040,22 +1040,13 @@ void EditHotkeyScreen_Show(struct HotkeyData original) {
 *#########################################################################################################################*/
 #define GENLEVEL_NUM_INPUTS 4
 
-static const char* const GenLevel_TypeNames[] = { "Flat", "Normal", "Floating", "Caves", "Empty" };
-static const struct MapGenerator* GenLevel_TypeGens[] = { &FlatgrassGen, &NotchyGen, &FloatingGen, &CavesGen, &EmptyGen };
-#define GENLEVEL_TYPE_COUNT 5
-
-static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert" };
-#define GENLEVEL_THEME_COUNT 5
-
 static struct GenLevelScreen {
 	Screen_Body
 	struct FontDesc textFont;
-	int worldType;  /* index into GenLevel_TypeNames */
-	int worldTheme; /* index into GenLevel_ThemeNames */
-	struct ButtonWidget typeBtn, themeBtn, generate, cancel;
+	struct ButtonWidget flatgrass, vanilla, cancel;
 	struct TextInputWidget inputs[4];
 	struct TextWidget labels[4], title;
-	struct Widget* __widgets[2 * GENLEVEL_NUM_INPUTS + 5];
+	struct Widget* __widgets[2 * GENLEVEL_NUM_INPUTS + 4];
 } GenLevelScreen;
 
 CC_NOINLINE static int GenLevelScreen_GetInt(struct GenLevelScreen* s, int index) {
@@ -1092,48 +1083,13 @@ static void GenLevelScreen_Gen(void* screen, const struct MapGenerator* gen) {
 	} else if (!width || !height || !length) {
 		Chat_AddRaw("&cOne of the map dimensions is invalid.");
 	} else {
-		Gen_Theme = s->worldTheme;
 		Gui_Remove((struct Screen*)s);
 		Gen_Start(gen, seed, width, height, length);
 	}
 }
 
-static void GenLevelScreen_UpdateType(struct GenLevelScreen* s) {
-	struct FontDesc titleFont;
-	cc_string str; char strBuf[STRING_SIZE];
-	String_InitArray(str, strBuf);
-	String_Format1(&str, "Type: %c", GenLevel_TypeNames[s->worldType]);
-	Gui_MakeTitleFont(&titleFont);
-	ButtonWidget_Set(&s->typeBtn, &str, &titleFont);
-	Font_Free(&titleFont);
-}
-
-static void GenLevelScreen_CycleType(void* screen, void* b) {
-	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
-	s->worldType = (s->worldType + 1) % GENLEVEL_TYPE_COUNT;
-	GenLevelScreen_UpdateType(s);
-}
-
-static void GenLevelScreen_UpdateTheme(struct GenLevelScreen* s) {
-	struct FontDesc titleFont;
-	cc_string str; char strBuf[STRING_SIZE];
-	String_InitArray(str, strBuf);
-	String_Format1(&str, "Theme: %c", GenLevel_ThemeNames[s->worldTheme]);
-	Gui_MakeTitleFont(&titleFont);
-	ButtonWidget_Set(&s->themeBtn, &str, &titleFont);
-	Font_Free(&titleFont);
-}
-
-static void GenLevelScreen_CycleTheme(void* screen, void* b) {
-	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
-	s->worldTheme = (s->worldTheme + 1) % GENLEVEL_THEME_COUNT;
-	GenLevelScreen_UpdateTheme(s);
-}
-
-static void GenLevelScreen_Generate(void* a, void* b) {
-	struct GenLevelScreen* s = (struct GenLevelScreen*)a;
-	GenLevelScreen_Gen(a, GenLevel_TypeGens[s->worldType]);
-}
+static void GenLevelScreen_Flatgrass(void* a, void* b) { GenLevelScreen_Gen(a, &FlatgrassGen); }
+static void GenLevelScreen_Notchy(void* a, void* b)    { GenLevelScreen_Gen(a, &NotchyGen);    }
 
 static void GenLevelScreen_Make(struct GenLevelScreen* s, int i, int def) {
 	cc_string tmp; char tmpBuffer[STRING_SIZE];
@@ -1215,11 +1171,10 @@ static void GenLevelScreen_ContextRecreated(void* screen) {
 	TextWidget_SetConst(&s->labels[2], "Length:", &s->textFont);
 	TextWidget_SetConst(&s->labels[3], "Seed:",   &s->textFont);
 	
-	TextWidget_SetConst(&s->title,    "Generate new level", &s->textFont);
-	GenLevelScreen_UpdateType(s);
-	GenLevelScreen_UpdateTheme(s);
-	ButtonWidget_SetConst(&s->generate, "Generate",          &titleFont);
-	ButtonWidget_SetConst(&s->cancel,   "Cancel",            &titleFont);
+	TextWidget_SetConst(&s->title,       "Generate new level", &s->textFont);
+	ButtonWidget_SetConst(&s->flatgrass, "Flatgrass",          &titleFont);
+	ButtonWidget_SetConst(&s->vanilla,   "Vanilla",            &titleFont);
+	ButtonWidget_SetConst(&s->cancel,    "Cancel",             &titleFont);
 	Font_Free(&titleFont);
 }
 
@@ -1244,10 +1199,9 @@ static void GenLevelScreen_Layout(void* screen) {
 		Widget_SetLocation(&s->labels[i], ANCHOR_CENTRE_MAX, ANCHOR_CENTRE, 110, y);
 	}
 
-	Widget_SetLocation(&s->title,    ANCHOR_CENTRE, ANCHOR_CENTRE,  0, -130);
-	Widget_SetLocation(&s->typeBtn,  ANCHOR_CENTRE, ANCHOR_CENTRE, -110,  100);
-	Widget_SetLocation(&s->themeBtn, ANCHOR_CENTRE, ANCHOR_CENTRE,  110,  100);
-	Widget_SetLocation(&s->generate, ANCHOR_CENTRE, ANCHOR_CENTRE,  0,  150);
+	Widget_SetLocation(&s->title,     ANCHOR_CENTRE, ANCHOR_CENTRE,    0, -130);
+	Widget_SetLocation(&s->flatgrass, ANCHOR_CENTRE, ANCHOR_CENTRE, -120,  100);
+	Widget_SetLocation(&s->vanilla,   ANCHOR_CENTRE, ANCHOR_CENTRE,  120,  100);
 	Menu_LayoutBack(&s->cancel);
 }
 
@@ -1264,11 +1218,8 @@ static void GenLevelScreen_Init(void* screen) {
 	GenLevelScreen_Make(s, 3, 0);
 
 	TextWidget_Add(s,   &s->title);
-	s->worldType  = 1; /* default to Normal */
-	s->worldTheme = 0; /* default to Normal */
-	ButtonWidget_Add(s, &s->typeBtn,   200, GenLevelScreen_CycleType);
-	ButtonWidget_Add(s, &s->themeBtn,  200, GenLevelScreen_CycleTheme);
-	ButtonWidget_Add(s, &s->generate,  200, GenLevelScreen_Generate);
+	ButtonWidget_Add(s, &s->flatgrass, 200, GenLevelScreen_Flatgrass);
+	ButtonWidget_Add(s, &s->vanilla,   200, GenLevelScreen_Notchy);
 	AddPrimaryButton(s, &s->cancel,         Menu_SwitchPause);
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
@@ -1396,6 +1347,10 @@ static void SaveLevelScreen_RemoveOverwrites(struct SaveLevelScreen* s) {
 	}
 }
 
+static void SaveLevelScreen_OnInputTextChanged(void* elem) {
+	SaveLevelScreen_RemoveOverwrites(&SaveLevelScreen);
+}
+
 static cc_result DoSaveMap(const cc_string* path, struct GZipState* state) {
 	static const cc_string schematic = String_FromConst(".schematic");
 	static const cc_string mine      = String_FromConst(".mine");
@@ -1475,6 +1430,7 @@ static void SaveLevelScreen_Save(void* screen, void* widget) {
 		
 	SaveLevelScreen_RemoveOverwrites(s);
 	if ((res = SaveLevelScreen_SaveMap(&path))) return;
+
 	Chat_Add1("&eSaved map to: %s", &path);
 	CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
 }
@@ -1513,14 +1469,12 @@ static void SaveLevelScreen_File(void* screen, void* b) {
 
 static int SaveLevelScreen_KeyPress(void* screen, char keyChar) {
 	struct SaveLevelScreen* s = (struct SaveLevelScreen*)screen;
-	SaveLevelScreen_RemoveOverwrites(s);
 	InputWidget_Append(&s->input.base, keyChar);
 	return true;
 }
 
 static int SaveLevelScreen_TextChanged(void* screen, const cc_string* str) {
 	struct SaveLevelScreen* s = (struct SaveLevelScreen*)screen;
-	SaveLevelScreen_RemoveOverwrites(s);
 	InputWidget_SetText(&s->input.base, str);
 	return true;
 }
@@ -1530,11 +1484,10 @@ static int SaveLevelScreen_KeyDown(void* screen, int key, struct InputDevice* de
 	int handled;
 	
 	handled = Menu_DoInputDown(s, key, device);
-	/* Pressing Enter triggers save */
+	/* Pressing Enter in general triggers save */
 	if (!handled && InputDevice_IsEnter(key, device))
 		SaveLevelScreen_Save(s, &s->save);
 
-	if (key != CCMOUSE_L) SaveLevelScreen_RemoveOverwrites(s);
 	return Screen_InputDown(s, key, device);
 }
 
@@ -1595,6 +1548,7 @@ static void SaveLevelScreen_Init(void* screen) {
 
 	TextWidget_Add(s, &s->desc);
 	s->input.onscreenPlaceholder = "Map name";
+	s->input.base.OnTextChanged  = SaveLevelScreen_OnInputTextChanged;
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
 }
@@ -2011,7 +1965,7 @@ static void SwitchBindsMain(void* s, void* w) {
 *#########################################################################################################################*/
 struct KeyBindsScreen;
 typedef void (*InitKeyBindings)(struct KeyBindsScreen* s);
-#define KEYBINDS_MAX_BTNS 14
+#define KEYBINDS_MAX_BTNS 12
 
 static struct KeyBindsScreen {
 	Screen_Body	
@@ -2266,11 +2220,11 @@ void HacksBindingsScreen_Show(void) {
 *--------------------------------------------------OtherBindingsScreen----------------------------------------------------*
 *#########################################################################################################################*/
 void OtherBindingsScreen_Show(void) {
-	static const cc_uint8 binds[]     = { BIND_EXT_INPUT, BIND_HIDE_FPS, BIND_HIDE_GUI, BIND_HOTBAR_SWITCH, BIND_DROP_BLOCK,BIND_SCREENSHOT, BIND_FULLSCREEN, BIND_AXIS_LINES, BIND_AUTOROTATE, BIND_SMOOTH_CAMERA, BIND_IDOVERLAY, BIND_BREAK_LIQUIDS, BIND_SPAWN_MOB };
-	static const char* const descs[]  = { "Show ext input", "Hide FPS", "Hide gui", "Hotbar switching", "Drop block", "Screenshot", "Fullscreen", "Show axis lines", "Auto-rotate", "Smooth camera", "ID overlay", "Breakable liquids", "Spawn mob" };
+	static const cc_uint8 binds[]     = { BIND_EXT_INPUT, BIND_HIDE_FPS, BIND_HIDE_GUI, BIND_HOTBAR_SWITCH, BIND_DROP_BLOCK,BIND_SCREENSHOT, BIND_FULLSCREEN, BIND_AXIS_LINES, BIND_AUTOROTATE, BIND_SMOOTH_CAMERA, BIND_IDOVERLAY, BIND_BREAK_LIQUIDS };
+	static const char* const descs[]  = { "Show ext input", "Hide FPS", "Hide gui", "Hotbar switching", "Drop block", "Screenshot", "Fullscreen", "Show axis lines", "Auto-rotate", "Smooth camera", "ID overlay", "Breakable liquids" };
 	
 	KeyBindsScreen_Reset(Menu_SwitchBindsHacks, Menu_SwitchBindsMouse, 260);
-	KeyBindsScreen_SetLayout(-140, 10, 7);
+	KeyBindsScreen_SetLayout(-140, 10, 6);
 	KeyBindsScreen_Show(Array_Elems(binds), binds, descs, "Other controls");
 }
 
@@ -2781,129 +2735,6 @@ void UrlWarningOverlay_Show(const cc_string* url) {
 
 
 /*########################################################################################################################*
-*------------------------------------------------ResolutionConfirmOverlay-------------------------------------------------*
-*#########################################################################################################################*/
-static struct ResolutionConfirmOverlay {
-	Screen_Body
-	int resWidth, resHeight;
-	float countdown;
-	struct ButtonWidget btns[2];
-	struct TextWidget   lbls[4];
-	struct Widget* __widgets[4 + 2];
-} ResolutionConfirmOverlay_Instance;
-
-static void ResolutionConfirmOverlay_Revert(struct ResolutionConfirmOverlay* s) {
-	cc_string str;
-	/* Revert the resolution */
-	Window_RestoreDisplayResolution();
-	/* Restore the option to Desktop */
-	str = String_FromReadonly("Desktop");
-	Options_Set(OPT_FULLSCREEN_RES, &str);
-	Gui_Remove((struct Screen*)s);
-}
-
-static void ResolutionConfirmOverlay_KeepClick(void* screen, void* b) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	/* Keep the resolution - just close the overlay */
-	Gui_Remove((struct Screen*)s);
-}
-
-static void ResolutionConfirmOverlay_RevertClick(void* screen, void* b) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	ResolutionConfirmOverlay_Revert(s);
-}
-
-static void ResolutionConfirmOverlay_Update(void* screen, float delta) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	cc_string str; char strBuf[STRING_SIZE];
-	int secs;
-	struct FontDesc textFont;
-
-	s->countdown -= delta;
-	if (s->countdown <= 0) {
-		ResolutionConfirmOverlay_Revert(s);
-		return;
-	}
-
-	secs = (int)(s->countdown + 0.99f);
-	String_InitArray(str, strBuf);
-	String_Format1(&str, "Reverting in %i seconds...", &secs);
-
-	Gui_MakeBodyFont(&textFont);
-	TextWidget_Set(&s->lbls[2], &str, &textFont);
-	Font_Free(&textFont);
-	s->dirty = true;
-}
-
-static void ResolutionConfirmOverlay_ContextRecreated(void* screen) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	struct FontDesc titleFont, textFont;
-	cc_string str; char strBuf[STRING_SIZE];
-	int secs;
-
-	Screen_UpdateVb(screen);
-	Gui_MakeTitleFont(&titleFont);
-	Gui_MakeBodyFont(&textFont);
-
-	TextWidget_SetConst(&s->lbls[0], "&eKeep this display resolution?", &titleFont);
-
-	String_InitArray(str, strBuf);
-	String_Format2(&str, "Resolution changed to %i x %i", 
-		&s->resWidth, &s->resHeight);
-	TextWidget_Set(&s->lbls[1], &str, &textFont);
-
-	secs = (int)(s->countdown + 0.99f);
-	String_InitArray(str, strBuf);
-	String_Format1(&str, "Reverting in %i seconds...", &secs);
-	TextWidget_Set(&s->lbls[2], &str, &textFont);
-
-	ButtonWidget_SetConst(&s->btns[0], "Keep", &titleFont);
-	ButtonWidget_SetConst(&s->btns[1], "Revert", &titleFont);
-	Font_Free(&titleFont);
-	Font_Free(&textFont);
-}
-
-static void ResolutionConfirmOverlay_Layout(void* screen) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	Overlay_LayoutLabels(s->lbls);
-	Overlay_LayoutMainButtons(s->btns);
-}
-
-static void ResolutionConfirmOverlay_Init(void* screen) {
-	struct ResolutionConfirmOverlay* s = (struct ResolutionConfirmOverlay*)screen;
-	s->widgets     = s->__widgets;
-	s->numWidgets  = 0;
-	s->maxWidgets  = Array_Elems(s->__widgets);
-
-	Overlay_AddLabels(s, s->lbls);
-	ButtonWidget_Add(s, &s->btns[0], 160, ResolutionConfirmOverlay_KeepClick);
-	ButtonWidget_Add(s, &s->btns[1], 160, ResolutionConfirmOverlay_RevertClick);
-
-	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
-}
-
-static const struct ScreenVTABLE ResolutionConfirmOverlay_VTABLE = {
-	ResolutionConfirmOverlay_Init,   ResolutionConfirmOverlay_Update, Screen_NullFunc,
-	MenuScreen_Render2,              Screen_BuildMesh,
-	Menu_InputDown,                  Screen_InputUp,     Screen_TKeyPress, Screen_TText,
-	Menu_PointerDown,                Screen_PointerUp,   Menu_PointerMove, Screen_TMouseScroll,
-	ResolutionConfirmOverlay_Layout, Screen_ContextLost, ResolutionConfirmOverlay_ContextRecreated,
-	Menu_PadAxis
-};
-
-void ResolutionConfirmOverlay_Show(int resWidth, int resHeight) {
-	struct ResolutionConfirmOverlay* s = &ResolutionConfirmOverlay_Instance;
-	s->grabsInput = true;
-	s->closable   = false;
-	s->VTABLE     = &ResolutionConfirmOverlay_VTABLE;
-	s->resWidth   = resWidth;
-	s->resHeight  = resHeight;
-	s->countdown  = 15.0f;
-	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENUINPUT);
-}
-
-
-/*########################################################################################################################*
 *-----------------------------------------------------TexPackOverlay------------------------------------------------------*
 *#########################################################################################################################*/
 static struct TexPackOverlay {
@@ -3091,6 +2922,76 @@ void TexPackOverlay_Show(const cc_string* url) {
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_TEXPACK);
 }
 
+
+/*########################################################################################################################*
+*--------------------------------------------------NostalgiaMenuScreen-----------------------------------------------------*
+*#########################################################################################################################*/
+static struct NostalgiaMenuScreen {
+	Screen_Body
+	struct ButtonWidget btnA, btnF, done;
+	struct TextWidget title;
+	struct Widget* __widgets[4];
+} NostalgiaMenuScreen;
+
+static void NostalgiaMenuScreen_Appearance(void* a, void* b)    { NostalgiaAppearanceScreen_Show(); }
+static void NostalgiaMenuScreen_Functionality(void* a, void* b) { NostalgiaFunctionalityScreen_Show(); }
+
+static void NostalgiaMenuScreen_SwitchBack(void* a, void* b) {
+	if (Gui.ClassicMenu) { Menu_SwitchPause(a, b); } else { Menu_SwitchOptions(a, b); }
+}
+
+static void NostalgiaMenuScreen_ContextRecreated(void* screen) {
+	struct NostalgiaMenuScreen* s = (struct NostalgiaMenuScreen*)screen;
+	struct FontDesc titleFont;
+	Screen_UpdateVb(screen);
+	Gui_MakeTitleFont(&titleFont);
+
+	TextWidget_SetConst(&s->title, "Nostalgia options", &titleFont);
+	ButtonWidget_SetConst(&s->btnA, "Appearance",       &titleFont);
+	ButtonWidget_SetConst(&s->btnF, "Functionality",    &titleFont);
+	ButtonWidget_SetConst(&s->done,    "Done",          &titleFont);
+
+	Font_Free(&titleFont);
+}
+
+static void NostalgiaMenuScreen_Layout(void* screen) {
+	struct NostalgiaMenuScreen* s = (struct NostalgiaMenuScreen*)screen;
+	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, -100);
+	Widget_SetLocation(&s->btnA,  ANCHOR_CENTRE, ANCHOR_CENTRE, 0,  -25);
+	Widget_SetLocation(&s->btnF,  ANCHOR_CENTRE, ANCHOR_CENTRE, 0,   25);
+	Menu_LayoutBack(&s->done);
+}
+
+static void NostalgiaMenuScreen_Init(void* screen) {
+	struct NostalgiaMenuScreen* s = (struct NostalgiaMenuScreen*)screen;
+
+	s->widgets     = s->__widgets;
+	s->numWidgets  = 0;
+	s->maxWidgets  = Array_Elems(s->__widgets);
+
+	ButtonWidget_Add(s, &s->btnA, 400, NostalgiaMenuScreen_Appearance);
+	ButtonWidget_Add(s, &s->btnF, 400, NostalgiaMenuScreen_Functionality);
+	ButtonWidget_Add(s, &s->done, 400, NostalgiaMenuScreen_SwitchBack);
+	TextWidget_Add(s,   &s->title);
+
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
+}
+
+static const struct ScreenVTABLE NostalgiaMenuScreen_VTABLE = {
+	NostalgiaMenuScreen_Init,  Screen_NullUpdate, Screen_NullFunc,
+	MenuScreen_Render2,        Screen_BuildMesh,
+	Menu_InputDown,            Screen_InputUp,    Screen_TKeyPress, Screen_TText,
+	Menu_PointerDown,          Screen_PointerUp,  Menu_PointerMove, Screen_TMouseScroll,
+	NostalgiaMenuScreen_Layout, Screen_ContextLost, NostalgiaMenuScreen_ContextRecreated,
+	Menu_PadAxis
+};
+void NostalgiaMenuScreen_Show(void) {
+	struct NostalgiaMenuScreen* s = &NostalgiaMenuScreen;
+	s->grabsInput = true;
+	s->closable   = true;
+	s->VTABLE     = &NostalgiaMenuScreen_VTABLE;
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
+}
 #else
 void TexIdsOverlay_Show(void) { }
 void UrlWarningOverlay_Show(const cc_string* url) { }

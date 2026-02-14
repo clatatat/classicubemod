@@ -20,8 +20,6 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 /* Packs an index into the 18x18x18 chunk array. Coordinates range from -1 to 16. */
 #define Builder_PackChunk(xx, yy, zz) (((yy) + 1) * EXTCHUNK_SIZE_2 + ((zz) + 1) * EXTCHUNK_SIZE + ((xx) + 1))
 
-#define IsLeverBlock(b) ((b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON)
-
 static BlockID* Builder_Chunk;
 static cc_uint8* Builder_Counts;
 static int* Builder_BitFlags;
@@ -183,12 +181,6 @@ static void PrepareChunk(int x1, int y1, int z1) {
 				/* Sprites can't be stretched, nor can then be they hidden by other blocks. */
 				/* Note sprites are drawn using DrawSprite and not with any of the DrawXFace. */
 				if (Blocks.Draw[b] == DRAW_SPRITE) { AddSpriteVertices(b); continue; }
-				
-				/* Lever blocks (DRAW_TRANSPARENT) also need sprite verts for handle */
-				if (IsLeverBlock(b)) {
-					int k = Atlas1D_Index(96);
-					Builder_Parts[k].sCount += 4 * 4;
-				}
 
 				Builder_X = x; Builder_Y = y; Builder_Z = z;
 				Builder_FullBright = Blocks.Brightness[b];
@@ -496,261 +488,6 @@ static void DefaultPostStretchChunk(void) {
 }
 
 static RNGState spriteRng;
-
-#define s_u1 0.0f
-#define s_u2 UV2_Scale
-
-/* Draw a torch with proper orientation (ground standing or wall-mounted tilted) */
-/* Helper: check if Builder_Block is any redstone torch variant */
-#define IsRedTorch(b) ((b) == BLOCK_RED_ORE_TORCH || (b) == BLOCK_RED_ORE_TORCH_OFF \
-	|| (b) == BLOCK_RED_TORCH_ON_S || (b) == BLOCK_RED_TORCH_ON_N \
-	|| (b) == BLOCK_RED_TORCH_ON_E || (b) == BLOCK_RED_TORCH_ON_W \
-	|| (b) == BLOCK_RED_TORCH_OFF_S || (b) == BLOCK_RED_TORCH_OFF_N \
-	|| (b) == BLOCK_RED_TORCH_OFF_E || (b) == BLOCK_RED_TORCH_OFF_W \
-	|| (b) == BLOCK_RED_TORCH_UNMOUNTED || (b) == BLOCK_RED_TORCH_UNMOUNTED_OFF)
-#define IsAnyTorchBlock(b) ((b) == BLOCK_TORCH || IsRedTorch(b))
-
-static void Builder_DrawTorch(int x, int y, int z) {
-	struct Builder1DPart* part;
-	struct VertexTextured* v;
-	cc_bool bright;
-	PackedCol color;
-	TextureLoc loc;
-	float v1, v2;
-	cc_uint8 facing;
-	float X, Y, Z;
-	/* Bottom and top coordinates for the two crossing planes */
-	float x1b,y1b,z1b, x2b,z2b; /* bottom corners */
-	float x1t,z1t, x2t,z2t; /* top corners (may differ for tilt) */
-	float y2;
-	
-	X  = (float)x; Y = (float)y; Z = (float)z;
-	facing = DirectionalBlock_GetFacing(x, y, z);
-	
-	loc = Block_Tex(Builder_Block, FACE_XMAX);
-	v1  = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
-	v2  = v1 + Atlas1D.InvTileSize * UV2_Scale;
-	/* Red Ore Torch: use bottom 11/16 (skip top 5 rows); regular torch: bottom 10/16 (skip top 6 rows) */
-	if (IsRedTorch(Builder_Block)) {
-		v1  = v1 + (5.0f/16.0f) * Atlas1D.InvTileSize * UV2_Scale;
-	} else {
-		v1  = v1 + (6.0f/16.0f) * Atlas1D.InvTileSize * UV2_Scale;
-	}
-	
-	if (facing == 4 || facing == 1) {
-		/* Ground torch (facing=4) or default (facing=1 used as fallback) */
-		/* Straight vertical torch, full-width sprite planes */
-		x1b = X + 2.50f/16.0f; z1b = Z + 2.50f/16.0f; y1b = Y;
-		x2b = X + 13.5f/16.0f; z2b = Z + 13.5f/16.0f;
-		x1t = x1b; z1t = z1b;
-		x2t = x2b; z2t = z2b;
-		y2  = IsRedTorch(Builder_Block) ? Y + 11.0f/16.0f : Y + 10.0f/16.0f;
-		
-		/* If facing is 1 (south) but this is actually ground, use ground torch */
-		if (facing != 4) {
-			/* Wall torch: attached to north wall (z-1), lean toward +Z */
-			float wallOff = 8.0f/16.0f;
-			float leanOff = -4.0f/16.0f;
-			y1b = IsRedTorch(Builder_Block) ? Y + 2.0f/16.0f : Y + 3.0f/16.0f;
-			y2  = Y + 13.0f/16.0f;
-			/* Bottom shifted toward wall (-Z) */
-			z1b = Z + 2.50f/16.0f - wallOff;
-			z2b = Z + 13.5f/16.0f - wallOff;
-			/* Top shifted away from wall (+Z) */
-			z1t = Z + 2.50f/16.0f + leanOff;
-			z2t = Z + 13.5f/16.0f + leanOff;
-		}
-	} else if (facing == 0) {
-		/* Wall torch: attached to south wall (z+1), lean toward -Z */
-		float wallOff = 8.0f/16.0f;
-		float leanOff = -4.0f/16.0f;
-		y1b = IsRedTorch(Builder_Block) ? Y + 2.0f/16.0f : Y + 3.0f/16.0f;
-		y2  = Y + 13.0f/16.0f;
-		x1b = X + 2.50f/16.0f; x2b = X + 13.5f/16.0f;
-		x1t = x1b; x2t = x2b;
-		/* Bottom toward wall (+Z) */
-		z1b = Z + 2.50f/16.0f + wallOff;
-		z2b = Z + 13.5f/16.0f + wallOff;
-		/* Top away from wall (-Z) */
-		z1t = Z + 2.50f/16.0f - leanOff;
-		z2t = Z + 13.5f/16.0f - leanOff;
-	} else if (facing == 2) {
-		/* Wall torch: attached to east wall (x+1), lean toward -X */
-		float wallOff = 8.0f/16.0f;
-		float leanOff = -4.0f/16.0f;
-		y1b = IsRedTorch(Builder_Block) ? Y + 2.0f/16.0f : Y + 3.0f/16.0f;
-		y2  = Y + 13.0f/16.0f;
-		z1b = Z + 2.50f/16.0f; z2b = Z + 13.5f/16.0f;
-		z1t = z1b; z2t = z2b;
-		/* Bottom toward wall (+X) */
-		x1b = X + 2.50f/16.0f + wallOff;
-		x2b = X + 13.5f/16.0f + wallOff;
-		/* Top away from wall (-X) */
-		x1t = X + 2.50f/16.0f - leanOff;
-		x2t = X + 13.5f/16.0f - leanOff;
-	} else if (facing == 3) {
-		/* Wall torch: attached to west wall (x-1), lean toward +X */
-		float wallOff = 8.0f/16.0f;
-		float leanOff = -4.0f/16.0f;
-		y1b = IsRedTorch(Builder_Block) ? Y + 2.0f/16.0f : Y + 3.0f/16.0f;
-		y2  = Y + 13.0f/16.0f;
-		z1b = Z + 2.50f/16.0f; z2b = Z + 13.5f/16.0f;
-		z1t = z1b; z2t = z2b;
-		/* Bottom toward wall (-X) */
-		x1b = X + 2.50f/16.0f - wallOff;
-		x2b = X + 13.5f/16.0f - wallOff;
-		/* Top away from wall (+X) */
-		x1t = X + 2.50f/16.0f + leanOff;
-		x2t = X + 13.5f/16.0f + leanOff;
-	} else {
-		/* Fallback: ground torch */
-		x1b = X + 2.50f/16.0f; z1b = Z + 2.50f/16.0f; y1b = Y;
-		x2b = X + 13.5f/16.0f; z2b = Z + 13.5f/16.0f;
-		x1t = x1b; z1t = z1b;
-		x2t = x2b; z2t = z2b;
-		y2  = IsRedTorch(Builder_Block) ? Y + 11.0f/16.0f : Y + 10.0f/16.0f;
-	}
-	
-	bright = Blocks.Brightness[Builder_Block];
-	part   = &Builder_Parts[Atlas1D_Index(loc)];
-	color  = bright ? PACKEDCOL_WHITE : Lighting.Color_Sprite_Fast(x, y, z);
-	Block_Tint(color, Builder_Block);
-
-	/* Draw Z axis - bottom uses (x1b,z1b)-(x2b,z2b), top uses (x1t,z1t)-(x2t,z2t) */
-	v = &Builder_Vertices[part->sOffset];
-	v->x = x1b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x1t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x2t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x2b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-
-	/* Draw Z axis mirrored */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x2b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x2t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x1t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x1b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-
-	/* Draw X axis - cross pattern with swapped z/x corners */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x1b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x1t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x2t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x2b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-
-	/* Draw X axis mirrored */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x2b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x2t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x1t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x1b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-
-	part->sOffset += 4;
-}
-
-static void Builder_DrawLeverHandle(int x, int y, int z) {
-	struct Builder1DPart* part;
-	struct VertexTextured* v;
-	PackedCol color;
-	TextureLoc loc;
-	float v1, v2;
-	cc_uint8 facing;
-	float X, Y, Z;
-	float x1b,y1b,z1b, x2b,z2b;
-	float x1t,z1t, x2t,z2t;
-	float y2;
-	float d_up, d_out;
-	float hw = 5.5f/16.0f; /* half-width of crossed sprite planes (same as torch) */
-	cc_bool leverOn;
-	float cx, cz; /* center of the base on the wall */
-	
-	X  = (float)x; Y = (float)y; Z = (float)z;
-	facing = DirectionalBlock_GetFacing(x, y, z);
-	leverOn = (Builder_Block == BLOCK_LEVER_ON);
-	
-	loc = 96; /* Lever handle texture */
-	v1  = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
-	v2  = v1 + Atlas1D.InvTileSize * UV2_Scale;
-	/* Only show bottom 10/16 of texture (skip top 6 rows, like a regular torch) */
-	v1  = v1 + (6.0f/16.0f) * Atlas1D.InvTileSize * UV2_Scale;
-	
-	d_up  = 10.0f/16.0f * 0.5f;    /* handleLen * sin(30) = 5/16 */
-	d_out = 10.0f/16.0f * 0.866f;  /* handleLen * cos(30) = ~8.7/16 */
-	
-	if (!leverOn) d_up = -d_up;
-	
-	/* Center the crossed sprite planes on the base center, not block center */
-	switch (facing) {
-		case 0: /* South wall (z+1) - base at z=13-16/16 */
-			cx = X + 0.5f; cz = Z + 14.5f/16.0f;
-			x1b = cx - hw; x2b = cx + hw;
-			z1b = cz - hw; z2b = cz + hw;
-			x1t = x1b; x2t = x2b;
-			z1t = z1b - d_out; z2t = z2b - d_out;
-			y1b = Y + 0.5f; y2 = Y + 0.5f + d_up;
-			break;
-		case 1: /* North wall (z-1) - base at z=0-3/16 */
-			cx = X + 0.5f; cz = Z + 1.5f/16.0f;
-			x1b = cx - hw; x2b = cx + hw;
-			z1b = cz - hw; z2b = cz + hw;
-			x1t = x1b; x2t = x2b;
-			z1t = z1b + d_out; z2t = z2b + d_out;
-			y1b = Y + 0.5f; y2 = Y + 0.5f + d_up;
-			break;
-		case 2: /* East wall (x+1) - base at x=13-16/16 */
-			cx = X + 14.5f/16.0f; cz = Z + 0.5f;
-			x1b = cx - hw; x2b = cx + hw;
-			z1b = cz - hw; z2b = cz + hw;
-			z1t = z1b; z2t = z2b;
-			x1t = x1b - d_out; x2t = x2b - d_out;
-			y1b = Y + 0.5f; y2 = Y + 0.5f + d_up;
-			break;
-		case 3: /* West wall (x-1) - base at x=0-3/16 */
-			cx = X + 1.5f/16.0f; cz = Z + 0.5f;
-			x1b = cx - hw; x2b = cx + hw;
-			z1b = cz - hw; z2b = cz + hw;
-			z1t = z1b; z2t = z2b;
-			x1t = x1b + d_out; x2t = x2b + d_out;
-			y1b = Y + 0.5f; y2 = Y + 0.5f + d_up;
-			break;
-		default:
-			return;
-	}
-	
-	part  = &Builder_Parts[Atlas1D_Index(loc)];
-	color = Blocks.Brightness[Builder_Block] ? PACKEDCOL_WHITE : Lighting.Color_Sprite_Fast(x, y, z);
-	Block_Tint(color, Builder_Block);
-	
-	/* Draw Z axis */
-	v = &Builder_Vertices[part->sOffset];
-	v->x = x1b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x1t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x2t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x2b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-	
-	/* Draw Z axis mirrored */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x2b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x2t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x1t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x1b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-	
-	/* Draw X axis */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x1b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x1t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x2t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x2b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-	
-	/* Draw X axis mirrored */
-	v -= 4; v += part->sCount >> 2;
-	v->x = x2b; v->y = y1b; v->z = z1b; v->Col = color; v->U = s_u2; v->V = v2; v++;
-	v->x = x2t; v->y = y2;  v->z = z1t; v->Col = color; v->U = s_u2; v->V = v1; v++;
-	v->x = x1t; v->y = y2;  v->z = z2t; v->Col = color; v->U = s_u1; v->V = v1; v++;
-	v->x = x1b; v->y = y1b; v->z = z2b; v->Col = color; v->U = s_u1; v->V = v2; v++;
-	
-	part->sOffset += 4;
-}
-
 static void Builder_DrawSprite(int x, int y, int z) {
 	struct Builder1DPart* part;
 	struct VertexTextured* v;
@@ -768,6 +505,8 @@ static void Builder_DrawSprite(int x, int y, int z) {
 	x1 = X + 2.50f/16.0f; y1 = Y;        z1 = Z + 2.50f/16.0f;
 	x2 = X + 13.5f/16.0f; y2 = Y + 1.0f; z2 = Z + 13.5f/16.0f;
 
+#define s_u1 0.0f
+#define s_u2 UV2_Scale
 	loc = Block_Tex(Builder_Block, FACE_XMAX);
 	v1  = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
 	v2  = v1 + Atlas1D.InvTileSize * UV2_Scale;
@@ -927,7 +666,6 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	int offset;
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
-		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 
@@ -948,23 +686,15 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	Drawer.MinBB = Blocks.MinBB[Builder_Block]; Drawer.MinBB.y = 1.0f - Drawer.MinBB.y;
 	Drawer.MaxBB = Blocks.MaxBB[Builder_Block]; Drawer.MaxBB.y = 1.0f - Drawer.MaxBB.y;
 
-	DirectionalBlock_GetRenderBounds(Builder_Block, x, y, z, &min, &max);
+	min = Blocks.RenderMinBB[Builder_Block]; max = Blocks.RenderMaxBB[Builder_Block];
 	Drawer.X1 = x + min.x; Drawer.Y1 = y + min.y; Drawer.Z1 = z + min.z;
 	Drawer.X2 = x + max.x; Drawer.Y2 = y + max.y; Drawer.Z2 = z + max.z;
-
-	/* For buttons/levers/pressure plates, use dynamic bounds for UV mapping too, so textures match geometry */
-	if (Builder_Block == BLOCK_BUTTON || Builder_Block == BLOCK_BUTTON_PRESSED
-		|| IsLeverBlock(Builder_Block)
-		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED) {
-		Drawer.MinBB = min; Drawer.MinBB.y = 1.0f - Drawer.MinBB.y;
-		Drawer.MaxBB = max; Drawer.MaxBB.y = 1.0f - Drawer.MaxBB.y;
-	}
 
 	Drawer.Tinted  = Blocks.Tinted[Builder_Block];
 	Drawer.TintCol = Blocks.FogCol[Builder_Block];
 
 	if (count_XMin) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_XMIN);
+		loc    = Block_Tex(Builder_Block, FACE_XMIN);
 		offset = (lightFlags >> FACE_XMIN) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
@@ -974,7 +704,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	}
 
 	if (count_XMax) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_XMAX);
+		loc    = Block_Tex(Builder_Block, FACE_XMAX);
 		offset = (lightFlags >> FACE_XMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
@@ -984,7 +714,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	}
 
 	if (count_ZMin) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_ZMIN);
+		loc    = Block_Tex(Builder_Block, FACE_ZMIN);
 		offset = (lightFlags >> FACE_ZMIN) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
@@ -994,7 +724,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	}
 
 	if (count_ZMax) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_ZMAX);
+		loc    = Block_Tex(Builder_Block, FACE_ZMAX);
 		offset = (lightFlags >> FACE_ZMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
@@ -1004,7 +734,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	}
 
 	if (count_YMin) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_YMIN);
+		loc    = Block_Tex(Builder_Block, FACE_YMIN);
 		offset = (lightFlags >> FACE_YMIN) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
@@ -1013,17 +743,12 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	}
 
 	if (count_YMax) {
-		loc    = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_YMAX);
+		loc    = Block_Tex(Builder_Block, FACE_YMAX);
 		offset = (lightFlags >> FACE_YMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 
 		col = fullBright ? PACKEDCOL_WHITE : Lighting.Color_YMax_Fast(x, y + offset, z);
 		Drawer_YMax(count_YMax, col, loc, &part->faces.vertices[FACE_YMAX]);
-	}
-	
-	/* Draw lever handle sprite after base box faces */
-	if (IsLeverBlock(Builder_Block)) {
-		Builder_DrawLeverHandle(x, y, z);
 	}
 }
 
@@ -1054,7 +779,6 @@ static Vec3 adv_minBB, adv_maxBB;
 static int adv_initBitFlags, adv_baseOffset;
 static int* adv_bitFlags;
 static float adv_x1, adv_y1, adv_z1, adv_x2, adv_y2, adv_z2;
-static int adv_blockX, adv_blockY, adv_blockZ;
 static PackedCol adv_lerp[5], adv_lerpX[5], adv_lerpZ[5], adv_lerpY[5];
 static cc_bool adv_tinted;
 
@@ -1239,7 +963,7 @@ static int Adv_StretchZ(int countIndex, int x, int y, int z, int chunkIndex, Blo
 #define Adv_CountBits(F, a, b, c, d) (((F >> a) & 1) + ((F >> b) & 1) + ((F >> c) & 1) + ((F >> d) & 1))
 
 static void Adv_DrawXMin(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_XMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_XMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.z, u2 = (count - 1) + adv_maxBB.z * UV2_Scale;
@@ -1281,7 +1005,7 @@ static void Adv_DrawXMin(int count) {
 }
 
 static void Adv_DrawXMax(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_XMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_XMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = (count - adv_minBB.z), u2 = (1 - adv_maxBB.z) * UV2_Scale;
@@ -1323,7 +1047,7 @@ static void Adv_DrawXMax(int count) {
 }
 
 static void Adv_DrawZMin(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_ZMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_ZMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = (count - adv_minBB.x), u2 = (1 - adv_maxBB.x) * UV2_Scale;
@@ -1365,7 +1089,7 @@ static void Adv_DrawZMin(int count) {
 }
 
 static void Adv_DrawZMax(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_ZMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_ZMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1407,7 +1131,7 @@ static void Adv_DrawZMax(int count) {
 }
 
 static void Adv_DrawYMin(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_YMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_YMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1449,7 +1173,7 @@ static void Adv_DrawYMin(int count) {
 }
 
 static void Adv_DrawYMax(int count) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, adv_blockX, adv_blockY, adv_blockZ, FACE_YMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_YMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1496,7 +1220,6 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 	int count_ZMax, count_YMin, count_YMax;
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
-		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 
@@ -1514,22 +1237,12 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 	adv_baseOffset = (Blocks.Draw[Builder_Block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
 	adv_tinted     = Blocks.Tinted[Builder_Block];
 
-	DirectionalBlock_GetRenderBounds(Builder_Block, x, y, z, &min, &max);
+	min = Blocks.RenderMinBB[Builder_Block]; max = Blocks.RenderMaxBB[Builder_Block];
 	adv_x1 = x + min.x; adv_y1 = y + min.y; adv_z1 = z + min.z;
 	adv_x2 = x + max.x; adv_y2 = y + max.y; adv_z2 = z + max.z;
 
 	adv_minBB = Blocks.MinBB[Builder_Block]; adv_maxBB = Blocks.MaxBB[Builder_Block];
 	adv_minBB.y = 1.0f - adv_minBB.y; adv_maxBB.y = 1.0f - adv_maxBB.y;
-
-	/* For buttons/levers/pressure plates, use dynamic bounds for UV mapping */
-	if (Builder_Block == BLOCK_BUTTON || Builder_Block == BLOCK_BUTTON_PRESSED
-		|| IsLeverBlock(Builder_Block)
-		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED) {
-		adv_minBB = min; adv_minBB.y = 1.0f - adv_minBB.y;
-		adv_maxBB = max; adv_maxBB.y = 1.0f - adv_maxBB.y;
-	}
-
-	adv_blockX = x; adv_blockY = y; adv_blockZ = z;
 
 	if (count_XMin) Adv_DrawXMin(count_XMin);
 	if (count_XMax) Adv_DrawXMax(count_XMax);
@@ -1537,11 +1250,6 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 	if (count_ZMax) Adv_DrawZMax(count_ZMax);
 	if (count_YMin) Adv_DrawYMin(count_YMin);
 	if (count_YMax) Adv_DrawYMax(count_YMax);
-	
-	/* Draw lever handle sprite after base box faces */
-	if (IsLeverBlock(Builder_Block)) {
-		Builder_DrawLeverHandle(x, y, z);
-	}
 }
 
 static void Adv_PrePrepareChunk(void) {
@@ -1625,7 +1333,7 @@ static PackedCol Modern_GetColorX(PackedCol orig, int x, int y, int z, int oY, i
 	return AVERAGE(ab, cd);
 }
 static void Modern_DrawXMin(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_XMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_XMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.z, u2 = (count - 1) + adv_maxBB.z * UV2_Scale;
@@ -1658,7 +1366,7 @@ static void Modern_DrawXMin(int count, int x, int y, int z) {
 }
 
 static void Modern_DrawXMax(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_XMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_XMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = (count - adv_minBB.z), u2 = (1 - adv_maxBB.z) * UV2_Scale;
@@ -1704,7 +1412,7 @@ static PackedCol Modern_GetColorZ(PackedCol orig, int x, int y, int z, int oX, i
 	return AVERAGE(ab, cd);
 }
 static void Modern_DrawZMin(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_ZMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_ZMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = (count - adv_minBB.x), u2 = (1 - adv_maxBB.x) * UV2_Scale;
@@ -1737,7 +1445,7 @@ static void Modern_DrawZMin(int count, int x, int y, int z) {
 }
 
 static void Modern_DrawZMax(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_ZMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_ZMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1783,7 +1491,7 @@ static PackedCol Modern_GetColorYMin(PackedCol orig, int x, int y, int z, int oX
 	return AVERAGE(ab, cd);
 }
 static void Modern_DrawYMin(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_YMIN);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_YMIN);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1829,7 +1537,7 @@ static PackedCol Modern_GetColorYMax(PackedCol orig, int x, int y, int z, int oX
 	return AVERAGE(ab, cd);
 }
 static void Modern_DrawYMax(int count, int x, int y, int z) {
-	TextureLoc texLoc = DirectionalBlock_GetTexture(Builder_Block, x, y, z, FACE_YMAX);
+	TextureLoc texLoc = Block_Tex(Builder_Block, FACE_YMAX);
 	float vOrigin = Atlas1D_RowId(texLoc) * Atlas1D.InvTileSize;
 
 	float u1 = adv_minBB.x, u2 = (count - 1) + adv_maxBB.x * UV2_Scale;
@@ -1868,7 +1576,6 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 	int count_ZMax, count_YMin, count_YMax;
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
-		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 
@@ -1886,20 +1593,12 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 	adv_baseOffset = (Blocks.Draw[Builder_Block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
 	adv_tinted = Blocks.Tinted[Builder_Block];
 
-	DirectionalBlock_GetRenderBounds(Builder_Block, x, y, z, &min, &max);
+	min = Blocks.RenderMinBB[Builder_Block]; max = Blocks.RenderMaxBB[Builder_Block];
 	adv_x1 = x + min.x; adv_y1 = y + min.y; adv_z1 = z + min.z;
 	adv_x2 = x + max.x; adv_y2 = y + max.y; adv_z2 = z + max.z;
 
 	adv_minBB = Blocks.MinBB[Builder_Block]; adv_maxBB = Blocks.MaxBB[Builder_Block];
 	adv_minBB.y = 1.0f - adv_minBB.y; adv_maxBB.y = 1.0f - adv_maxBB.y;
-
-	/* For buttons/levers/pressure plates, use dynamic bounds for UV mapping */
-	if (Builder_Block == BLOCK_BUTTON || Builder_Block == BLOCK_BUTTON_PRESSED
-		|| IsLeverBlock(Builder_Block)
-		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED) {
-		adv_minBB = min; adv_minBB.y = 1.0f - adv_minBB.y;
-		adv_maxBB = max; adv_maxBB.y = 1.0f - adv_maxBB.y;
-	}
 
 	if (count_XMin) Modern_DrawXMin(count_XMin, x, y, z);
 	if (count_XMax) Modern_DrawXMax(count_XMax, x, y, z);
@@ -1907,11 +1606,6 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 	if (count_ZMax) Modern_DrawZMax(count_ZMax, x, y, z);
 	if (count_YMin) Modern_DrawYMin(count_YMin, x, y, z);
 	if (count_YMax) Modern_DrawYMax(count_YMax, x, y, z);
-	
-	/* Draw lever handle sprite after base box faces */
-	if (IsLeverBlock(Builder_Block)) {
-		Builder_DrawLeverHandle(x, y, z);
-	}
 }
 
 static void Modern_PrePrepareChunk(void) {
