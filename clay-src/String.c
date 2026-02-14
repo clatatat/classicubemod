@@ -13,6 +13,7 @@ const cc_string String_Empty;
 
 int String_CalcLen(const char* raw, int capacity) {
 	int length = 0;
+	if (!raw || capacity <= 0) return 0;
 	while (length < capacity && *raw) { raw++; length++; }
 	return length;
 }
