@@ -1031,7 +1031,7 @@ static void DumpStack(void) {
 	}
 }
 
-static BOOL WINAPI DumpModule(const char* name, ULONG_PTR base, ULONG size, void* userCtx) {
+static BOOL WINAPI DumpModule(char* name, ULONG_PTR base, ULONG size, void* userCtx) {
 	cc_string str; char strBuffer[256];
 	cc_uintptr beg, end;
 
