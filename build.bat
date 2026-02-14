@@ -9,6 +9,18 @@ set NEED_BUILD=0
 
 echo Building ClassiCube for Windows 2000...
 
+REM Extract source assets if not present
+if not exist "src\audio" (
+    echo Extracting audio assets...
+    mkdir src\audio 2>nul
+    powershell -NoProfile -Command "Expand-Archive -Path 'audio\default.zip' -DestinationPath 'src\audio' -Force"
+)
+if not exist "src\texpacks" (
+    echo Extracting texpack assets...
+    mkdir src\texpacks 2>nul
+    powershell -NoProfile -Command "Expand-Archive -Path 'texpacks\Minecraft.zip' -DestinationPath 'src\texpacks' -Force"
+)
+
 REM Check if we need to rebuild (exe missing or source files newer)
 if not exist "ClassiCube.exe" (
     set NEED_BUILD=1
@@ -44,6 +56,7 @@ if "%NEED_BUILD%"=="1" (
     echo Source unchanged, skipping build.
     if not exist "%OUTPUT_DIR%\ClassiCube.exe" copy ClassiCube.exe "%OUTPUT_DIR%\"
 )
+
 
 REM Wait for zip operations to complete
 :wait_zips
