@@ -846,51 +846,51 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	{
 		MenuOptionsScreen_AddEnum(s, "FPS mode", FpsLimit_Names, FPS_LIMIT_COUNT,
 			GrO_GetFPS,        GrO_SetFPS,
-			"&eVSync: &fNumber of frames rendered is at most the monitor's refresh rate.\n" \
-			"&e30/60/120/144 FPS: &fRenders 30/60/120/144 frames at most each second.\n" \
-			"&eNoLimit: &fRenders as many frames as possible each second.\n" \
-			"&cNoLimit is pointless - it wastefully renders frames that you don't even see!");
+			"&eVSync: &fLimits FPS to monitor refresh rate.\n" \
+			"&e30/60/120/144 FPS: &fLimits to that rate.\n" \
+			"&eNoLimit: &fRenders as fast as possible.\n" \
+			"&cNoLimit wastes CPU on unseen frames!");
 		MenuOptionsScreen_AddInt(s, "View distance",
 			8, 4096, 512,
 			GrO_GetViewDist,   GrO_SetViewDist, NULL);
 		MenuOptionsScreen_AddEnum(s, "Render mode", RenderMode_Names, RENDER_MODE_COUNT,
 			GrO_GetRenderMode, GrO_SetRenderMode,
-			"&eNormal: &fDefault render mode, with all environmental effects enabled.\n" \
-			"&eLegacy: &fSame as normal, but may fix cloud/edge rendering issues.\n" \
-			"&eFast: &fDisables clouds, fog and overhead sky for better performance.\n" \
-			"&eLegacyFast: &fCombines Legacy and Fast modes.");
+			"&eNormal: &fAll effects enabled.\n" \
+			"&eLegacy: &fMay fix cloud/edge issues.\n" \
+			"&eFast: &fNo clouds/fog for speed.\n" \
+			"&eLegacyFast: &fLegacy + Fast combined.");
 		MenuOptionsScreen_AddInt(s, "Chunk updates",
 			4, 1024, 30,
 			GrO_GetChunkUpdates, GrO_SetChunkUpdates,
-			"&eMaximum chunk updates per frame.\n" \
-			"&fLower values improve framerate but slow down map loading.\n" \
-			"&cReduce this on slow machines.");
+			"&eMax chunk updates per frame.\n" \
+			"&fLower = better FPS, slower loading.\n" \
+			"&cReduce on slow machines.");
 		MenuOptionsScreen_AddBool(s, "Smooth lighting",
 			GrO_GetSmooth,     GrO_SetSmooth,
-			"&eSmooth lighting smooths lighting and adds a minor glow to bright blocks.\n" \
-			"&cNote: &eThis setting may reduce performance.");
+			"&eSmoothes lighting, adds glow to blocks.\n" \
+			"&cMay reduce performance.");
 		MenuOptionsScreen_AddEnum(s, "Names",   NameMode_Names,   NAME_MODE_COUNT,
 			GrO_GetNames,      GrO_SetNames,
-			"&eNone: &fNo names of players are drawn.\n" \
-			"&eHovered: &fName of the targeted player is drawn see-through.\n" \
-			"&eAll: &fNames of all other players are drawn normally.\n" \
-			"&eAllHovered: &fAll names of players are drawn see-through.\n" \
-			"&eAllUnscaled: &fAll names of players are drawn see-through without scaling.");
+			"&eNone: &fNo names drawn.\n" \
+			"&eHovered: &fTargeted name see-through.\n" \
+			"&eAll: &fAll names drawn normally.\n" \
+			"&eAllHovered: &fAll names see-through.\n" \
+			"&eAllUnscaled: &fSee-through, no scaling.");
 		MenuOptionsScreen_AddEnum(s, "Shadows", ShadowMode_Names, SHADOW_MODE_COUNT,
 			GrO_GetShadows,    GrO_SetShadows,
-			"&eNone: &fNo entity shadows are drawn.\n" \
-			"&eSnapToBlock: &fA square shadow is shown on block you are directly above.\n" \
-			"&eCircle: &fA circular shadow is shown across the blocks you are above.\n" \
-			"&eCircleAll: &fA circular shadow is shown underneath all entities.");
+			"&eNone: &fNo shadows drawn.\n" \
+			"&eSnapToBlock: &fSquare shadow below you.\n" \
+			"&eCircle: &fCircular shadow below you.\n" \
+			"&eCircleAll: &fShadow under all entities.");
 		MenuOptionsScreen_AddBool(s, "Simple fog",
 			GrO_GetSimpleFog,  GrO_SetSimpleFog,
-			"&eDisables GPU fog and uses the sky colour as the background.\n" \
-			"&fEnable this if fog renders as a white wall on your machine.\n" \
-			"&fThe view distance edge will blend into the sky instead.");
+			"&eUses sky colour instead of GPU fog.\n" \
+			"&fEnable if fog shows as white wall.\n" \
+			"&fView edge blends into sky instead.");
 		MenuOptionsScreen_AddBool(s, "Clouds",
 			GrO_GetClouds,     GrO_SetClouds,
 			"&eWhether clouds are rendered.\n" \
-			"&fDisabling may improve performance on very limited machines.");
+			"&fDisable for better performance.");
 
 		if (!Gfx_GetUIOptions(s)) {
 		MenuOptionsScreen_AddBool(s, "Mipmaps",
@@ -902,9 +902,9 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 
 		MenuOptionsScreen_AddEnum(s, "Fullscreen res", GrO_ResNames, GRO_RES_COUNT,
 			GrO_GetRes,        GrO_SetRes,
-			"&eDesktop: &fUses your desktop resolution when fullscreen.\n" \
-			"&eOther: &fChanges display resolution when entering fullscreen.\n" \
-			"&cLow resolutions may not display the GUI correctly.");
+			"&eDesktop: &fUses desktop resolution.\n" \
+			"&eOther: &fChanges display resolution.\n" \
+			"&cLow res may break GUI display.");
 	};
 	MenuOptionsScreen_EndButtons(s, -1, GrO_SwitchBack);
 	GrO_InitialResIdx = GrO_GetRes();
