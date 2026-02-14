@@ -215,8 +215,9 @@ cc_bool Gfx_TryRestoreContext(void) {
 	/* A user reported an issue where after changing some settings in */
 	/*  nvidia control panel, IDirect3DDevice9_Reset would return */
 	/*  D3DERR_NOTAVAILABLE and hence crash the game */
+	/* Similarly, D3DERR_INVALIDCALL can occur during Alt+Tab or display changes */
 	/* So try to workaround this by only crashing after 50 failures */
-	if (res == D3DERR_NOTAVAILABLE && availFails++ < 50) return false;
+	if ((res == D3DERR_NOTAVAILABLE || res == D3DERR_INVALIDCALL) && availFails++ < 50) return false;
 
 	if (res) Process_Abort2(res, "Error recreating D3D9 context");
 	D3D9_UpdateCachedDimensions();

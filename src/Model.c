@@ -496,6 +496,7 @@ void Model_Unregister(struct Model* model) {
 	{
 		struct Entity* e = Entities.List[i];
 		if (e && e->Model == model) {
+			if (!Models.Human) continue; /* Models not yet initialized */
 			cc_string humanModelName = String_FromReadonly(Models.Human->name);
 			Entity_SetModel(e, &humanModelName);
 		}
