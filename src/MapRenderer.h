@@ -14,6 +14,8 @@ extern struct IGameComponent MapRenderer_Component;
 
 /* Max used 1D atlases. (i.e. Atlas1D_Index(maxTextureLoc) + 1) */
 extern int MapRenderer_1DUsedCount;
+/* Maximum number of chunk updates that can be performed in one frame. */
+extern int MapRenderer_MaxChunkUpdates;
 
 /* Buffer for all chunk parts. There are (MapRenderer_ChunksCount * Atlas1D_Count) parts in the buffer,
 with parts for 'normal' buffer being in lower half. */

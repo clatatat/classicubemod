@@ -57,6 +57,9 @@ if "%NEED_BUILD%"=="1" (
     if not exist "%OUTPUT_DIR%\ClassiCube.exe" copy ClassiCube.exe "%OUTPUT_DIR%\"
 )
 
+REM Copy optimized options.txt for low-end hardware
+copy options.txt "%OUTPUT_DIR%\" >nul
+echo Copied optimized options.txt
 
 REM Wait for zip operations to complete
 :wait_zips

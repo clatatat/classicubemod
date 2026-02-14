@@ -113,7 +113,7 @@ static void Menu_SwitchPause(void* a, void* b)     { Gui_ShowPauseMenu(); }
 *#########################################################################################################################*/
 struct MenuOptionsScreen;
 typedef void (*InitMenuOptions)(struct MenuOptionsScreen* s);
-#define MENUOPTS_MAX_OPTS 11
+#define MENUOPTS_MAX_OPTS 13
 static void MenuOptionsScreen_Layout(void* screen);
 
 static struct MenuOptionsScreen {
@@ -792,6 +792,34 @@ static void    GrO_SetClouds(cc_bool v) {
 	Options_SetBool(OPT_CLOUDS_ENABLED, v);
 }
 
+static int  GrO_GetChunkUpdates(void) { return MapRenderer_MaxChunkUpdates; }
+static void GrO_SetChunkUpdates(int v) {
+	MapRenderer_MaxChunkUpdates = v;
+	Options_SetInt(OPT_MAX_CHUNK_UPDATES, v);
+}
+
+static const char* const RenderMode_Names[] = { "Normal", "Legacy", "Fast", "LegacyFast" };
+#define RENDER_MODE_COUNT 4
+
+static int GrO_GetRenderMode(void) {
+	if (EnvRenderer_Legacy && EnvRenderer_Minimal) return 3; /* LegacyFast */
+	if (EnvRenderer_Minimal) return 2; /* Fast */
+	if (EnvRenderer_Legacy)  return 1; /* Legacy */
+	return 0; /* Normal */
+}
+
+static void GrO_SetRenderMode(int v) {
+	int flags = 0;
+	cc_string mode;
+	if (v == 1) flags = ENV_LEGACY;
+	else if (v == 2) flags = ENV_MINIMAL;
+	else if (v == 3) flags = ENV_LEGACY | ENV_MINIMAL;
+	
+	EnvRenderer_SetMode(flags);
+	mode = String_FromReadonly(RenderMode_Names[v]);
+	Options_Set(OPT_RENDER_TYPE, &mode);
+}
+
 static int  GrO_GetNames(void) { return Entities.NamesMode; }
 static void GrO_SetNames(int v) {
 	cc_string str = String_FromReadonly(NameMode_Names[v]);
@@ -825,6 +853,18 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddInt(s, "View distance",
 			8, 4096, 512,
 			GrO_GetViewDist,   GrO_SetViewDist, NULL);
+		MenuOptionsScreen_AddEnum(s, "Render mode", RenderMode_Names, RENDER_MODE_COUNT,
+			GrO_GetRenderMode, GrO_SetRenderMode,
+			"&eNormal: &fDefault render mode, with all environmental effects enabled.\n" \
+			"&eLegacy: &fSame as normal, but may fix cloud/edge rendering issues.\n" \
+			"&eFast: &fDisables clouds, fog and overhead sky for better performance.\n" \
+			"&eLegacyFast: &fCombines Legacy and Fast modes.");
+		MenuOptionsScreen_AddInt(s, "Chunk updates",
+			4, 1024, 30,
+			GrO_GetChunkUpdates, GrO_SetChunkUpdates,
+			"&eMaximum chunk updates per frame.\n" \
+			"&fLower values improve framerate but slow down map loading.\n" \
+			"&cReduce this on slow machines.");
 		MenuOptionsScreen_AddBool(s, "Smooth lighting",
 			GrO_GetSmooth,     GrO_SetSmooth,
 			"&eSmooth lighting smooths lighting and adds a minor glow to bright blocks.\n" \

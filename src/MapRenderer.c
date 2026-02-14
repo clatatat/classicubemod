@@ -43,7 +43,7 @@ static int renderChunksCount;
 /* Distance of each chunk from the camera. */
 static cc_uint32* distances;
 /* Maximum number of chunk updates that can be performed in one frame. */
-static int maxChunkUpdates;
+int MapRenderer_MaxChunkUpdates;
 /* Cached number of chunks in the world */
 static int chunksCount;
 
@@ -619,7 +619,7 @@ static void UpdateChunks(float delta) {
 
 	/* Build more chunks if 30 FPS or over, otherwise slowdown */
 	chunksTarget += delta < CHUNK_TARGET_TIME ? 1 : -1; 
-	Math_Clamp(chunksTarget, 4, maxChunkUpdates);
+	Math_Clamp(chunksTarget, 4, MapRenderer_MaxChunkUpdates);
 
 	p = Entities.CurPlayer;
 	samePos = Vec3_Equals(&Camera.CurrentPos, &lastCamPos)
@@ -799,7 +799,7 @@ static void OnInit(void) {
 	/* This = 87 fixes map being invisible when no textures */
 	MapRenderer_1DUsedCount = 87; /* Atlas1D_UsedAtlasesCount(); */
 	chunkPos   = IVec3_MaxValue();
-	maxChunkUpdates = Options_GetInt(OPT_MAX_CHUNK_UPDATES, 4, 1024, 30);
+	MapRenderer_MaxChunkUpdates = Options_GetInt(OPT_MAX_CHUNK_UPDATES, 4, 1024, 30);
 	CalcViewDists();
 }
 

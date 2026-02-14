@@ -85,7 +85,7 @@ texpacks
 maps
 texturecache
 logs
-options.txt
+#options.txt
 ClassiCube*
 screenshots
 fontscache.txt
@@ -93,7 +93,7 @@ fontscache.txt
 # DOS files
 CWSDPMI.EXE
 CWSDPMI.SWP
-OPTIONS.TXT
+#OPTIONS.TXT
 CCDOS.EXE
 
 # Android source files need to be included
@@ -233,3 +233,5 @@ Minecraft Alpha 1.0.6 source code
 Minecraft Indev 20100223 source code
 Minecraft textures
 .claude/settings.local.json
+
+dist/
