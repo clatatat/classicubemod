@@ -602,13 +602,11 @@ void Context2D_DrawText(struct Context2D* ctx, struct DrawTextArgs* args, int x,
 }
 
 int Drawer2D_TextWidth(struct DrawTextArgs* args) {
-	if (!args || !args->font) return 0; /* FIX: Prevent NULL crash */
 	if (Font_IsBitmap(args->font)) return MeasureBitmappedWidth(args);
 	return SysFont_TextWidth(args);
 }
 
 int Drawer2D_TextHeight(struct DrawTextArgs* args) {
-	if (!args || !args->font) return 0; /* FIX: Prevent NULL crash */
 	return Font_CalcHeight(args->font, args->useShadow);
 }
 

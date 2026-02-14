@@ -1,54 +1,38 @@
 @echo off
-REM Optimized Release Build for Windows 2000 (32-bit)
-REM Run this from Windows Command Prompt or double-click it
+setlocal
 
-echo ==========================================
-echo ClassiCube RELEASE Build (Optimized -O3)
-echo ==========================================
-echo.
+REM Build script for ClassiCube targeting Windows 2000
+REM Creates a clean output folder ready to copy to a Windows 2000 machine
 
-REM Set temp directory to avoid Windows permission issues
-set TMPDIR=C:\dev\Classicube\build\tmp
-set TEMP=%TMPDIR%
-set TMP=%TMPDIR%
-if not exist "%TMPDIR%" mkdir "%TMPDIR%"
+set OUTPUT_DIR=dist\win2000
 
-REM Add MinGW32 and MSYS2 tools to PATH
-set PATH=C:\msys64\mingw32\bin;C:\msys64\usr\bin;%PATH%
+echo Building ClassiCube for Windows 2000...
 
-REM Navigate to project directory
-cd /d C:\dev\Classicube
-
-echo Cleaning previous build...
-make clean PLAT=mingw
-
-echo.
-echo Building with -O3 optimization...
-echo This will take a few minutes...
-echo.
-
-make ClassiCube PLAT=mingw RELEASE=1 OPT_LEVEL=3
-
-if exist ClassiCube.exe (
-    echo.
-    echo ==========================================
-    echo SUCCESS! Optimized build completed!
-    echo ==========================================
-    echo.
-    echo File info:
-    dir ClassiCube.exe | find "ClassiCube.exe"
-    echo.
-    echo Compilation completed succesfully.
-    echo Executable: %CD%\ClassiCube.exe
-) else (
-    echo.
-    echo ==========================================
-    echo BUILD FAILED!
-    echo ==========================================
-    echo Check the error messages above.
-    pause
+REM Clean and build
+make clean >nul 2>&1
+make mingw RELEASE=1
+if errorlevel 1 (
+    echo Build failed!
     exit /b 1
 )
 
+REM Create output directory
+if exist "%OUTPUT_DIR%" rmdir /s /q "%OUTPUT_DIR%"
+mkdir "%OUTPUT_DIR%"
+
+REM Copy executable
+copy ClassiCube.exe "%OUTPUT_DIR%\"
+
 echo.
-pause
+echo ========================================
+echo Build complete!
+echo Output folder: %OUTPUT_DIR%
+echo.
+echo Contents:
+dir /b "%OUTPUT_DIR%"
+echo.
+echo Copy the contents of %OUTPUT_DIR% to your Windows 2000 machine.
+echo On first run, ClassiCube will download required assets automatically.
+echo ========================================
+
+endlocal

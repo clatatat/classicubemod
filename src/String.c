@@ -19,7 +19,6 @@ int String_CalcLen(const char* raw, int capacity) {
 
 int String_Length(const char* raw) {
 	int length = 0;
-	if (!raw) return 0; /* FIX: Prevent NULL crash on Windows 2000 */
 	while (length < UInt16_MaxValue && *raw) { raw++; length++; }
 	return length;
 }
@@ -29,9 +28,7 @@ cc_string String_FromRaw(STRING_REF char* buffer, int capacity) {
 }
 
 cc_string String_FromReadonly(STRING_REF const char* buffer) {
-	int len;
-	if (!buffer) return String_Empty;
-	len = String_Length(buffer);
+	int len = String_Length(buffer);
 	return String_Init((char*)buffer, len, len);
 }
 

@@ -41,11 +41,6 @@ extern cc_bool EnvRenderer_Legacy;
 /* Whether minimal environmental effects are rendered. */
 /* Minimal mode disables skybox, clouds and fog. */
 extern cc_bool EnvRenderer_Minimal;
-/* Whether simple (distance-clamped) fog is used instead of GPU fog. */
-/* Useful as fallback for old GPUs that don't render fog correctly. */
-extern cc_bool EnvRenderer_SimpleFog;
-/* Whether clouds rendering is enabled. */
-extern cc_bool EnvRenderer_CloudsEnabled;
 /* Sets whether Legacy and Minimal modes are used based on given flags. */
 void EnvRenderer_SetMode(int flags);
 /* Calculates mode flags for the given mode. */

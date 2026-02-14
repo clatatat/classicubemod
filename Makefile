@@ -70,13 +70,12 @@ ifeq ($(PLAT),web)
 endif
 
 ifeq ($(PLAT),mingw)
-	CC      =  /c/msys64/mingw32/bin/gcc.exe
+	CC      =  gcc
 	OEXT    =  .exe
-	CFLAGS  += -DUNICODE -D_WIN32_WINNT=0x0500 -DWINVER=0x0500 -march=i686 -pipe
-	LDFLAGS =  -g -Wl,--major-subsystem-version,5 -Wl,--minor-subsystem-version,0 -pipe
+	CFLAGS  += -DUNICODE
+	LDFLAGS =  -g
 	LIBS    =  -mwindows -lwinmm
 	BUILD_DIR = build/win
-	export TMPDIR = /c/dev/Classicube/build/tmp
 endif
 
 ifeq ($(PLAT),linux)

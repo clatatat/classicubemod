@@ -45,7 +45,6 @@ void Particles_Render(float t);
 void Particles_BreakBlockEffect(IVec3 coords, BlockID oldBlock, BlockID block);
 void Particles_RainSnowEffect(float x, float y, float z);
 void Particles_CustomEffect(int effectID, float x, float y, float z, float originX, float originY, float originZ);
-void Particles_SmokeEffect(float x, float y, float z, float radius);
 
 CC_END_HEADER
 #endif
