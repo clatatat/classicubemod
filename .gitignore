@@ -91,8 +91,9 @@ screenshots
 fontscache.txt
 
 # Minecraft alpha/indev folders
-minecraft_alpha/
-minecraft_indev/
+Minecraft Alpha 1.0.6 source code/
+Minecraft Indev 20100223 source code/
+Minecraft textures/
 
 # Claude Code local configuration
 .claude/
