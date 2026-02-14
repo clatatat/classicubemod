@@ -51,6 +51,22 @@ static const struct SimpleBlockDef invalid_blockDef = {
 	"Invalid", 0,0,0,16, FOG_NONE,0, false,true, 100, DRAW_OPAQUE,COLLIDE_SOLID,0
 };
 
+/* Extra block definitions for survival mode blocks */
+static const struct SimpleBlockDef door_ns_top_def = {"Door NS Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef door_ew_bottom_def = {"Door EW Bottom", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef door_ew_top_def = {"Door EW Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef lit_red_ore_dust_def = {"Lit Red Ore Dust", 100, 102, 102, 1, FOG_NONE, 0, BRIT_FULL, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
+static const struct SimpleBlockDef red_ore_torch_off_def = {"Red Ore Torch Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef red_torch_wall_on_def = {"Red Torch Wall On", 99, 99, 99, 11, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef red_torch_wall_off_def = {"Red Torch Wall Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef red_torch_unmounted_def = {"Red Torch Unmounted", 99, 99, 99, 11, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef red_torch_unmounted_off_def = {"Red Torch Unmounted Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef button_pressed_def = {"Button Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef lever_on_def = {"Lever On", 16, 16, 16, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef pressure_plate_pressed_def = {"Pressure Plate Pressed", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
+static const struct SimpleBlockDef iron_door_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef double_chest_def = {"Double Chest", 26, 27, 26, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+
 /* Properties for all built-in blocks (Classic and CPE blocks) */
 static const struct SimpleBlockDef core_blockDefs[] = {
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
@@ -1206,45 +1222,35 @@ void Block_ResetProps(BlockID block) {
 	
 	/* Special handling for high ID door blocks */
 	if (block == BLOCK_DOOR_NS_TOP) {
-		def = &(struct SimpleBlockDef){"Door NS Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+		def = &door_ns_top_def;
 	} else if (block == BLOCK_DOOR_EW_BOTTOM) {
-		def = &(struct SimpleBlockDef){"Door EW Bottom", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+		def = &door_ew_bottom_def;
 	} else if (block == BLOCK_DOOR_EW_TOP) {
-		def = &(struct SimpleBlockDef){"Door EW Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+		def = &door_ew_top_def;
 	} else if (block == BLOCK_LIT_RED_ORE_DUST) {
-		def = &(struct SimpleBlockDef){"Lit Red Ore Dust", 100, 102, 102, 1, FOG_NONE, 0, BRIT_FULL, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
+		def = &lit_red_ore_dust_def;
 	} else if (block == BLOCK_RED_ORE_TORCH_OFF) {
-		def = &(struct SimpleBlockDef){"Red Ore Torch Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+		def = &red_ore_torch_off_def;
 	} else if (block == BLOCK_RED_TORCH_ON_S || block == BLOCK_RED_TORCH_ON_N || block == BLOCK_RED_TORCH_ON_E || block == BLOCK_RED_TORCH_ON_W) {
-		def = &(struct SimpleBlockDef){"Red Torch Wall On", 99, 99, 99, 11, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+		def = &red_torch_wall_on_def;
 	} else if (block == BLOCK_RED_TORCH_OFF_S || block == BLOCK_RED_TORCH_OFF_N || block == BLOCK_RED_TORCH_OFF_E || block == BLOCK_RED_TORCH_OFF_W) {
-		def = &(struct SimpleBlockDef){"Red Torch Wall Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+		def = &red_torch_wall_off_def;
 	} else if (block == BLOCK_RED_TORCH_UNMOUNTED) {
-		def = &(struct SimpleBlockDef){"Red Torch Unmounted", 99, 99, 99, 11, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+		def = &red_torch_unmounted_def;
 	} else if (block == BLOCK_RED_TORCH_UNMOUNTED_OFF) {
-		def = &(struct SimpleBlockDef){"Red Torch Unmounted Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+		def = &red_torch_unmounted_off_def;
 	} else if (block == BLOCK_BUTTON_PRESSED) {
-		def = &(struct SimpleBlockDef){"Button Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
+		def = &button_pressed_def;
 	} else if (block == BLOCK_LEVER_ON) {
-		def = &(struct SimpleBlockDef){"Lever On", 16, 16, 16, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
+		def = &lever_on_def;
 	} else if (block == BLOCK_PRESSURE_PLATE_PRESSED) {
-		def = &(struct SimpleBlockDef){"Pressure Plate Pressed", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
-	} else if (block == BLOCK_IRON_DOOR_NS_TOP) {
-		def = &(struct SimpleBlockDef){"Iron Door NS Top", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_EW_BOTTOM) {
-		def = &(struct SimpleBlockDef){"Iron Door EW Bottom", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_EW_TOP) {
-		def = &(struct SimpleBlockDef){"Iron Door EW Top", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM) {
-		def = &(struct SimpleBlockDef){"Iron Door NS Open Bottom", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_NS_OPEN_TOP) {
-		def = &(struct SimpleBlockDef){"Iron Door NS Open Top", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM) {
-		def = &(struct SimpleBlockDef){"Iron Door EW Open Bottom", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
-	} else if (block == BLOCK_IRON_DOOR_EW_OPEN_TOP) {
-		def = &(struct SimpleBlockDef){"Iron Door EW Open Top", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
+		def = &pressure_plate_pressed_def;
+	} else if (block == BLOCK_IRON_DOOR_NS_TOP || block == BLOCK_IRON_DOOR_EW_BOTTOM || block == BLOCK_IRON_DOOR_EW_TOP ||
+	           block == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || block == BLOCK_IRON_DOOR_NS_OPEN_TOP ||
+	           block == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || block == BLOCK_IRON_DOOR_EW_OPEN_TOP) {
+		def = &iron_door_def;
 	} else if (block >= BLOCK_DCHEST_S_L && block <= BLOCK_DCHEST_W_R) {
-		def = &(struct SimpleBlockDef){"Double Chest", 26, 27, 26, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+		def = &double_chest_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
