@@ -46,7 +46,7 @@ REM Clean and build only if source changed
 if "%NEED_BUILD%"=="1" (
     echo Source changed, rebuilding...
     make clean >nul 2>&1
-    make mingw RELEASE=1
+    make mingw RELEASE=1 OPT_LEVEL=3
     if errorlevel 1 (
         echo Build failed!
         exit /b 1
