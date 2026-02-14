@@ -62,6 +62,34 @@ extern cc_bool Game_ClassicHacks;
 #define Game_PureClassic (Game_ClassicMode && !Game_ClassicHacks)
 extern cc_bool Game_AllowCustomBlocks;
 extern cc_bool Game_AllowServerTextures;
+extern cc_bool Game_EnemySpawning;
+extern cc_bool Game_PassiveSpawning;
+extern cc_bool Game_SurvivalMode;
+
+#define CREEPER_DONT_EXPLODE   0
+#define CREEPER_EXPLOSION_ATK  1
+#define CREEPER_EXPLODE_DEATH  2
+#define CREEPER_BEHAVIOR_COUNT 3
+extern int     Game_CreeperBehavior;
+extern cc_bool Game_SpiderWallclimb;
+extern cc_bool Game_SkeletonShoot;
+
+#define SPIDER_LEAP_DONT  0
+#define SPIDER_LEAP_DIST_COUNT 7
+extern int     Game_SpiderLeapDist;
+
+extern cc_bool Game_SpiderVariants;
+extern cc_bool Game_CreeperVariants;
+
+#define ZOMBIE_SPEED_COUNT 4
+extern int     Game_ZombieSpeed;
+
+#define MOB_SPAWN_RATE_COUNT 5
+extern int     Game_MobSpawnRate;
+extern cc_bool Game_LightRestrictSpawning;
+
+#define MOB_LIGHT_SENSITIVITY_COUNT 3
+extern int     Game_MobLightSensitivity;
 
 extern cc_bool Game_Anaglyph3D;
 extern cc_bool Game_ViewBobbing;

@@ -2157,8 +2157,19 @@ static void GeneratingScreen_EndGeneration(void) {
 	World_SetNewMap(Gen_Blocks, World.Width, World.Height, World.Length);
 	if (!Gen_Blocks) { Chat_AddRaw("&cFailed to generate the map."); return; }
 
+	/* Let the generator configure environment (e.g. floating islands hide borders) */
+	if (gen_active && gen_active->Setup) gen_active->Setup();
+
 	Gen_Blocks = NULL;
-	LocalPlayer_CalcDefaultSpawn(Entities.CurPlayer, &update);
+	if (Gen_SpawnOverride.y >= 0) {
+		update.flags = LU_HAS_POS | LU_HAS_YAW | LU_HAS_PITCH;
+		update.pos   = Gen_SpawnOverride;
+		update.yaw   = 0.0f;
+		update.pitch = 0.0f;
+		Gen_SpawnOverride.y = -1.0f;
+	} else {
+		LocalPlayer_CalcDefaultSpawn(Entities.CurPlayer, &update);
+	}
 	LocalPlayers_MoveToSpawn(&update);
 }
 

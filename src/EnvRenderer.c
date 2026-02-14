@@ -21,6 +21,8 @@
 #include "Entity.h"
 
 cc_bool EnvRenderer_Legacy, EnvRenderer_Minimal;
+cc_bool EnvRenderer_SimpleFog;
+cc_bool EnvRenderer_CloudsEnabled = true;
 
 static CC_INLINE int EnvRenderer_AxisSize(void) {
 	if (Gfx.Limitations & GFX_LIMIT_MAX_VERTEX_SIZE) return 8;
@@ -128,12 +130,28 @@ void EnvRenderer_UpdateFog(void) {
 	if (!World.Loaded) return;
 
 	fogColor = CalcFog(&fogDensity);
-	Gfx_ClearColor(fogColor);
 
-	if (EnvRenderer_Minimal) {
+	if (EnvRenderer_SimpleFog) {
+		/* Simple fog: use GPU linear fog plus clamp view distance */
+		/*  Same blended colour as normal fog, but simpler method  */
+		Gfx_ClearColor(fogColor);
+		if (fogDensity != 0.0f) {
+			Gfx_SetFogMode(FOG_EXP);
+			Gfx_SetFogDensity(fogDensity);
+		} else {
+			Gfx_SetFogMode(FOG_LINEAR);
+			Gfx_SetFogCol(fogColor);
+			Gfx_SetFogEnd((float)Game_ViewDistance);
+		}
 		UpdateFogMinimal(fogDensity);
 	} else {
-		UpdateFogNormal(fogDensity, fogColor);
+		Gfx_ClearColor(fogColor);
+
+		if (EnvRenderer_Minimal) {
+			UpdateFogMinimal(fogDensity);
+		} else {
+			UpdateFogNormal(fogDensity, fogColor);
+		}
 	}
 }
 
@@ -193,6 +211,7 @@ static CC_NOINLINE void BuildClouds(void) {
 
 void EnvRenderer_RenderClouds(void) {
 	float offset;
+	if (!EnvRenderer_CloudsEnabled) return;
 	if (Env.CloudsHeight < -2000 || !clouds_tex) return;
 
 	if (!clouds_vb) {
@@ -959,6 +978,9 @@ static void OnInit(void) {
 	if (flags == -1) flags = 0;
 	EnvRenderer_Legacy  = flags & ENV_LEGACY;
 	EnvRenderer_Minimal = flags & ENV_MINIMAL;
+
+	EnvRenderer_SimpleFog     = Options_GetBool(OPT_SIMPLE_FOG, false);
+	EnvRenderer_CloudsEnabled = Options_GetBool(OPT_CLOUDS_ENABLED, true);
 
 	TextureEntry_Register(&clouds_entry);
 	TextureEntry_Register(&skybox_entry);

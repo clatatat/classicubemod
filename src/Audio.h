@@ -50,6 +50,7 @@ void Audio_SetMusic(int volume);
 void Audio_SetSounds(int volume);
 void Audio_PlayDigSound(cc_uint8 type);
 void Audio_PlayStepSound(cc_uint8 type);
+void Audio_PlayStepSoundVolume(cc_uint8 type, int volume);
 #define AUDIO_MAX_BUFFERS 4
 
 cc_bool AudioBackend_Init(void);
@@ -119,7 +120,17 @@ cc_result SoundContext_PollBusy(struct AudioContext* ctx, cc_bool* isBusy);
 enum SoundType {
 	SOUND_NONE,  SOUND_WOOD,  SOUND_GRAVEL, SOUND_GRASS, 
 	SOUND_STONE, SOUND_METAL, SOUND_GLASS,  SOUND_CLOTH, 
-	SOUND_SAND,  SOUND_SNOW,  SOUND_DOOR,  SOUND_COUNT
+	SOUND_SAND,  SOUND_SNOW,  SOUND_DOOR,
+	SOUND_BUTTON_ON, SOUND_BUTTON_OFF,
+	SOUND_FUSE, SOUND_EXPLODE, SOUND_HURT, SOUND_SHOOT, SOUND_ARROW,
+	SOUND_SKELETON_HURT, SOUND_SKELETON_DEATH,
+	SOUND_CREEPER_HURT,  SOUND_CREEPER_DEATH,
+	SOUND_SPIDER_HURT,   SOUND_SPIDER_DEATH,
+	SOUND_ZOMBIE_HURT,   SOUND_ZOMBIE_DEATH,
+	SOUND_PIG_HURT,      SOUND_PIG_DEATH,
+	SOUND_SHEEP,
+	SOUND_EXPLODE_BIG,
+	SOUND_COUNT
 };
 extern const char* const Sound_Names[SOUND_COUNT];
 

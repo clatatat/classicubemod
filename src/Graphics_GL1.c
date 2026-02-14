@@ -304,7 +304,7 @@ void Gfx_BindTexture(GfxResourceID texID) { setTexture(texID); }
 *#########################################################################################################################*/
 static PackedCol gfx_fogColor;
 static float gfx_fogEnd, gfx_fogDensity;
-static int gfx_fogMode;
+static int gfx_fogMode = -1;
 
 void Gfx_SetFog(cc_bool enabled) {
 	gfx_fogEnabled = enabled;

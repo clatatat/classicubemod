@@ -9,8 +9,9 @@
 #include "Screens.h"
 #include "Window.h"
 
-static const struct MapGenerator* gen_active;
+const struct MapGenerator* gen_active;
 BlockRaw* Gen_Blocks;
+int Gen_Theme;
 
 volatile float Gen_CurrentProgress;
 volatile const char* Gen_CurrentState;
@@ -127,21 +128,47 @@ static cc_bool FlatgrassGen_Prepare(int seed) {
 }
 
 static void FlatgrassGen_Generate(void) {
+	BlockRaw surfaceBlock, fillBlock;
+
+	if (Gen_Theme == GEN_THEME_HELL) {
+		surfaceBlock = BLOCK_DIRT;
+		fillBlock    = BLOCK_DIRT;
+	} else if (Gen_Theme == GEN_THEME_DESERT) {
+		surfaceBlock = BLOCK_SAND;
+		fillBlock    = BLOCK_SAND;
+	} else {
+		surfaceBlock = BLOCK_GRASS;
+		fillBlock    = BLOCK_DIRT;
+	}
+
 	Gen_CurrentState = "Setting air blocks";
 	FlatgrassGen_MapSet(World.Height / 2, World.MaxY, BLOCK_AIR);
 
-	Gen_CurrentState = "Setting dirt blocks";
-	FlatgrassGen_MapSet(0, World.Height / 2 - 2, BLOCK_DIRT);
+	Gen_CurrentState = "Setting fill blocks";
+	FlatgrassGen_MapSet(0, World.Height / 2 - 2, fillBlock);
 
-	Gen_CurrentState = "Setting grass blocks";
-	FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, BLOCK_GRASS);
+	Gen_CurrentState = "Setting surface blocks";
+	FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, surfaceBlock);
 
 	gen_done = true;
 }
 
+static void FlatgrassGen_Setup(void) {
+	if (Gen_Theme == GEN_THEME_HELL) {
+		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
+		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
+		Env_SetSidesBlock(BLOCK_OBSIDIAN);
+	}
+}
+
 const struct MapGenerator FlatgrassGen = {
 	FlatgrassGen_Prepare,
-	FlatgrassGen_Generate
+	FlatgrassGen_Generate,
+	FlatgrassGen_Setup
 };
 
 
@@ -265,7 +292,7 @@ static void NotchyGen_FillOblateSpheroid(int x, int y, int z, float radius, Bloc
 
 				if ((dx * dx + 2 * dy * dy + dz * dz) < radiusSq) {
 					index = World_Pack(xx, yy, zz);
-					if (Gen_Blocks[index] == BLOCK_STONE)
+					if (Gen_Blocks[index] == BLOCK_STONE || Gen_Blocks[index] == BLOCK_DIRT)
 						Gen_Blocks[index] = block;
 				}
 			}
@@ -355,6 +382,10 @@ static void NotchyGen_CreateHeightmap(void) {
 
 			height *= 0.5f;
 			if (height < 0) height *= 0.8f;
+
+			/* Paradise/Desert: flatten terrain */
+			if (Gen_Theme == GEN_THEME_PARADISE || Gen_Theme == GEN_THEME_DESERT)
+				height *= 0.5f;
 
 			adjHeight = (int)(height + waterLevel);
 			minHeight = min(adjHeight, minHeight);
@@ -514,15 +545,16 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 	int waterY = waterLevel - 1;
 	int index1, index2;
 	int x, z;
-	Gen_CurrentState = "Flooding edge water";
+	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : BLOCK_STILL_WATER;
+	Gen_CurrentState = (Gen_Theme == GEN_THEME_HELL) ? "Flooding edge lava" : "Flooding edge water";
 
 	index1 = World_Pack(0, waterY, 0);
 	index2 = World_Pack(0, waterY, World.Length - 1);
 	for (x = 0; x < World.Width; x++) {
 		Gen_CurrentProgress = 0.0f + ((float)x / World.Width) * 0.5f;
 
-		NotchyGen_FloodFill(index1, BLOCK_STILL_WATER);
-		NotchyGen_FloodFill(index2, BLOCK_STILL_WATER);
+		NotchyGen_FloodFill(index1, fluidBlock);
+		NotchyGen_FloodFill(index2, fluidBlock);
 		index1++; index2++;
 	}
 
@@ -531,8 +563,8 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 	for (z = 0; z < World.Length; z++) {
 		Gen_CurrentProgress = 0.5f + ((float)z / World.Length) * 0.5f;
 
-		NotchyGen_FloodFill(index1, BLOCK_STILL_WATER);
-		NotchyGen_FloodFill(index2, BLOCK_STILL_WATER);
+		NotchyGen_FloodFill(index1, fluidBlock);
+		NotchyGen_FloodFill(index2, fluidBlock);
 		index1 += World.Width; index2 += World.Width;
 	}
 }
@@ -540,16 +572,17 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 static void NotchyGen_FloodFillWater(void) {
 	int numSources;
 	int i, x, y, z;
+	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : BLOCK_STILL_WATER;
 
 	numSources       = World.Width * World.Length / 800;
-	Gen_CurrentState = "Flooding water";
+	Gen_CurrentState = (Gen_Theme == GEN_THEME_HELL) ? "Flooding lava" : "Flooding water";
 	for (i = 0; i < numSources; i++) {
 		Gen_CurrentProgress = (float)i / numSources;
 
 		x = Random_Next(&rnd, World.Width);
 		z = Random_Next(&rnd, World.Length);
 		y = waterLevel - Random_Range(&rnd, 1, 3);
-		NotchyGen_FloodFill(World_Pack(x, y, z), BLOCK_STILL_WATER);
+		NotchyGen_FloodFill(World_Pack(x, y, z), fluidBlock);
 	}
 }
 
@@ -600,11 +633,38 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 			index = World_Pack(x, y, z);
 			above = y >= World.MaxY ? BLOCK_AIR : Gen_Blocks[index + World.OneY];
 
-			/* TODO: update heightmap */
-			if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-				Gen_Blocks[index] = BLOCK_GRAVEL;
-			} else if (above == BLOCK_AIR) {
-				Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
+			if (Gen_Theme == GEN_THEME_DESERT) {
+				/* Desert: all exposed surface is sand */
+				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = BLOCK_SAND;
+					/* Replace dirt below with sand too */
+					if (y >= 1) {
+						Gen_Blocks[World_Pack(x, y - 1, z)] = BLOCK_SAND;
+					}
+				}
+			} else if (Gen_Theme == GEN_THEME_HELL) {
+				/* Hell: no grass, just dirt; gravel underwater */
+				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = BLOCK_DIRT;
+				}
+			} else if (Gen_Theme == GEN_THEME_PARADISE) {
+				/* Paradise: more beaches (lower threshold = more sand near water) */
+				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = (y <= waterLevel + 2 && (OctaveNoise_Calc(n1, (float)x, (float)z) > 2)) ? BLOCK_SAND : BLOCK_GRASS;
+				}
+			} else {
+				/* Normal / Woods */
+				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
+				}
 			}
 		}
 	}
@@ -619,6 +679,7 @@ static void NotchyGen_PlantFlowers(void) {
 
 	if (Game_Version.Version < VERSION_0023) return;
 	numPatches       = World.Width * World.Length / 3000;
+	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
 	Gen_CurrentState = "Planting flowers";
 
 	for (i = 0; i < numPatches; i++) {
@@ -690,6 +751,7 @@ static void NotchyGen_PlantTrees(void) {
 	int treeHeight, index, count;
 	BlockRaw under;
 	int i, j, k, m;
+	int cactusH, cy;
 
 	IVec3 coords[TREE_MAX_COUNT];
 	BlockRaw blocks[TREE_MAX_COUNT];
@@ -697,8 +759,10 @@ static void NotchyGen_PlantTrees(void) {
 	Tree_Blocks = Gen_Blocks;
 	Tree_Rnd    = &rnd;
 
-	numPatches       = World.Width * World.Length / 4000;
-	Gen_CurrentState = "Planting trees";
+	numPatches = World.Width * World.Length / 4000;
+	if (Gen_Theme == GEN_THEME_WOODS) numPatches *= 8;
+
+	Gen_CurrentState = (Gen_Theme == GEN_THEME_DESERT) ? "Planting cacti" : "Planting trees";
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
 
@@ -714,17 +778,91 @@ static void NotchyGen_PlantTrees(void) {
 				if (!World_ContainsXZ(treeX, treeZ) || Random_Float(&rnd) >= 0.25f) continue;
 				treeY = heightmap[treeZ * World.Width + treeX] + 1;
 				if (treeY >= World.Height) continue;
-				treeHeight = 5 + Random_Next(&rnd, 3);
 
 				index = World_Pack(treeX, treeY, treeZ);
 				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
 
-				if (under == BLOCK_GRASS && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-					count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+				if (Gen_Theme == GEN_THEME_DESERT) {
+					/* Desert: place cacti on sand */
+					if (under == BLOCK_SAND) {
+						cactusH = 1 + Random_Next(&rnd, 3);
+						for (cy = 0; cy < cactusH; cy++) {
+							if (treeY + cy >= World.Height) break;
+							index = World_Pack(treeX, treeY + cy, treeZ);
+							if (Gen_Blocks[index] != BLOCK_AIR) break;
+							Gen_Blocks[index] = BLOCK_CACTUS;
+						}
+					}
+				} else {
+					/* Normal/Woods/Paradise/Hell: normal trees on grass (or dirt for Hell) */
+					treeHeight = 5 + Random_Next(&rnd, 3);
+					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				}
+			}
+		}
+	}
 
-					for (m = 0; m < count; m++) {
-						index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-						Gen_Blocks[index] = blocks[m];
+	/* Desert: plant occasional oases (small grass patches with flowers and a tree) */
+	if (Gen_Theme == GEN_THEME_DESERT) {
+		int numOases = World.Width * World.Length / 8000;
+		int ox, oz, oy, oRadius, dx, dz;
+		if (numOases < 3) numOases = 3;
+		Gen_CurrentState = "Planting oases";
+		for (i = 0; i < numOases; i++) {
+			Gen_CurrentProgress = (float)i / numOases;
+			ox = Random_Next(&rnd, World.Width);
+			oz = Random_Next(&rnd, World.Length);
+			oRadius = 6 + Random_Next(&rnd, 5); /* 6-10 block radius */
+
+			/* Convert sand to grass in oasis patch */
+			for (dz = -oRadius; dz <= oRadius; dz++) {
+				for (dx = -oRadius; dx <= oRadius; dx++) {
+					if (dx * dx + dz * dz > oRadius * oRadius) continue;
+					if (!World_ContainsXZ(ox + dx, oz + dz)) continue;
+					oy = heightmap[(oz + dz) * World.Width + (ox + dx)];
+					if (oy < 0 || oy >= World.Height) continue;
+					index = World_Pack(ox + dx, oy, oz + dz);
+					if (Gen_Blocks[index] == BLOCK_SAND) {
+						Gen_Blocks[index] = BLOCK_GRASS;
+						if (oy >= 1) Gen_Blocks[World_Pack(ox + dx, oy - 1, oz + dz)] = BLOCK_DIRT;
+					}
+				}
+			}
+			/* Place flowers in oasis */
+			for (m = 0; m < 15; m++) {
+				int fx = ox + Random_Next(&rnd, oRadius * 2) - oRadius;
+				int fz = oz + Random_Next(&rnd, oRadius * 2) - oRadius;
+				int fy;
+				if (!World_ContainsXZ(fx, fz)) continue;
+				fy = heightmap[fz * World.Width + fx] + 1;
+				if (fy <= 0 || fy >= World.Height) continue;
+				index = World_Pack(fx, fy, fz);
+				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS)
+					Gen_Blocks[index] = (BlockRaw)(BLOCK_DANDELION + Random_Next(&rnd, 2));
+			}
+			/* Plant trees in oasis */
+			for (m = 0; m < 4; m++) {
+				int tx = ox + Random_Next(&rnd, oRadius) - oRadius / 2;
+				int tz = oz + Random_Next(&rnd, oRadius) - oRadius / 2;
+				int ty;
+				if (!World_ContainsXZ(tx, tz)) continue;
+				ty = heightmap[tz * World.Width + tx] + 1;
+				if (ty <= 0 || ty >= World.Height) continue;
+				index = World_Pack(tx, ty, tz);
+				if (Gen_Blocks[index - World.OneY] == BLOCK_GRASS) {
+					treeHeight = 5 + Random_Next(&rnd, 3);
+					if (TreeGen_CanGrow(tx, ty, tz, treeHeight)) {
+						count = TreeGen_Grow(tx, ty, tz, treeHeight, coords, blocks);
+						for (j = 0; j < count; j++) {
+							index = World_Pack(coords[j].x, coords[j].y, coords[j].z);
+							Gen_Blocks[index] = blocks[j];
+						}
 					}
 				}
 			}
@@ -749,7 +887,7 @@ static void NotchyGen_Generate(void) {
 		GEN_COOP_STEP( 3, NotchyGen_CarveOreVeins(0.9f, "Carving coal ore", BLOCK_COAL_ORE) );
 		GEN_COOP_STEP( 4, NotchyGen_CarveOreVeins(0.7f, "Carving iron ore", BLOCK_IRON_ORE) );
 		GEN_COOP_STEP( 5, NotchyGen_CarveOreVeins(0.5f, "Carving gold ore", BLOCK_GOLD_ORE) );
-		GEN_COOP_STEP( 6, NotchyGen_CarveOreVeins(0.7f, "Carving red ore", BLOCK_RED_ORE) );
+		GEN_COOP_STEP( 6, NotchyGen_CarveOreVeins(0.6f, "Carving red ore", BLOCK_RED_ORE) );
 		GEN_COOP_STEP( 7, NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE) );
 
 		GEN_COOP_STEP( 8, NotchyGen_FloodFillWaterBorders() );
@@ -767,9 +905,741 @@ static void NotchyGen_Generate(void) {
 	gen_done  = true;
 }
 
+static void NotchyGen_Setup(void) {
+	if (Gen_Theme == GEN_THEME_HELL) {
+		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
+		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
+		Env_SetSidesBlock(BLOCK_OBSIDIAN);
+	}
+}
+
 const struct MapGenerator NotchyGen = {
 	NotchyGen_Prepare,
-	NotchyGen_Generate
+	NotchyGen_Generate,
+	NotchyGen_Setup
+};
+
+
+/*########################################################################################################################*
+*---------------------------------------------------Floating island gen---------------------------------------------------*
+*#########################################################################################################################*/
+/* Floating island generator inspired by Minecraft Indev's "Floating" world type.
+   Generates multiple layers of terrain, then carves out everything below a noise-derived
+   cutoff per column, leaving floating islands suspended in the air. */
+
+static cc_int16* floatCutoff; /* per-column bottom cutoff Y */
+static int floatNumLayers;
+
+/* Generate one layer of floating islands centered at the given Y level */
+static void FloatingGen_GenLayer(int layer, int layerBaseY) {
+	int mapArea = World.Width * World.Length;
+	int hIndex, x, z, y, index;
+	float hLow, hHigh, height;
+	int adjHeight, dirtHeight, stoneHeight, dirtThickness;
+	float edgeX, edgeZ, edge, noise, sqrtVal, cutoffF;
+	int cutoff, maxY = World.MaxY;
+	int treeHeight, count;
+	BlockRaw under, block, above;
+	int numPatches, patchX, patchZ, treeX, treeY, treeZ;
+	int flowerX, flowerY, flowerZ;
+	int i, j, k, m;
+	IVec3 coords[TREE_MAX_COUNT];
+	BlockRaw blocks[TREE_MAX_COUNT];
+
+#if CC_BUILD_MAXSTACK <= (16 * 1024)
+	struct NoiseBuffer { 
+		struct CombinedNoise n1, n2;
+		struct OctaveNoise n3, nCutoff, nStrata;
+	};
+	void* mem = TempMem_Alloc(sizeof(struct NoiseBuffer));
+	struct NoiseBuffer* buf  = (struct NoiseBuffer*)mem;
+	struct CombinedNoise* n1 = &buf->n1;
+	struct CombinedNoise* n2 = &buf->n2;
+	struct OctaveNoise*   n3 = &buf->n3;
+	struct OctaveNoise*   nCutoff = &buf->nCutoff;
+	struct OctaveNoise*   nStrata = &buf->nStrata;
+#else
+	struct CombinedNoise _n1, *n1 = &_n1;
+	struct CombinedNoise _n2, *n2 = &_n2;
+	struct OctaveNoise   _n3, *n3 = &_n3;
+	struct OctaveNoise   _nCutoff, *nCutoff = &_nCutoff;
+	struct OctaveNoise   _nStrata, *nStrata = &_nStrata;
+#endif
+
+	/* ----- Heightmap for this layer ----- */
+	CombinedNoise_Init(n1, &rnd, 8, 8);
+	CombinedNoise_Init(n2, &rnd, 8, 8);
+	OctaveNoise_Init(n3,   &rnd, 6);
+
+	Gen_CurrentState = "Building heightmap";
+	hIndex = 0;
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			hLow   = CombinedNoise_Calc(n1, x * 1.3f, z * 1.3f) / 6 - 4;
+			height = hLow;
+
+			if (OctaveNoise_Calc(n3, (float)x, (float)z) <= 0) {
+				hHigh = CombinedNoise_Calc(n2, x * 1.3f, z * 1.3f) / 5 + 6;
+				height = max(hLow, hHigh);
+			}
+
+			height *= 0.5f;
+			if (height < 0) height *= 0.8f;
+
+			adjHeight = (int)(height + layerBaseY);
+			adjHeight = min(adjHeight, maxY);
+			adjHeight = max(adjHeight, 0);
+			heightmap[hIndex++] = adjHeight;
+		}
+	}
+
+	/* ----- Compute bottom cutoffs (island undersides) ----- */
+	OctaveNoise_Init(nCutoff, &rnd, 8);
+
+	Gen_CurrentState = "Shaping islands";
+	hIndex = 0;
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			/* Edge falloff: 0 at center, approaches 1 at borders */
+			edgeX = Math_AbsF((float)x / World.Width  * 2.0f - 1.0f);
+			edgeZ = Math_AbsF((float)z / World.Length * 2.0f - 1.0f);
+			edge  = max(edgeX, edgeZ);
+			edge  = edge * edge * edge; /* cubic falloff */
+
+			/* Sample noise at lower frequency for bigger island/gap features */
+			noise = OctaveNoise_Calc(nCutoff, x * 1.2f, z * 1.2f) / 24.0f;
+
+			/* Transform: sqrt(abs(noise)) * sign(noise) * 40 + base */
+			/* Larger multiplier = thicker islands, deeper underbellies */
+			sqrtVal = Math_SqrtF(Math_AbsF(noise));
+			if (noise < 0) sqrtVal = -sqrtVal;
+			cutoffF = sqrtVal * 40.0f + layerBaseY - 8;
+
+			/* Blend toward world height at edges (thinner/no islands at borders) */
+			cutoffF = cutoffF * (1.0f - edge) + edge * World.Height;
+
+			/* Columns where cutoff exceeds the surface become gaps between islands */
+			cutoff = (int)cutoffF;
+			if (cutoff > layerBaseY + 4) cutoff = World.Height;
+
+			floatCutoff[hIndex++] = (cc_int16)cutoff;
+		}
+	}
+
+	/* ----- Fill strata (stone + dirt) ----- */
+	OctaveNoise_Init(nStrata, &rnd, 8);
+
+	Gen_CurrentState = "Creating strata";
+	hIndex = 0;
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			dirtThickness = (int)(OctaveNoise_Calc(nStrata, (float)x, (float)z) / 24 - 4);
+			dirtHeight    = heightmap[hIndex];
+			stoneHeight   = dirtHeight + dirtThickness;
+			cutoff        = floatCutoff[hIndex];
+			hIndex++;
+
+			stoneHeight = min(stoneHeight, maxY);
+			dirtHeight  = min(dirtHeight,  maxY);
+
+			/* Fill stone from cutoff to stoneHeight */
+			for (y = cutoff; y <= stoneHeight; y++) {
+				if (y < 0 || y > maxY) continue;
+				index = World_Pack(x, y, z);
+				if (Gen_Blocks[index] == BLOCK_AIR)
+					Gen_Blocks[index] = BLOCK_STONE;
+			}
+
+			/* Fill dirt from stoneHeight+1 to dirtHeight */
+			for (y = max(stoneHeight + 1, cutoff); y <= dirtHeight; y++) {
+				if (y < 0 || y > maxY) continue;
+				index = World_Pack(x, y, z);
+				if (Gen_Blocks[index] == BLOCK_AIR)
+					Gen_Blocks[index] = BLOCK_DIRT;
+			}
+		}
+	}
+
+	/* ----- Surface layer ----- */
+	Gen_CurrentState = "Creating surface";
+	hIndex = 0;
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			y = heightmap[hIndex++];
+			if (y < 0 || y >= World.Height) continue;
+			index = World_Pack(x, y, z);
+			if (Gen_Blocks[index] != BLOCK_DIRT && Gen_Blocks[index] != BLOCK_STONE) continue;
+			above = y >= World.MaxY ? BLOCK_AIR : Gen_Blocks[index + World.OneY];
+			if (above == BLOCK_AIR) {
+				if (Gen_Theme == GEN_THEME_HELL)
+					Gen_Blocks[index] = BLOCK_DIRT;
+				else if (Gen_Theme == GEN_THEME_DESERT)
+					Gen_Blocks[index] = BLOCK_SAND;
+				else
+					Gen_Blocks[index] = BLOCK_GRASS;
+			}
+		}
+	}
+
+	/* ----- Flowers (skip for Desert; Hell naturally skipped since no grass) ----- */
+	numPatches       = World.Width * World.Length / 3000;
+	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
+	if (Gen_Theme != GEN_THEME_DESERT) {
+	Gen_CurrentState = "Planting flowers";
+	for (i = 0; i < numPatches; i++) {
+		Gen_CurrentProgress = (float)i / numPatches;
+		block  = (BlockRaw)(BLOCK_DANDELION + Random_Next(&rnd, 2));
+		patchX = Random_Next(&rnd, World.Width);
+		patchZ = Random_Next(&rnd, World.Length);
+
+		for (j = 0; j < 10; j++) {
+			flowerX = patchX; flowerZ = patchZ;
+			for (k = 0; k < 5; k++) {
+				flowerX += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+				flowerZ += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+				if (!World_ContainsXZ(flowerX, flowerZ)) continue;
+				flowerY = heightmap[flowerZ * World.Width + flowerX] + 1;
+				if (flowerY <= 0 || flowerY >= World.Height) continue;
+				index = World_Pack(flowerX, flowerY, flowerZ);
+				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS)
+					Gen_Blocks[index] = block;
+			}
+		}
+	}
+	}
+
+	/* ----- Trees / Cacti ----- */
+	Tree_Blocks = Gen_Blocks;
+	Tree_Rnd    = &rnd;
+	numPatches       = World.Width * World.Length / 4000;
+	if (Gen_Theme == GEN_THEME_WOODS) numPatches *= 8;
+	Gen_CurrentState = (Gen_Theme == GEN_THEME_DESERT) ? "Planting cacti" : "Planting trees";
+
+	for (i = 0; i < numPatches; i++) {
+		Gen_CurrentProgress = (float)i / numPatches;
+		patchX = Random_Next(&rnd, World.Width);
+		patchZ = Random_Next(&rnd, World.Length);
+
+		for (j = 0; j < 20; j++) {
+			treeX = patchX; treeZ = patchZ;
+			for (k = 0; k < 20; k++) {
+				treeX += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+				treeZ += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+				if (!World_ContainsXZ(treeX, treeZ) || Random_Float(&rnd) >= 0.25f) continue;
+				treeY = heightmap[treeZ * World.Width + treeX] + 1;
+				if (treeY >= World.Height) continue;
+				index = World_Pack(treeX, treeY, treeZ);
+				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
+
+				if (Gen_Theme == GEN_THEME_DESERT) {
+					if (under == BLOCK_SAND) {
+						int cactusH = 1 + Random_Next(&rnd, 3);
+						int cy;
+						for (cy = 0; cy < cactusH; cy++) {
+							if (treeY + cy >= World.Height) break;
+							index = World_Pack(treeX, treeY + cy, treeZ);
+							if (Gen_Blocks[index] != BLOCK_AIR) break;
+							Gen_Blocks[index] = BLOCK_CACTUS;
+						}
+					}
+				} else {
+					treeHeight = 5 + Random_Next(&rnd, 3);
+					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				}
+			}
+		}
+	}
+}
+
+static cc_bool FloatingGen_Prepare(int seed) {
+	int mapArea = World.Width * World.Length;
+	Random_Seed(&rnd, seed);
+	waterLevel = World.Height / 2;
+	minHeight  = World.Height;
+
+	/* Calculate number of layers based on world height */
+	floatNumLayers = (World.Height - 64) / 48 + 1;
+	if (floatNumLayers < 1) floatNumLayers = 1;
+	if (floatNumLayers > 4) floatNumLayers = 4;
+
+	heightmap   = (cc_int16*)Mem_TryAlloc(mapArea, 2);
+	if (!heightmap) return false;
+	floatCutoff = (cc_int16*)Mem_TryAlloc(mapArea, 2);
+	if (!floatCutoff) { Mem_Free(heightmap); heightmap = NULL; return false; }
+	return true;
+}
+
+static void FloatingGen_Generate(void) {
+	int layer;
+
+	/* Fill entire map with air */
+	Mem_Set(Gen_Blocks, BLOCK_AIR, World.Volume);
+
+	/* Generate each layer of floating islands */
+	for (layer = 0; layer < floatNumLayers; layer++) {
+		int layerBaseY = World.Height - 32 - layer * 48;
+		if (layerBaseY < 16) layerBaseY = 16;
+
+		Gen_CurrentState = "Generating island layer";
+		FloatingGen_GenLayer(layer, layerBaseY);
+	}
+
+	/* Carve caves and ore veins through all layers */
+	NotchyGen_CarveCaves();
+	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore", BLOCK_COAL_ORE);
+	NotchyGen_CarveOreVeins(0.7f, "Carving iron ore", BLOCK_IRON_ORE);
+	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore", BLOCK_GOLD_ORE);
+	NotchyGen_CarveOreVeins(0.6f, "Carving red ore", BLOCK_RED_ORE);
+	NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
+
+	Mem_Free(heightmap);   heightmap   = NULL;
+	Mem_Free(floatCutoff); floatCutoff = NULL;
+	gen_done = true;
+}
+
+static void FloatingGen_Setup(void) {
+	/* Hide map borders: set edge/sides to air so they don't render */
+	Env_SetEdgeBlock(BLOCK_AIR);
+	Env_SetSidesBlock(BLOCK_AIR);
+	/* Move clouds below the world so they're invisible */
+	Env_SetCloudsHeight(-16);
+
+	if (Gen_Theme == GEN_THEME_HELL) {
+		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
+		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+	}
+}
+
+const struct MapGenerator FloatingGen = {
+	FloatingGen_Prepare,
+	FloatingGen_Generate,
+	FloatingGen_Setup
+};
+
+
+/*########################################################################################################################*
+*-----------------------------------------------------Caves world gen-----------------------------------------------------*
+*#########################################################################################################################*/
+/* Caves world generator: fills the entire world with stone, then carves extensive
+   cave systems and large caverns throughout. Player spawns inside a cave. */
+
+Vec3 Gen_SpawnOverride = { 0, -1.0f, 0 };
+
+static void CavesGen_FillStone(void) {
+	BlockRaw fillBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_DIRT : BLOCK_STONE;
+	Gen_CurrentState = "Filling world";
+	Mem_Set(Gen_Blocks, fillBlock, World.Volume);
+}
+
+static void CavesGen_CarveTunnels(void) {
+	int cavesCount, caveLen;
+	float caveX, caveY, caveZ;
+	float theta, deltaTheta, phi, deltaPhi;
+	float caveRadius, radius;
+	int cenX, cenY, cenZ;
+	int i, j;
+
+	/* Tunnels that connect the caverns - slightly more than normal gen */
+	cavesCount       = World.Volume / 4096;
+	Gen_CurrentState = "Carving tunnels";
+	for (i = 0; i < cavesCount; i++) {
+		Gen_CurrentProgress = (float)i / cavesCount;
+
+		caveX = (float)Random_Next(&rnd, World.Width);
+		caveY = (float)Random_Next(&rnd, World.Height);
+		caveZ = (float)Random_Next(&rnd, World.Length);
+
+		caveLen    = (int)(Random_Float(&rnd) * Random_Float(&rnd) * 250.0f);
+		theta      = Random_Float(&rnd) * 2.0f * MATH_PI; deltaTheta = 0.0f;
+		phi        = Random_Float(&rnd) * 2.0f * MATH_PI; deltaPhi   = 0.0f;
+		caveRadius = Random_Float(&rnd) * Random_Float(&rnd);
+
+		for (j = 0; j < caveLen; j++) {
+			caveX += Math_SinF(theta) * Math_CosF(phi);
+			caveZ += Math_CosF(theta) * Math_CosF(phi);
+			caveY += Math_SinF(phi);
+
+			theta      = theta + deltaTheta * 0.2f;
+			deltaTheta = deltaTheta * 0.9f + Random_Float(&rnd) - Random_Float(&rnd);
+			phi        = phi * 0.5f + deltaPhi * 0.25f;
+			deltaPhi   = deltaPhi  * 0.75f + Random_Float(&rnd) - Random_Float(&rnd);
+			if (Random_Float(&rnd) < 0.25f) continue;
+
+			cenX = (int)(caveX + (Random_Next(&rnd, 4) - 2) * 0.2f);
+			cenY = (int)(caveY + (Random_Next(&rnd, 4) - 2) * 0.2f);
+			cenZ = (int)(caveZ + (Random_Next(&rnd, 4) - 2) * 0.2f);
+
+			radius = 1.2f + (0.5f + caveRadius * 2.0f);
+			radius = radius * Math_SinF(j * MATH_PI / caveLen);
+			NotchyGen_FillOblateSpheroid(cenX, cenY, cenZ, radius, BLOCK_AIR);
+		}
+	}
+}
+
+static void CavesGen_CarveCaverns(void) {
+	int numCaverns, i;
+	int cenX, cenY, cenZ;
+	float radiusH, radiusV;
+	float dx, dy, dz;
+	int minX, maxX, minY, maxY, minZ, maxZ, index;
+	int x, y, z;
+	int hasGrass, floorY;
+	int treeX, treeZ, treeY, treeHeight, count, m;
+	int fx, fz, fy;
+	BlockRaw flowerBlock;
+	IVec3 coords[TREE_MAX_COUNT];
+	BlockRaw blocks[TREE_MAX_COUNT];
+
+	/* Large open cavern rooms */
+	numCaverns       = World.Volume / 32768;
+	if (numCaverns < 4) numCaverns = 4;
+	Gen_CurrentState = "Carving caverns";
+	for (i = 0; i < numCaverns; i++) {
+		Gen_CurrentProgress = (float)i / numCaverns;
+
+		cenX = Random_Next(&rnd, World.Width);
+		cenY = Random_Next(&rnd, World.Height);
+		cenZ = Random_Next(&rnd, World.Length);
+
+		radiusH = 8.0f + Random_Float(&rnd) * 16.0f;  /* 8-24 horizontal */
+		radiusV = 5.0f + Random_Float(&rnd) * 10.0f;   /* 5-15 vertical */
+
+		minX = max(0, cenX - (int)radiusH - 1);
+		maxX = min(World.MaxX, cenX + (int)radiusH + 1);
+		minY = max(0, cenY - (int)radiusV - 1);
+		maxY = min(World.MaxY, cenY + (int)radiusV + 1);
+		minZ = max(0, cenZ - (int)radiusH - 1);
+		maxZ = min(World.MaxZ, cenZ + (int)radiusH + 1);
+
+		/* Carve the ellipsoid */
+		for (y = minY; y <= maxY; y++) {
+			for (z = minZ; z <= maxZ; z++) {
+				for (x = minX; x <= maxX; x++) {
+					dx = (float)(x - cenX) / radiusH;
+					dy = (float)(y - cenY) / radiusV;
+					dz = (float)(z - cenZ) / radiusH;
+					if (dx * dx + dy * dy + dz * dz < 1.0f) {
+						index = World_Pack(x, y, z);
+						Gen_Blocks[index] = BLOCK_AIR;
+					}
+				}
+			}
+		}
+
+		floorY = cenY - (int)radiusV;
+		if (floorY < 1 || floorY >= World.MaxY) continue;
+
+		/* ~40% of caverns get garden floors (grass/sand) with trees/cacti and flowers */
+		hasGrass = Random_Float(&rnd) < 0.4f;
+		/* Hell theme: never has garden rooms */
+		if (Gen_Theme == GEN_THEME_HELL) hasGrass = 0;
+
+		if (hasGrass) {
+			BlockRaw gardenSurface, gardenFill;
+			if (Gen_Theme == GEN_THEME_DESERT) {
+				gardenSurface = BLOCK_SAND;
+				gardenFill    = BLOCK_SAND;
+			} else {
+				gardenSurface = BLOCK_GRASS;
+				gardenFill    = BLOCK_DIRT;
+			}
+
+			/* Place surface + fill on the cavern floor */
+			for (z = minZ; z <= maxZ; z++) {
+				for (x = minX; x <= maxX; x++) {
+					dx = (float)(x - cenX) / radiusH;
+					dz = (float)(z - cenZ) / radiusH;
+					if (dx * dx + dz * dz >= 0.85f) continue;
+
+					for (y = floorY; y <= floorY + 3; y++) {
+						if (y < 1 || y >= World.MaxY) continue;
+						index = World_Pack(x, y, z);
+						if (Gen_Blocks[index] != BLOCK_AIR) continue;
+						if (Gen_Blocks[index - World.OneY] == BLOCK_AIR) continue;
+
+						Gen_Blocks[index - World.OneY] = gardenSurface;
+						if (y >= 2) {
+							index = World_Pack(x, y - 2, z);
+							if (Gen_Blocks[index] != BLOCK_AIR && Gen_Blocks[index] != BLOCK_BEDROCK)
+								Gen_Blocks[index] = gardenFill;
+						}
+						break;
+					}
+				}
+			}
+
+			if (Gen_Theme == GEN_THEME_DESERT) {
+				/* Desert caverns: plant cacti instead of flowers/trees */
+				for (m = 0; m < 12; m++) {
+					int cactusH, cy;
+					fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					fz = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					if (!World_ContainsXZ(fx, fz)) continue;
+
+					for (fy = floorY; fy <= floorY + 4; fy++) {
+						if (fy < 1 || fy >= World.Height) continue;
+						index = World_Pack(fx, fy, fz);
+						if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_SAND) {
+							cactusH = 1 + Random_Next(&rnd, 3);
+							for (cy = 0; cy < cactusH; cy++) {
+								if (fy + cy >= World.Height) break;
+								index = World_Pack(fx, fy + cy, fz);
+								if (Gen_Blocks[index] != BLOCK_AIR) break;
+								Gen_Blocks[index] = BLOCK_CACTUS;
+							}
+							break;
+						}
+					}
+				}
+			} else {
+				/* Normal/Woods/Paradise: flowers and trees in garden */
+				for (m = 0; m < 12; m++) {
+					fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					fz = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					if (!World_ContainsXZ(fx, fz)) continue;
+					flowerBlock = (BlockRaw)(BLOCK_DANDELION + Random_Next(&rnd, 2));
+
+					for (fy = floorY; fy <= floorY + 4; fy++) {
+						if (fy < 1 || fy >= World.Height) continue;
+						index = World_Pack(fx, fy, fz);
+						if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS) {
+							Gen_Blocks[index] = flowerBlock;
+							break;
+						}
+					}
+				}
+
+				/* Plant trees in the garden */
+				Tree_Blocks = Gen_Blocks;
+				Tree_Rnd    = &rnd;
+				for (m = 0; m < 5; m++) {
+					treeX = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					treeZ = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+					if (!World_ContainsXZ(treeX, treeZ)) continue;
+
+					for (treeY = floorY; treeY <= floorY + 4; treeY++) {
+						if (treeY < 1 || treeY >= World.Height) continue;
+						index = World_Pack(treeX, treeY, treeZ);
+						if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS) {
+							treeHeight = 5 + Random_Next(&rnd, 3);
+							if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+								count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+								for (y = 0; y < count; y++) {
+									index = World_Pack(coords[y].x, coords[y].y, coords[y].z);
+									Gen_Blocks[index] = blocks[y];
+								}
+							}
+							break;
+						}
+					}
+				}
+			}
+		} else {
+			/* Non-garden room: scatter brown and red mushrooms on the floor */
+			BlockRaw mushroomFloor = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_DIRT : BLOCK_STONE;
+			for (m = 0; m < 8; m++) {
+				fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+				fz = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
+				if (!World_ContainsXZ(fx, fz)) continue;
+				flowerBlock = (BlockRaw)(BLOCK_BROWN_SHROOM + Random_Next(&rnd, 2));
+
+				for (fy = floorY; fy <= floorY + 4; fy++) {
+					if (fy < 1 || fy >= World.Height) continue;
+					index = World_Pack(fx, fy, fz);
+					if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == mushroomFloor) {
+						Gen_Blocks[index] = flowerBlock;
+						break;
+					}
+				}
+			}
+		}
+	}
+}
+
+/* Place lava pools at the very bottom of the world */
+static void CavesGen_PlaceLavaPools(void) {
+	int x, z, index;
+
+	Gen_CurrentState = "Placing lava";
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			index = World_Pack(x, 0, z);
+			/* Bottom 2 layers: replace air with lava */
+			if (Gen_Blocks[index] == BLOCK_AIR)
+				Gen_Blocks[index] = BLOCK_STILL_LAVA;
+			if (World.Height > 1) {
+				index = World_Pack(x, 1, z);
+				if (Gen_Blocks[index] == BLOCK_AIR)
+					Gen_Blocks[index] = BLOCK_STILL_LAVA;
+			}
+		}
+	}
+}
+
+/* Replace stone at y=0 and y=MaxY with bedrock, plus bedrock walls on all edges */
+static void CavesGen_PlaceBedrock(void) {
+	int x, y, z, index;
+
+	Gen_CurrentState = "Placing bedrock";
+	/* Floor and ceiling */
+	for (z = 0; z < World.Length; z++) {
+		for (x = 0; x < World.Width; x++) {
+			index = World_Pack(x, 0, z);
+			Gen_Blocks[index] = BLOCK_BEDROCK;
+			index = World_Pack(x, World.MaxY, z);
+			Gen_Blocks[index] = BLOCK_BEDROCK;
+		}
+	}
+	/* Walls on all four edges (x=0, x=MaxX, z=0, z=MaxZ) */
+	for (y = 0; y <= World.MaxY; y++) {
+		for (x = 0; x < World.Width; x++) {
+			Gen_Blocks[World_Pack(x, y, 0)]           = BLOCK_BEDROCK;
+			Gen_Blocks[World_Pack(x, y, World.MaxZ)]   = BLOCK_BEDROCK;
+		}
+		for (z = 0; z < World.Length; z++) {
+			Gen_Blocks[World_Pack(0, y, z)]            = BLOCK_BEDROCK;
+			Gen_Blocks[World_Pack(World.MaxX, y, z)]   = BLOCK_BEDROCK;
+		}
+	}
+}
+
+/* Find a spawn point inside a cave near the center of the map */
+static void CavesGen_FindSpawn(void) {
+	int cx = World.Width / 2;
+	int cz = World.Length / 2;
+	int radius, x, y, z, index;
+
+	Gen_CurrentState = "Finding spawn";
+	/* Search outward from center, scanning downward from mid-height */
+	for (radius = 0; radius < World.Width / 2; radius += 2) {
+		for (y = World.Height / 2; y > 2; y--) {
+			for (x = cx - radius; x <= cx + radius; x++) {
+				for (z = cz - radius; z <= cz + radius; z++) {
+					if (!World_ContainsXZ(x, z)) continue;
+					/* Only check perimeter of each radius ring to avoid redundancy */
+					if (radius > 0 && x != cx - radius && x != cx + radius &&
+					    z != cz - radius && z != cz + radius) continue;
+
+					index = World_Pack(x, y, z);
+					/* Need: solid below, air at feet, air at head */
+					if (Gen_Blocks[index] != BLOCK_AIR) continue;
+					if (y + 1 >= World.Height || Gen_Blocks[index + World.OneY] != BLOCK_AIR) continue;
+					if (y <= 0 || Gen_Blocks[index - World.OneY] == BLOCK_AIR) continue;
+
+					Gen_SpawnOverride.x = (float)x + 0.5f;
+					Gen_SpawnOverride.y = (float)y;
+					Gen_SpawnOverride.z = (float)z + 0.5f;
+					return;
+				}
+			}
+		}
+	}
+}
+
+static cc_bool CavesGen_Prepare(int seed) {
+	Random_Seed(&rnd, seed);
+	Gen_SpawnOverride.y = -1.0f; /* reset */
+	return true;
+}
+
+static void CavesGen_Generate(void) {
+	CavesGen_FillStone();
+	CavesGen_CarveTunnels();
+	CavesGen_CarveCaverns();
+	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
+	NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
+	NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
+	NotchyGen_CarveOreVeins(0.7f, "Carving iron ore",    BLOCK_IRON_ORE);
+	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore",    BLOCK_GOLD_ORE);
+	NotchyGen_CarveOreVeins(0.6f, "Carving red ore",     BLOCK_RED_ORE);
+	NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
+	CavesGen_PlaceLavaPools();
+	CavesGen_PlaceBedrock();
+	CavesGen_FindSpawn();
+
+	gen_done = true;
+}
+
+static void CavesGen_Setup(void) {
+	/* Hide sky and borders */
+	Env_SetEdgeBlock(BLOCK_BEDROCK);
+	Env_SetSidesBlock(BLOCK_BEDROCK);
+	Env_SetCloudsHeight(-16);
+
+	if (Gen_Theme == GEN_THEME_HELL) {
+		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
+		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+	}
+}
+
+const struct MapGenerator CavesGen = {
+	CavesGen_Prepare,
+	CavesGen_Generate,
+	CavesGen_Setup
+};
+
+
+/*########################################################################################################################*
+*------------------------------------------------------Empty gen----------------------------------------------------------*
+*#########################################################################################################################*/
+/* Empty world: just a single cobblestone block in the center, invisible borders */
+
+static cc_bool EmptyGen_Prepare(int seed) {
+	Gen_SpawnOverride.y = -1.0f;
+	return true;
+}
+
+static void EmptyGen_Generate(void) {
+	int cx, cy, cz, index;
+
+	Gen_CurrentState = "Generating empty world";
+	Mem_Set(Gen_Blocks, BLOCK_AIR, World.Volume);
+
+	cx = World.Width / 2;
+	cy = World.Height / 2 - 1;
+	cz = World.Length / 2;
+
+	index = World_Pack(cx, cy, cz);
+	Gen_Blocks[index] = BLOCK_COBBLE;
+
+	Gen_SpawnOverride.x = (float)cx + 0.5f;
+	Gen_SpawnOverride.y = (float)(cy + 1);
+	Gen_SpawnOverride.z = (float)cz + 0.5f;
+
+	gen_done = true;
+}
+
+static void EmptyGen_Setup(void) {
+	Env_SetEdgeBlock(BLOCK_AIR);
+	Env_SetSidesBlock(BLOCK_AIR);
+	Env_SetCloudsHeight(-16);
+}
+
+const struct MapGenerator EmptyGen = {
+	EmptyGen_Prepare,
+	EmptyGen_Generate,
+	EmptyGen_Setup
 };
 
 

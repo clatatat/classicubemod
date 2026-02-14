@@ -133,6 +133,7 @@ static void D3D9_UpdateCachedDimensions(void) {
 }
 
 static cc_bool deviceCreated;
+static cc_bool d3d9_useVertexFog;
 static void TryCreateDevice(void) {
 	cc_result res;
 	D3DCAPS9 caps;
@@ -168,6 +169,9 @@ static void TryCreateDevice(void) {
 	Gfx.MaxTexWidth  = caps.MaxTextureWidth;
 	Gfx.MaxTexHeight = caps.MaxTextureHeight;
 	totalMem = IDirect3DDevice9_GetAvailableTextureMem(device) / (1024.0f * 1024.0f);
+
+	/* DX7-era cards (e.g. Radeon 7000) don't support per-pixel table fog */
+	d3d9_useVertexFog = !(caps.RasterCaps & D3DPRASTERCAPS_FOGTABLE);
 }
 
 void Gfx_Create(void) {
@@ -459,12 +463,14 @@ void Gfx_SetFogEnd(float value) {
 
 void Gfx_SetFogMode(FogFunc func) {
 	static D3DFOGMODE modes[3] = { D3DFOG_LINEAR, D3DFOG_EXP, D3DFOG_EXP2 };
+	D3DRENDERSTATETYPE fogRS;
 	D3DFOGMODE mode = modes[func];
 	if (mode == gfx_fogMode) return;
 
 	gfx_fogMode = mode;
 	if (Gfx.LostContext) return;
-	IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, mode);
+	fogRS = d3d9_useVertexFog ? D3DRS_FOGVERTEXMODE : D3DRS_FOGTABLEMODE;
+	IDirect3DDevice9_SetRenderState(device, fogRS, mode);
 }
 
 static void SetAlphaTest(cc_bool enabled) {
@@ -544,7 +550,11 @@ static void D3D9_RestoreRenderStates(void) {
 	IDirect3DDevice9_SetRenderState(device, D3DRS_FOGDENSITY, raw.u);
 	raw.f = gfx_fogEnd;
 	IDirect3DDevice9_SetRenderState(device, D3DRS_FOGEND, raw.u);
-	IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, gfx_fogMode);
+	if (d3d9_useVertexFog) {
+		IDirect3DDevice9_SetRenderState(device, D3DRS_FOGVERTEXMODE, gfx_fogMode);
+	} else {
+		IDirect3DDevice9_SetRenderState(device, D3DRS_FOGTABLEMODE, gfx_fogMode);
+	}
 
 	IDirect3DDevice9_SetRenderState(device, D3DRS_ZENABLE,      gfx_depthTesting);
 	IDirect3DDevice9_SetRenderState(device, D3DRS_ZWRITEENABLE, gfx_depthWriting);

@@ -34,7 +34,9 @@ void Lighting_SetMode(cc_uint8 mode, cc_bool fromServer) {
 *----------------------------------------------------Classic lighting-----------------------------------------------------*
 *#########################################################################################################################*/
 static cc_int16* classic_heightmap;
+static cc_uint8* torch_lightmap;
 #define HEIGHT_UNCALCULATED Int16_MaxValue
+#define TORCH_LIGHT_RADIUS 4
 
 #define ClassicLighting_CalcBody(get_block)\
 for (y = maxY; y >= 0; y--, i -= World.OneY) {\
@@ -74,46 +76,168 @@ int ClassicLighting_GetLightHeight(int x, int z) {
 
 /* Outside color is same as sunlight color, so we reuse when possible */
 cc_bool ClassicLighting_IsLit(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return true;
 	return y > ClassicLighting_GetLightHeight(x, z);
 }
 
 cc_bool ClassicLighting_IsLit_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return true;
 	return y > classic_heightmap[Lighting_Pack(x, z)];
+}
+
+
+/*########################################################################################################################*
+*------------------------------------------------------Torch lighting-----------------------------------------------------*
+*#########################################################################################################################*/
+typedef struct TorchNode_ { cc_int16 x, y, z; cc_uint8 level; } TorchNode;
+static const cc_int8 torch_dirs[6][3] = {{1,0,0},{-1,0,0},{0,1,0},{0,-1,0},{0,0,1},{0,0,-1}};
+
+static void TorchLight_Propagate(int srcX, int srcY, int srcZ) {
+	TorchNode queue[512];
+	int head, tail, idx, d, nx, ny, nz;
+	cc_uint8 newLevel;
+
+	head = 0; tail = 0;
+	idx = World_Pack(srcX, srcY, srcZ);
+	if (TORCH_LIGHT_RADIUS > torch_lightmap[idx])
+		torch_lightmap[idx] = TORCH_LIGHT_RADIUS;
+	queue[tail].x = (cc_int16)srcX; queue[tail].y = (cc_int16)srcY;
+	queue[tail].z = (cc_int16)srcZ; queue[tail].level = TORCH_LIGHT_RADIUS;
+	tail++;
+
+	while (head < tail) {
+		newLevel = queue[head].level - 1;
+		if (newLevel == 0) { head++; continue; }
+
+		for (d = 0; d < 6; d++) {
+			nx = queue[head].x + torch_dirs[d][0];
+			ny = queue[head].y + torch_dirs[d][1];
+			nz = queue[head].z + torch_dirs[d][2];
+			if (!World_Contains(nx, ny, nz)) continue;
+			if (Blocks.BlocksLight[World_GetBlock(nx, ny, nz)]) continue;
+
+			idx = World_Pack(nx, ny, nz);
+			if (torch_lightmap[idx] >= newLevel) continue;
+
+			torch_lightmap[idx] = newLevel;
+			if (tail < 512) {
+				queue[tail].x = (cc_int16)nx; queue[tail].y = (cc_int16)ny;
+				queue[tail].z = (cc_int16)nz; queue[tail].level = newLevel;
+				tail++;
+			}
+		}
+		head++;
+	}
+}
+
+static void TorchLight_Remove(int srcX, int srcY, int srcZ) {
+	int x, y, z, r;
+	int minX, maxX, minY, maxY, minZ, maxZ;
+
+	r = TORCH_LIGHT_RADIUS;
+	/* Clear light in affected area */
+	minX = max(srcX - r, 0); maxX = min(srcX + r, World.MaxX);
+	minY = max(srcY - r, 0); maxY = min(srcY + r, World.MaxY);
+	minZ = max(srcZ - r, 0); maxZ = min(srcZ + r, World.MaxZ);
+
+	for (y = minY; y <= maxY; y++)
+		for (z = minZ; z <= maxZ; z++)
+			for (x = minX; x <= maxX; x++)
+				torch_lightmap[World_Pack(x, y, z)] = 0;
+
+	/* Re-propagate from nearby torches and red ore torches */
+	minX = max(srcX - 2*r, 0); maxX = min(srcX + 2*r, World.MaxX);
+	minY = max(srcY - 2*r, 0); maxY = min(srcY + 2*r, World.MaxY);
+	minZ = max(srcZ - 2*r, 0); maxZ = min(srcZ + 2*r, World.MaxZ);
+
+	for (y = minY; y <= maxY; y++)
+		for (z = minZ; z <= maxZ; z++)
+			for (x = minX; x <= maxX; x++) {
+				BlockID b = World_GetBlock(x, y, z);
+				if (b == BLOCK_TORCH)
+					TorchLight_Propagate(x, y, z);
+			}
+}
+
+static void TorchLight_RefreshChunks(int srcX, int srcY, int srcZ) {
+	int cx, cy, cz, r;
+	int minCX, maxCX, minCY, maxCY, minCZ, maxCZ;
+
+	r = TORCH_LIGHT_RADIUS;
+	minCX = max(srcX - r, 0) >> CHUNK_SHIFT;
+	maxCX = min(srcX + r, World.MaxX) >> CHUNK_SHIFT;
+	minCY = max(srcY - r, 0) >> CHUNK_SHIFT;
+	maxCY = min(srcY + r, World.MaxY) >> CHUNK_SHIFT;
+	minCZ = max(srcZ - r, 0) >> CHUNK_SHIFT;
+	maxCZ = min(srcZ + r, World.MaxZ) >> CHUNK_SHIFT;
+
+	for (cy = minCY; cy <= maxCY; cy++)
+		for (cz = minCZ; cz <= maxCZ; cz++)
+			for (cx = minCX; cx <= maxCX; cx++)
+				MapRenderer_RefreshChunk(cx, cy, cz);
+}
+
+static void TorchLight_ScanWorld(void) {
+	int x, y, z;
+	BlockID block;
+
+	for (y = 0; y < World.Height; y++)
+		for (z = 0; z < World.Length; z++)
+			for (x = 0; x < World.Width; x++) {
+				block = World_GetBlock(x, y, z);
+				if (block == BLOCK_TORCH)
+					TorchLight_Propagate(x, y, z);
+			}
 }
 
 static PackedCol ClassicLighting_Color(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunCol;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunCol;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol SmoothLighting_Color(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunCol;
 	if (Blocks.Brightness[World_GetBlock(x, y, z)]) return Env.SunCol;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunCol;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_XSide(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunXSide;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunXSide;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunXSide : Env.ShadowXSide;
 }
 
 static PackedCol ClassicLighting_Color_Sprite_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return Env.SunCol;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMax_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return Env.SunCol;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMin_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return Env.SunYMin;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunYMin : Env.ShadowYMin;
 }
 
 static PackedCol ClassicLighting_Color_XSide_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return Env.SunXSide;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunXSide : Env.ShadowXSide;
 }
 
 static PackedCol ClassicLighting_Color_ZSide_Fast(int x, int y, int z) {
+	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
+		return Env.SunZSide;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunZSide : Env.ShadowZSide;
 }
 
@@ -267,6 +391,21 @@ void ClassicLighting_OnBlockChanged(int x, int y, int z, BlockID oldBlock, Block
 	ClassicLighting_UpdateLighting(x, y, z, oldBlock, newBlock, hIndex, lightH);
 	newHeight = classic_heightmap[hIndex] + 1;
 	ClassicLighting_RefreshAffected(x, y, z, newBlock, lightH + 1, newHeight);
+
+	/* Handle torch light */
+	if (torch_lightmap) {
+		if (newBlock == BLOCK_TORCH) {
+			TorchLight_Propagate(x, y, z);
+			TorchLight_RefreshChunks(x, y, z);
+		} else if (oldBlock == BLOCK_TORCH) {
+			TorchLight_Remove(x, y, z);
+			TorchLight_RefreshChunks(x, y, z);
+		} else if (Blocks.BlocksLight[newBlock] != Blocks.BlocksLight[oldBlock]) {
+			/* Light-blocking property changed near potential torch light */
+			TorchLight_Remove(x, y, z);
+			TorchLight_RefreshChunks(x, y, z);
+		}
+	}
 }
 
 
@@ -389,6 +528,8 @@ void ClassicLighting_LightHint(int startX, int startY, int startZ) {
 void ClassicLighting_FreeState(void) {
 	Mem_Free(classic_heightmap);
 	classic_heightmap = NULL;
+	Mem_Free(torch_lightmap);
+	torch_lightmap = NULL;
 }
 
 void ClassicLighting_AllocState(void) {
@@ -397,6 +538,13 @@ void ClassicLighting_AllocState(void) {
 		ClassicLighting_Refresh();
 	} else {
 		World_OutOfMemory();
+		return;
+	}
+
+	torch_lightmap = (cc_uint8*)Mem_TryAlloc(World.Volume, 1);
+	if (torch_lightmap) {
+		Mem_Set(torch_lightmap, 0, World.Volume);
+		TorchLight_ScanWorld();
 	}
 }
 

@@ -90,6 +90,13 @@ ClassiCube*
 screenshots
 fontscache.txt
 
+# Minecraft alpha/indev folders
+minecraft_alpha/
+minecraft_indev/
+
+# Claude Code local configuration
+.claude/
+
 # DOS files
 CWSDPMI.EXE
 CWSDPMI.SWP

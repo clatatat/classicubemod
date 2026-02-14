@@ -12,6 +12,13 @@ struct StringsBuffer;
 struct InputDevice;
 extern struct IGameComponent InputHandler_Component;
 
+/* Mob health system */
+void Mob_DamageMob(int id, int damage, cc_bool fromPlayer);
+void Mob_RemoveAllMobs(void);
+cc_bool Mob_IsMob(int id);
+cc_bool Mob_IsCreeper(int id);
+void Mob_TriggerCreeperChainExplosion(int id);
+
 
 /* whether to leave text input open for user to enter further input */
 #define HOTKEY_FLAG_STAYS_OPEN   0x01

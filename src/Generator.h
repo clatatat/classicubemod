@@ -19,14 +19,31 @@ extern BlockRaw* Gen_Blocks;
 struct MapGenerator {
 	cc_bool (*Prepare)(int seed);
 	void   (*Generate)(void);
+	void   (*Setup)(void); /* Called after World_SetNewMap to configure environment, may be NULL */
 };
 
 extern const struct MapGenerator FlatgrassGen;
 extern const struct MapGenerator NotchyGen;
+extern const struct MapGenerator FloatingGen;
+extern const struct MapGenerator CavesGen;
+extern const struct MapGenerator EmptyGen;
 
 /* Starts generating a map using the given generator */
 void Gen_Start(STRING_REF const struct MapGenerator* gen, int seed,
 				int width, int height, int length);
+/* The currently active map generator (valid during and after generation) */
+extern const struct MapGenerator* gen_active;
+/* If Y >= 0, overrides the default spawn position after generation */
+extern Vec3 Gen_SpawnOverride;
+
+/* World theme applied during/after generation */
+#define GEN_THEME_NORMAL   0
+#define GEN_THEME_HELL     1
+#define GEN_THEME_PARADISE 2
+#define GEN_THEME_WOODS    3
+#define GEN_THEME_DESERT   4
+#define GEN_THEME_COUNT    5
+extern int Gen_Theme;
 /* Checks whether the map generator has completed yet */
 cc_bool Gen_IsDone(void);
 

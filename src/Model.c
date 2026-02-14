@@ -1578,6 +1578,51 @@ static void CreeperModel_Register(void) {
 	Model_Register(&creeper_model);
 }
 
+/* Creeper variant A (survival test) - same geometry, different texture */
+static struct ModelVertex creepera_vertices[MODEL_BOX_VERTICES * 6];
+static struct ModelTex creepera_tex = { "creepera.png" };
+static struct Model creepera_model = { "creepera", creepera_vertices, &creepera_tex,
+	CreeperModel_MakeParts, CreeperModel_Draw,
+	CreeperModel_GetNameY,  CreeperModel_GetEyeY,
+	CreeperModel_GetSize,   CreeperModel_GetBounds
+};
+
+static void CreeperAModel_Register(void) {
+	Model_Init(&creepera_model);
+	creepera_model.maxVertices = CREEPER_MAX_VERTICES;
+	Model_Register(&creepera_model);
+}
+
+/* Creeper variant B (melee) - same geometry, different texture */
+static struct ModelVertex creeperb_vertices[MODEL_BOX_VERTICES * 6];
+static struct ModelTex creeperb_tex = { "creeperb.png" };
+static struct Model creeperb_model = { "creeperb", creeperb_vertices, &creeperb_tex,
+	CreeperModel_MakeParts, CreeperModel_Draw,
+	CreeperModel_GetNameY,  CreeperModel_GetEyeY,
+	CreeperModel_GetSize,   CreeperModel_GetBounds
+};
+
+static void CreeperBModel_Register(void) {
+	Model_Init(&creeperb_model);
+	creeperb_model.maxVertices = CREEPER_MAX_VERTICES;
+	Model_Register(&creeperb_model);
+}
+
+/* Creeper variant C (nuke) - same geometry, different texture */
+static struct ModelVertex creeperc_vertices[MODEL_BOX_VERTICES * 6];
+static struct ModelTex creeperc_tex = { "creeperc.png" };
+static struct Model creeperc_model = { "creeperc", creeperc_vertices, &creeperc_tex,
+	CreeperModel_MakeParts, CreeperModel_Draw,
+	CreeperModel_GetNameY,  CreeperModel_GetEyeY,
+	CreeperModel_GetSize,   CreeperModel_GetBounds
+};
+
+static void CreeperCModel_Register(void) {
+	Model_Init(&creeperc_model);
+	creeperc_model.maxVertices = CREEPER_MAX_VERTICES;
+	Model_Register(&creeperc_model);
+}
+
 
 /*########################################################################################################################*
 *----------------------------------------------------------PigModel-------------------------------------------------------*
@@ -2009,6 +2054,21 @@ static void SpiderModel_Register(void) {
 	Model_Register(&spider_model);
 }
 
+/* Brown spider variant - same geometry, different texture */
+static struct ModelVertex spiderb_vertices[MODEL_BOX_VERTICES * 5];
+static struct ModelTex spiderb_tex = { "spiderb.png" };
+static struct Model spiderb_model = { "spiderb", spiderb_vertices, &spiderb_tex,
+	SpiderModel_MakeParts, SpiderModel_Draw,
+	SpiderModel_GetNameY,  SpiderModel_GetEyeY,
+	SpiderModel_GetSize,   SpiderModel_GetBounds
+};
+
+static void SpiderBModel_Register(void) {
+	Model_Init(&spiderb_model);
+	spiderb_model.maxVertices = SPIDER_MAX_VERTICES;
+	Model_Register(&spiderb_model);
+}
+
 
 /*########################################################################################################################*
 *--------------------------------------------------------ZombieModel------------------------------------------------------*
@@ -2378,6 +2438,91 @@ static void HoldModel_Register(void) {
 
 
 /*########################################################################################################################*
+*---------------------------------------------------------ArrowModel------------------------------------------------------*
+*#########################################################################################################################*/
+static struct ModelPart arrow_part;
+/* 2 crossed quads (no backface culling, so each quad visible from both sides) */
+#define ARROW_MAX_VERTICES (2 * MODEL_QUAD_VERTICES)
+
+static void ArrowModel_MakeParts(void) {
+	struct Model* m = Models.Active;
+	int start = m->index;
+
+	/* UV texel coords for pixels (0,0)-(15,4) on 32x32 arrows.png
+	   Entity uScale=2.0 makes texels map 1:1 to pixels */
+	int u0 = 0, u16 = 16 | UV_MAX;
+	int v0 = 0, v5  = 5  | UV_MAX;
+
+	/* Coordinates are in 1/16 block units (like BoxDesc_Bounds divides by 16)
+	   Arrow: 4px wide, 16px long = 0.25 x 1.0 blocks */
+	#define P(x) ((x) / 16.0f)
+
+	/* Horizontal plane (Y=0) - visible from both sides (no face culling) */
+	ModelVertex_Init(&m->vertices[m->index], P(-2), 0, P(-8), u0,  v0);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P(-2), 0, P( 8), u16, v0);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P( 2), 0, P( 8), u16, v5);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P( 2), 0, P(-8), u0,  v5);  m->index++;
+
+	/* Vertical plane (X=0) - visible from both sides (no face culling) */
+	ModelVertex_Init(&m->vertices[m->index], 0, P(-2), P(-8), u0,  v5);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, P( 2), P(-8), u0,  v0);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, P( 2), P( 8), u16, v0);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, P(-2), P( 8), u16, v5);  m->index++;
+
+	#undef P
+	ModelPart_Init(&arrow_part, start, m->index - start, 0, 0, 0);
+}
+
+static void ArrowModel_GetTransform(struct Entity* e, Vec3 pos, struct Matrix* m) {
+	float vx = e->Velocity.x, vy = e->Velocity.y, vz = e->Velocity.z;
+	float speedSq = vx*vx + vy*vy + vz*vz;
+
+	if (speedSq > 0.001f) {
+		float h = Math_SqrtF(vx*vx + vz*vz);
+		e->RotY = -Math_Atan2f(vz, vx) * MATH_RAD2DEG;
+		e->RotX = Math_Atan2f(h, vy) * MATH_RAD2DEG;
+	}
+	e->RotZ = 0.0f;
+
+	Entity_GetTransform(e, pos, e->ModelScale, m);
+}
+
+static void ArrowModel_Draw(struct Entity* e) {
+	Model_ApplyTexture(e);
+	Model_LockVB(e, ARROW_MAX_VERTICES);
+
+	Model_DrawPart(&arrow_part);
+
+	Model_UnlockVB();
+	Gfx_DrawVb_IndexedTris(ARROW_MAX_VERTICES);
+}
+
+static float ArrowModel_GetNameY(struct Entity* e) { return 0.5f; }
+static float ArrowModel_GetEyeY(struct Entity* e)  { return 0.0f; }
+static void  ArrowModel_GetSize(struct Entity* e)   { Model_RetSize(4,4,16); }
+static void  ArrowModel_GetBounds(struct Entity* e) { Model_RetAABB(-2,-2,-8, 2,2,8); }
+
+static struct ModelVertex arrow_vertices[MODEL_QUAD_VERTICES * 2];
+static struct ModelTex arrow_tex = { "arrows.png" };
+static struct Model arrow_model = {
+	"arrow", arrow_vertices, &arrow_tex,
+	ArrowModel_MakeParts, ArrowModel_Draw,
+	ArrowModel_GetNameY,  ArrowModel_GetEyeY,
+	ArrowModel_GetSize,   ArrowModel_GetBounds
+};
+
+static void ArrowModel_Register(void) {
+	Model_Init(&arrow_model);
+	arrow_model.maxVertices  = ARROW_MAX_VERTICES;
+	arrow_model.bobbing      = false;
+	arrow_model.pushes       = false;
+	arrow_model.usesSkin     = false;
+	arrow_model.GetTransform = ArrowModel_GetTransform;
+	Model_Register(&arrow_model);
+}
+
+
+/*########################################################################################################################*
 *-------------------------------------------------------Models component--------------------------------------------------*
 *#########################################################################################################################*/
 static void RegisterDefaultModels(void) {
@@ -2385,13 +2530,18 @@ static void RegisterDefaultModels(void) {
 #ifndef CC_DISABLE_EXTRA_MODELS
 	Model_RegisterTexture(&chicken_tex);
 	Model_RegisterTexture(&creeper_tex);
+	Model_RegisterTexture(&creepera_tex);
+	Model_RegisterTexture(&creeperb_tex);
+	Model_RegisterTexture(&creeperc_tex);
 	Model_RegisterTexture(&pig_tex);
 	Model_RegisterTexture(&sheep_tex);
 	Model_RegisterTexture(&fur_tex);
 	Model_RegisterTexture(&skeleton_tex);
 	Model_RegisterTexture(&spider_tex);
+	Model_RegisterTexture(&spiderb_tex);
 	Model_RegisterTexture(&zombie_tex);
 	Model_RegisterTexture(&skinnedCube_tex);
+	Model_RegisterTexture(&arrow_tex);
 #endif
 
 	HumanoidModel_Register();
@@ -2402,11 +2552,15 @@ static void RegisterDefaultModels(void) {
 #ifndef CC_DISABLE_EXTRA_MODELS
 	ChickenModel_Register();
 	CreeperModel_Register();
+	CreeperAModel_Register();
+	CreeperBModel_Register();
+	CreeperCModel_Register();
 	PigModel_Register();
 	SheepModel_Register();
 	NoFurModel_Register();
 	SkeletonModel_Register();
 	SpiderModel_Register();
+	SpiderBModel_Register();
 	ZombieModel_Register();
 
 	ChibiModel_Register();
@@ -2415,6 +2569,7 @@ static void RegisterDefaultModels(void) {
 	CorpseModel_Register();
 	SkinnedCubeModel_Register();
 	HoldModel_Register();
+	ArrowModel_Register();
 #endif
 }
 
@@ -2432,7 +2587,7 @@ static void OnContextLost(void* obj) {
 static void OnInit(void) {
 	Models.MaxVertices = MODELS_MAX_VERTICES;
 	RegisterDefaultModels();
-	Models.ClassicArms = Options_GetBool(OPT_CLASSIC_ARM_MODEL, Game_ClassicMode);
+	Models.ClassicArms = Options_GetBool(OPT_CLASSIC_ARM_MODEL, true);
 
 	Event_Register_(&TextureEvents.FileChanged, NULL, Models_TextureChanged);
 	Event_Register_(&GfxEvents.ContextLost,     NULL, OnContextLost);

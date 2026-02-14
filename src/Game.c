@@ -59,6 +59,19 @@ static cc_bool autoPause;
 cc_bool Game_ClassicMode, Game_ClassicHacks;
 cc_bool Game_AllowCustomBlocks;
 cc_bool Game_AllowServerTextures;
+cc_bool Game_EnemySpawning;
+cc_bool Game_PassiveSpawning;
+cc_bool Game_SurvivalMode;
+int     Game_CreeperBehavior;
+cc_bool Game_SpiderWallclimb;
+cc_bool Game_SkeletonShoot;
+int     Game_SpiderLeapDist;
+cc_bool Game_SpiderVariants;
+cc_bool Game_CreeperVariants;
+int     Game_ZombieSpeed;
+int     Game_MobSpawnRate;
+cc_bool Game_LightRestrictSpawning;
+int     Game_MobLightSensitivity;
 cc_bool Game_Anaglyph3D;
 
 cc_bool Game_ViewBobbing, Game_HideGui;
@@ -109,11 +122,26 @@ void Game_ToggleFullscreen(void) {
 	cc_result res;
 
 	if (state == WINDOW_STATE_FULLSCREEN) {
+		Window_RestoreDisplayResolution();
 		res = Window_ExitFullscreen();
 		if (res) Logger_SysWarn(res, "leaving fullscreen");
 	} else {
 		res = Window_EnterFullscreen();
 		if (res) Logger_SysWarn(res, "going fullscreen");
+		/* Apply configured fullscreen resolution if not Desktop */
+		{
+			cc_string str; char strBuf[STRING_SIZE];
+			cc_string parts[2]; int w, h;
+			String_InitArray(str, strBuf);
+			Options_UNSAFE_Get(OPT_FULLSCREEN_RES, &str);
+			if (str.length > 0 && !String_CaselessEqualsConst(&str, "Desktop")) {
+				if (String_UNSAFE_Split(&str, 'x', parts, 2) == 2) {
+					if (Convert_ParseInt(&parts[0], &w) && Convert_ParseInt(&parts[1], &h)) {
+						Window_SetDisplayResolution(w, h);
+					}
+				}
+			}
+		}
 	}
 }
 
@@ -352,6 +380,19 @@ static void LoadOptions(void) {
 	Game_SimpleArmsAnim      = Options_GetBool(OPT_SIMPLE_ARMS_ANIM,   false);
 	Game_BreakableLiquids    = Options_GetBool(OPT_MODIFIABLE_LIQUIDS, false);
 	Game_AllowServerTextures = Options_GetBool(OPT_SERVER_TEXTURES,    true);
+	Game_EnemySpawning       = Options_GetBool(OPT_ENEMY_SPAWNING,    true);
+	Game_PassiveSpawning     = Options_GetBool(OPT_PASSIVE_SPAWNING,  true);
+	Game_SurvivalMode        = Options_GetBool(OPT_SURVIVAL_MODE,     false);
+	Game_CreeperBehavior     = Options_GetInt(OPT_CREEPER_BEHAVIOR,   0, 2, CREEPER_EXPLODE_DEATH);
+	Game_SpiderWallclimb     = Options_GetBool(OPT_SPIDER_WALLCLIMB,  false);
+	Game_SkeletonShoot       = Options_GetBool(OPT_SKELETON_SHOOT,    false);
+	Game_SpiderLeapDist      = Options_GetInt(OPT_SPIDER_LEAP_DIST,   0, 6, 2);
+	Game_SpiderVariants      = Options_GetBool(OPT_SPIDER_VARIANTS,   true);
+	Game_CreeperVariants     = Options_GetBool(OPT_CREEPER_VARIANTS,  true);
+	Game_ZombieSpeed         = Options_GetInt(OPT_ZOMBIE_SPEED,       0, 3, 2);
+	Game_MobSpawnRate        = Options_GetInt(OPT_MOB_SPAWN_RATE,     0, 4, 2);
+	Game_LightRestrictSpawning = Options_GetBool(OPT_LIGHT_RESTRICT_SPAWN, false);
+	Game_MobLightSensitivity   = Options_GetInt(OPT_MOB_LIGHT_SENSITIVITY, 0, 2, 0);
 
 	Game_ViewDistance     = Options_GetInt(OPT_VIEW_DISTANCE, 8, 4096, DEFAULT_VIEWDIST);
 	Game_UserViewDistance = Game_ViewDistance;

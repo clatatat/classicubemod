@@ -133,6 +133,10 @@ void Window_Show(void);
 /* Sets the size of the internal bounds of the window in pixels. */
 /* NOTE: This size excludes the bounds of borders + title */
 void Window_SetSize(int width, int height);
+/* Changes the display resolution (for fullscreen). */
+cc_result Window_SetDisplayResolution(int width, int height);
+/* Restores the display resolution to the original desktop mode. */
+cc_result Window_RestoreDisplayResolution(void);
 /* Attempts to close the window. (And on some backends also destroys the window) */
 /* May raise the WindowClosing and WindowClosed events. */
 void Window_RequestClose(void);

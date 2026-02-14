@@ -562,10 +562,115 @@ static void Custom_Tick(float delta) { }
 
 
 /*########################################################################################################################*
+*-------------------------------------------------------Smoke particle----------------------------------------------------*
+*#########################################################################################################################*/
+#define SMOKE_PARTICLES_MAX 600
+static struct Particle smoke_Particles[SMOKE_PARTICLES_MAX];
+static int smoke_count;
+/* Texture 7 in particles.png (8x8 tiles, 16 per row) = column 7, row 0 */
+static TextureRec smoke_rec = { 56.0f/128.0f, 0.0f/128.0f, 64.0f/128.0f, 8.0f/128.0f };
+
+static cc_bool SmokeParticle_Tick(struct Particle* p, float delta) {
+	p->lastPos = p->nextPos;
+	p->nextPos.x += p->velocity.x * delta;
+	p->nextPos.y += p->velocity.y * delta;
+	p->nextPos.z += p->velocity.z * delta;
+	/* Dampen all axes over time */
+	p->velocity.x *= 0.96f;
+	p->velocity.y *= 0.96f;
+	p->velocity.z *= 0.96f;
+	p->lifetime -= delta;
+	return p->lifetime < 0.0f;
+}
+
+static void SmokeParticle_Render(struct Particle* p, float t, struct VertexTextured* vertices) {
+	Vec3 pos;
+	Vec2 size;
+
+	Vec3_Lerp(&pos, &p->lastPos, &p->nextPos, t);
+	size.x = p->size * 0.015625f; size.y = size.x;
+
+	Particle_DoRender(&size, &pos, &smoke_rec, PACKEDCOL_WHITE, vertices);
+}
+
+static void Smoke_Render(float t) {
+	struct VertexTextured* data;
+	int i;
+	if (!smoke_count) return;
+
+	data = (struct VertexTextured*)Gfx_LockDynamicVb(particles_VB, 
+									VERTEX_FORMAT_TEXTURED, smoke_count * 4);
+	for (i = 0; i < smoke_count; i++) {
+		SmokeParticle_Render(&smoke_Particles[i], t, data);
+		data += 4;
+	}
+
+	Gfx_BindTexture(particles_TexId);
+	Gfx_UnlockDynamicVb(particles_VB);
+	Gfx_DrawVb_IndexedTris(smoke_count * 4);
+}
+
+static void Smoke_RemoveAt(int i) {
+	for (; i < smoke_count - 1; i++) {
+		smoke_Particles[i] = smoke_Particles[i + 1];
+	}
+	smoke_count--;
+}
+
+static void Smoke_Tick(float delta) {
+	int i;
+	for (i = 0; i < smoke_count; i++) {
+		if (SmokeParticle_Tick(&smoke_Particles[i], delta)) {
+			Smoke_RemoveAt(i); i--;
+		}
+	}
+}
+
+void Particles_SmokeEffect(float x, float y, float z, float radius) {
+	struct Particle* p;
+	int i, count;
+	float dx, dy, dz, dist, speed;
+
+	/* Spawn particles throughout the explosion sphere */
+	count = (int)(radius * radius * 24); /* scale count with explosion size */
+	if (count > 400) count = 400;
+
+	for (i = 0; i < count; i++) {
+		if (smoke_count >= SMOKE_PARTICLES_MAX) Smoke_RemoveAt(0);
+		p = &smoke_Particles[smoke_count++];
+
+		/* Random position within the explosion sphere */
+		dx = (Random_Float(&rnd) - 0.5f) * 2.0f;
+		dy = (Random_Float(&rnd) - 0.5f) * 2.0f;
+		dz = (Random_Float(&rnd) - 0.5f) * 2.0f;
+		dist = Math_SqrtF(dx * dx + dy * dy + dz * dz);
+		if (dist > 0.001f) {
+			dx /= dist; dy /= dist; dz /= dist;
+		}
+		dist = Random_Float(&rnd) * radius;
+
+		p->lastPos.x = x + dx * dist;
+		p->lastPos.y = y + dy * dist;
+		p->lastPos.z = z + dz * dist;
+		p->nextPos = p->lastPos;
+
+		/* Fast outward burst from explosion center */
+		speed = 2.0f + Random_Float(&rnd) * 3.0f;
+		p->velocity.x = dx * speed;
+		p->velocity.y = dy * speed;
+		p->velocity.z = dz * speed;
+
+		p->lifetime = 0.8f + Random_Float(&rnd) * 0.7f; /* 0.8-1.5 seconds */
+		p->size = 10.0f + Random_Float(&rnd) * 14.0f; /* varied sizes */
+	}
+}
+
+
+/*########################################################################################################################*
 *--------------------------------------------------------Particles--------------------------------------------------------*
 *#########################################################################################################################*/
 void Particles_Render(float t) {
-	if (!terrain_count && !rain_count && !custom_count) return;
+	if (!terrain_count && !rain_count && !custom_count && !smoke_count) return;
 
 	if (Gfx.LostContext) return;
 	if (!particles_VB)
@@ -577,6 +682,7 @@ void Particles_Render(float t) {
 	Terrain_Render(t);
 	Rain_Render(t);
 	Custom_Render(t);
+	Smoke_Render(t);
 
 	Gfx_SetAlphaTest(false);
 }
@@ -586,6 +692,7 @@ static void Particles_Tick(struct ScheduledTask* task) {
 	Terrain_Tick(delta);
 	Rain_Tick(delta);
 	Custom_Tick(delta);
+	Smoke_Tick(delta);
 }
 
 
@@ -620,7 +727,7 @@ static void OnInit(void) {
 
 static void OnFree(void) { OnContextLost(NULL); }
 
-static void OnReset(void) { rain_count = 0; terrain_count = 0; custom_count = 0; }
+static void OnReset(void) { rain_count = 0; terrain_count = 0; custom_count = 0; smoke_count = 0; }
 
 struct IGameComponent Particles_Component = {
 	OnInit,  /* Init  */
