@@ -557,6 +557,63 @@ cc_result Window_ExitFullscreen(void) {
 	return 0;
 }
 
+static cc_bool win_resChanged;
+static int win_origDisplayW, win_origDisplayH;
+
+cc_result Window_SetDisplayResolution(int width, int height) {
+	HWND hwnd = Window_Main.Handle.ptr;
+	DEVMODEA mode;
+	LONG res;
+	Mem_Set(&mode, 0, sizeof(DEVMODEA));
+	mode.dmSize       = sizeof(DEVMODEA);
+	mode.dmPelsWidth  = width;
+	mode.dmPelsHeight = height;
+	mode.dmBitsPerPel = 32;
+	mode.dmFields     = DM_PELSWIDTH | DM_PELSHEIGHT | DM_BITSPERPEL;
+
+	res = ChangeDisplaySettingsA(&mode, CDS_FULLSCREEN);
+	if (res != DISP_CHANGE_SUCCESSFUL) return ERR_NOT_SUPPORTED;
+
+	if (!win_resChanged) {
+		win_origDisplayW = DisplayInfo.Width;
+		win_origDisplayH = DisplayInfo.Height;
+	}
+	win_resChanged = true;
+
+	/* Update display info and resize the fullscreen window to match */
+	DisplayInfo.Width  = width;
+	DisplayInfo.Height = height;
+
+	suppress_resize = true;
+	SetWindowPos(hwnd, HWND_TOP, 0, 0, width, height, SWP_FRAMECHANGED);
+	suppress_resize = false;
+
+	RefreshWindowDimensions();
+	Event_RaiseVoid(&WindowEvents.Resized);
+	return 0;
+}
+
+cc_result Window_RestoreDisplayResolution(void) {
+	HWND hwnd;
+	if (!win_resChanged) return 0;
+	ChangeDisplaySettingsA(NULL, 0);
+	win_resChanged = false;
+
+	/* Restore original display dimensions */
+	DisplayInfo.Width  = win_origDisplayW;
+	DisplayInfo.Height = win_origDisplayH;
+
+	/* Re-maximize window at original resolution */
+	hwnd = Window_Main.Handle.ptr;
+	suppress_resize = true;
+	ShowWindow(hwnd, SW_MAXIMIZE);
+	suppress_resize = false;
+
+	RefreshWindowDimensions();
+	Event_RaiseVoid(&WindowEvents.Resized);
+	return 0;
+}
+
 int Window_IsObscured(void) { return 0; }
 
 void Window_Show(void) {

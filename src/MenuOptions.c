@@ -34,6 +34,7 @@
 #include "Utils.h"
 #include "Errors.h"
 #include "SystemFonts.h"
+#include "EnvRenderer.h"
 
 typedef void (*Button_GetText)(struct ButtonWidget* btn, cc_string* raw);
 typedef void (*Button_SetText)(struct ButtonWidget* btn, const cc_string* raw);
@@ -101,7 +102,6 @@ static void Menu_Remove(void* screen, int i) {
 static float Menu_Float(const cc_string* str) { float v; Convert_ParseFloat(str, &v); return v; }
 
 static void Menu_SwitchBindsClassic(void* a, void* b) { ClassicBindingsScreen_Show(); }
-static void Menu_SwitchNostalgia(void* a, void* b)    { NostalgiaMenuScreen_Show(); }
 static void Menu_SwitchFont(void* a, void* b)         { FontListScreen_Show(); }
 
 static void Menu_SwitchOptions(void* a, void* b)   { OptionsGroupScreen_Show(); }
@@ -715,8 +715,50 @@ void EnvSettingsScreen_Show(void) {
 /*########################################################################################################################*
 *--------------------------------------------------GraphicsOptionsScreen--------------------------------------------------*
 *#########################################################################################################################*/
-static void GrO_CheckLightingModeAllowed(struct MenuOptionsScreen* s) {
-	Widget_SetDisabled(s->widgets[3], Lighting_ModeLockedByServer);
+
+/* Fullscreen resolution options */
+static const char* const GrO_ResNames[] = {
+	"Desktop", "320x240", "400x300", "480x360", "512x384", "640x480",
+	"800x600", "1024x768", "1280x720", "1366x768",
+	"1600x900", "1920x1080", "2560x1080", "2560x1440",
+	"3440x1440", "3840x2160", "5120x1440"
+};
+static const int GrO_ResWidths[]  = { 0, 320, 400, 480, 512, 640, 800, 1024, 1280, 1366, 1600, 1920, 2560, 2560, 3440, 3840, 5120 };
+static const int GrO_ResHeights[] = { 0, 240, 300, 360, 384, 480, 600,  768,  720,  768,  900, 1080, 1080, 1440, 1440, 2160, 1440 };
+#define GRO_RES_COUNT Array_Elems(GrO_ResNames)
+
+static int GrO_GetRes(void) {
+	cc_string str; char strBuf[STRING_SIZE];
+	int i;
+	String_InitArray(str, strBuf);
+	Options_UNSAFE_Get(OPT_FULLSCREEN_RES, &str);
+	for (i = 1; i < (int)GRO_RES_COUNT; i++) {
+		if (String_CaselessEqualsConst(&str, GrO_ResNames[i])) return i;
+	}
+	return 0;
+}
+
+static int GrO_InitialResIdx; /* resolution index when screen was opened */
+
+static void GrO_SetRes(int v) {
+	cc_string str = String_FromReadonly(GrO_ResNames[v]);
+	Options_Set(OPT_FULLSCREEN_RES, &str);
+}
+
+static void GrO_SwitchBack(void* a, void* b) {
+	int curRes = GrO_GetRes();
+	/* Apply resolution change on Done if in fullscreen and setting changed */
+	if (Window_GetWindowState() == WINDOW_STATE_FULLSCREEN && curRes != GrO_InitialResIdx) {
+		if (curRes > 0) {
+			Window_SetDisplayResolution(GrO_ResWidths[curRes], GrO_ResHeights[curRes]);
+			OptionsGroupScreen_Show();
+			ResolutionConfirmOverlay_Show(GrO_ResWidths[curRes], GrO_ResHeights[curRes]);
+			return;
+		} else {
+			Window_RestoreDisplayResolution();
+		}
+	}
+	OptionsGroupScreen_Show();
 }
 
 static int  GrO_GetFPS(void) { return Game_FpsLimit; }
@@ -737,13 +779,17 @@ static void    GrO_SetSmooth(cc_bool v) {
 	MapRenderer_Refresh();
 }
 
-static int  GrO_GetLighting(void) { return Lighting_Mode; }
-static void GrO_SetLighting(int v) {
-	cc_string str = String_FromReadonly(LightingMode_Names[v]);
-	Options_Set(OPT_LIGHTING_MODE, &str);
+static cc_bool GrO_GetSimpleFog(void) { return EnvRenderer_SimpleFog; }
+static void    GrO_SetSimpleFog(cc_bool v) {
+	EnvRenderer_SimpleFog = v;
+	Options_SetBool(OPT_SIMPLE_FOG, v);
+	EnvRenderer_UpdateFog();
+}
 
-	Lighting_ModeSetByServer = false;
-	Lighting_SetMode(v, false);
+static cc_bool GrO_GetClouds(void) { return EnvRenderer_CloudsEnabled; }
+static void    GrO_SetClouds(cc_bool v) {
+	EnvRenderer_CloudsEnabled = v;
+	Options_SetBool(OPT_CLOUDS_ENABLED, v);
 }
 
 static int  GrO_GetNames(void) { return Entities.NamesMode; }
@@ -783,14 +829,6 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			GrO_GetSmooth,     GrO_SetSmooth,
 			"&eSmooth lighting smooths lighting and adds a minor glow to bright blocks.\n" \
 			"&cNote: &eThis setting may reduce performance.");
-		MenuOptionsScreen_AddEnum(s, "Lighting mode", LightingMode_Names, LIGHTING_MODE_COUNT,
-			GrO_GetLighting,   GrO_SetLighting,
-			"&eClassic: &fTwo levels of light, sun and shadow.\n" \
-			"    Good for performance.\n" \
-			"&eFancy: &fBright blocks cast a much wider range of light\n" \
-			"    May heavily reduce performance.\n" \
-			"&cNote: &eIn multiplayer, this option may be changed or locked by the server.");
-			
 		MenuOptionsScreen_AddEnum(s, "Names",   NameMode_Names,   NAME_MODE_COUNT,
 			GrO_GetNames,      GrO_SetNames,
 			"&eNone: &fNo names of players are drawn.\n" \
@@ -804,6 +842,15 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eSnapToBlock: &fA square shadow is shown on block you are directly above.\n" \
 			"&eCircle: &fA circular shadow is shown across the blocks you are above.\n" \
 			"&eCircleAll: &fA circular shadow is shown underneath all entities.");
+		MenuOptionsScreen_AddBool(s, "Simple fog",
+			GrO_GetSimpleFog,  GrO_SetSimpleFog,
+			"&eDisables GPU fog and uses the sky colour as the background.\n" \
+			"&fEnable this if fog renders as a white wall on your machine.\n" \
+			"&fThe view distance edge will blend into the sky instead.");
+		MenuOptionsScreen_AddBool(s, "Clouds",
+			GrO_GetClouds,     GrO_SetClouds,
+			"&eWhether clouds are rendered.\n" \
+			"&fDisabling may improve performance on very limited machines.");
 
 		if (!Gfx_GetUIOptions(s)) {
 		MenuOptionsScreen_AddBool(s, "Mipmaps",
@@ -812,10 +859,15 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 
 		MenuOptionsScreen_AddBool(s, "3D anaglyph",
 			ClO_GetAnaglyph,   ClO_SetAnaglyph, NULL);
+
+		MenuOptionsScreen_AddEnum(s, "Fullscreen res", GrO_ResNames, GRO_RES_COUNT,
+			GrO_GetRes,        GrO_SetRes,
+			"&eDesktop: &fUses your desktop resolution when fullscreen.\n" \
+			"&eOther: &fChanges display resolution when entering fullscreen.\n" \
+			"&cLow resolutions may not display the GUI correctly.");
 	};
-	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchOptions);
-	s->OnLightingModeServerChanged = GrO_CheckLightingModeAllowed;
-	GrO_CheckLightingModeAllowed(s);
+	MenuOptionsScreen_EndButtons(s, -1, GrO_SwitchBack);
+	GrO_InitialResIdx = GrO_GetRes();
 }
 
 void GraphicsOptionsScreen_Show(void) {
@@ -1206,152 +1258,189 @@ void MiscOptionsScreen_Show(void) {
 
 
 /*########################################################################################################################*
-*------------------------------------------------NostalgiaAppearanceScreen------------------------------------------------*
+*-------------------------------------------------GameplayOptionsScreen---------------------------------------------------*
 *#########################################################################################################################*/
-static cc_bool NA_GetHand(void) { return Models.ClassicArms; }
-static void    NA_SetHand(cc_bool v) { 
-	Models.ClassicArms = v;
-	Options_SetBool(OPT_CLASSIC_ARM_MODEL, v); 
+static cc_bool GP_GetEnemySpawning(void) { return Game_EnemySpawning; }
+static void    GP_SetEnemySpawning(cc_bool v) {
+	Game_EnemySpawning = v;
+	Options_SetBool(OPT_ENEMY_SPAWNING, v);
 }
 
-static cc_bool NA_GetAnim(void) { return !Game_SimpleArmsAnim; }
-static void    NA_SetAnim(cc_bool v) {
-	Game_SimpleArmsAnim = !v;
-	Options_SetBool(OPT_SIMPLE_ARMS_ANIM, !v);
+static cc_bool GP_GetPassiveSpawning(void) { return Game_PassiveSpawning; }
+static void    GP_SetPassiveSpawning(cc_bool v) {
+	Game_PassiveSpawning = v;
+	Options_SetBool(OPT_PASSIVE_SPAWNING, v);
 }
 
-static cc_bool NA_GetClassicChat(void) { return Gui.ClassicChat; }
-static void    NA_SetClassicChat(cc_bool v) { 
-	Gui.ClassicChat = v;
-	Options_SetBool(OPT_CLASSIC_CHAT, v); 
+static cc_bool GP_GetSurvivalMode(void) { return Game_SurvivalMode; }
+static void    GP_SetSurvivalMode(cc_bool v) {
+	Game_SurvivalMode = v;
+	Options_SetBool(OPT_SURVIVAL_MODE, v);
 }
 
-static cc_bool NA_GetClassicInv(void) { return Gui.ClassicInventory; }
-static void    NA_SetClassicInv(cc_bool v) { 
-	Gui.ClassicInventory = v;
-	Options_SetBool(OPT_CLASSIC_INVENTORY, v); 
+static const char* const CreeperBehavior_Names[CREEPER_BEHAVIOR_COUNT] = {
+	"Don't explode", "Explosion attack", "Explode on death"
+};
+static int  GP_GetCreeperBehavior(void) { return Game_CreeperBehavior; }
+static void GP_SetCreeperBehavior(int v) {
+	Game_CreeperBehavior = v;
+	Options_SetInt(OPT_CREEPER_BEHAVIOR, v);
 }
 
-static cc_bool NA_GetGui(void) { return Gui.ClassicTexture; }
-static void    NA_SetGui(cc_bool v) { 
-	Gui.ClassicTexture = v;
-	Options_SetBool(OPT_CLASSIC_GUI, v); 
+static cc_bool GP_GetSpiderWallclimb(void) { return Game_SpiderWallclimb; }
+static void    GP_SetSpiderWallclimb(cc_bool v) {
+	Game_SpiderWallclimb = v;
+	Options_SetBool(OPT_SPIDER_WALLCLIMB, v);
 }
 
-static cc_bool NA_GetList(void) { return Gui.ClassicTabList; }
-static void    NA_SetList(cc_bool v) { 
-	Gui.ClassicTabList = v;
-	Options_SetBool(OPT_CLASSIC_TABLIST, v); 
+static cc_bool GP_GetSkeletonShoot(void) { return Game_SkeletonShoot; }
+static void    GP_SetSkeletonShoot(cc_bool v) {
+	Game_SkeletonShoot = v;
+	Options_SetBool(OPT_SKELETON_SHOOT, v);
 }
 
-static cc_bool NA_GetOpts(void) { return Gui.ClassicMenu; }
-static void    NA_SetOpts(cc_bool v) { 
-	Gui.ClassicMenu = v;
-	Options_SetBool(OPT_CLASSIC_OPTIONS, v); 
+static const char* const SpiderLeapDist_Names[SPIDER_LEAP_DIST_COUNT] = {
+	"Don't leap", "3", "4", "5", "6", "7", "8"
+};
+static int  GP_GetSpiderLeapDist(void) { return Game_SpiderLeapDist; }
+static void GP_SetSpiderLeapDist(int v) {
+	Game_SpiderLeapDist = v;
+	Options_SetInt(OPT_SPIDER_LEAP_DIST, v);
 }
 
-static void NostalgiaAppearanceScreen_InitWidgets(struct MenuOptionsScreen* s) {
+static cc_bool GP_GetSpiderVariants(void) { return Game_SpiderVariants; }
+static void    GP_SetSpiderVariants(cc_bool v) {
+	Game_SpiderVariants = v;
+	Options_SetBool(OPT_SPIDER_VARIANTS, v);
+}
+
+static cc_bool GP_GetCreeperVariants(void) { return Game_CreeperVariants; }
+static void    GP_SetCreeperVariants(cc_bool v) {
+	struct MenuOptionsScreen* s = &MenuOptionsScreen_Instance;
+	Game_CreeperVariants = v;
+	Options_SetBool(OPT_CREEPER_VARIANTS, v);
+
+	if (v) {
+		/* Force behavior to "Explosion attack" when variants are enabled */
+		Game_CreeperBehavior = CREEPER_EXPLOSION_ATK;
+		Options_SetInt(OPT_CREEPER_BEHAVIOR, CREEPER_EXPLOSION_ATK);
+		MenuOptionsScreen_Update(s, &s->buttons[4]);
+	}
+	Widget_SetDisabled(&s->buttons[4], v);
+}
+
+static const char* const ZombieSpeed_Names[ZOMBIE_SPEED_COUNT] = {
+	"25%", "50%", "75%", "100%"
+};
+static int  GP_GetZombieSpeed(void) { return Game_ZombieSpeed; }
+static void GP_SetZombieSpeed(int v) {
+	Game_ZombieSpeed = v;
+	Options_SetInt(OPT_ZOMBIE_SPEED, v);
+}
+
+static const char* const MobSpawnRate_Names[MOB_SPAWN_RATE_COUNT] = {
+	"Off", "Slow (60s)", "Normal (30s)", "Fast (15s)", "Very fast (5s)"
+};
+static int  GP_GetMobSpawnRate(void) { return Game_MobSpawnRate; }
+static void GP_SetMobSpawnRate(int v) {
+	Game_MobSpawnRate = v;
+	Options_SetInt(OPT_MOB_SPAWN_RATE, v);
+}
+
+static cc_bool GP_GetLightRestrictSpawning(void) { return Game_LightRestrictSpawning; }
+static void    GP_SetLightRestrictSpawning(cc_bool v) {
+	Game_LightRestrictSpawning = v;
+	Options_SetBool(OPT_LIGHT_RESTRICT_SPAWN, v);
+}
+
+static void Menu_SwitchMobBehaviors(void* a, void* b) { MobBehaviorsScreen_Show(); }
+
+static const char* const MobLightSensitivity_Names[MOB_LIGHT_SENSITIVITY_COUNT] = {
+	"None", "Undead", "All"
+};
+static int  GP_GetMobLightSensitivity(void) { return Game_MobLightSensitivity; }
+static void GP_SetMobLightSensitivity(int v) {
+	Game_MobLightSensitivity = v;
+	Options_SetInt(OPT_MOB_LIGHT_SENSITIVITY, v);
+}
+
+static void GameplayScreen_SwitchBack(void* a, void* b) {
+	if (Gui.ClassicMenu) { Menu_SwitchPause(a, b); } else { Menu_SwitchOptions(a, b); }
+}
+
+static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
-		MenuOptionsScreen_AddBool(s, "Classic hand model",
-			NA_GetHand,        NA_SetHand, NULL);
-		MenuOptionsScreen_AddBool(s, "Classic walk anim",
-			NA_GetAnim,        NA_SetAnim, NULL);
-		MenuOptionsScreen_AddBool(s, "Classic chat",
-			NA_GetClassicChat, NA_SetClassicChat, NULL);
-		MenuOptionsScreen_AddBool(s, "Classic inventory",
-			NA_GetClassicInv,  NA_SetClassicInv, NULL);
-			
-		MenuOptionsScreen_AddBool(s, "Classic GUI textures",
-			NA_GetGui,   NA_SetGui, NULL);
-		MenuOptionsScreen_AddBool(s, "Classic player list",
-			NA_GetList,  NA_SetList, NULL);
-		MenuOptionsScreen_AddBool(s, "Classic options",
-			NA_GetOpts,  NA_SetOpts, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable enemy spawning",
+			GP_GetEnemySpawning,   GP_SetEnemySpawning, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable passive spawning",
+			GP_GetPassiveSpawning, GP_SetPassiveSpawning, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable survival mode",
+			GP_GetSurvivalMode,    GP_SetSurvivalMode, NULL);
+		MenuOptionsScreen_AddEnum(s, "Spawn rate",
+			MobSpawnRate_Names, MOB_SPAWN_RATE_COUNT,
+			GP_GetMobSpawnRate, GP_SetMobSpawnRate, NULL);
+		MenuOptionsScreen_AddBool(s, "Light restrictive spawning",
+			GP_GetLightRestrictSpawning, GP_SetLightRestrictSpawning, NULL);
+		MenuOptionsScreen_AddEnum(s, "Mob light sensitivity",
+			MobLightSensitivity_Names, MOB_LIGHT_SENSITIVITY_COUNT,
+			GP_GetMobLightSensitivity, GP_SetMobLightSensitivity, NULL);
+		MenuOptionsScreen_AddButton(s, "Mob behaviors...",
+			Menu_SwitchMobBehaviors, NULL, NULL, NULL);
 	}
-	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchNostalgia);
+	MenuOptionsScreen_EndButtons(s, -1, GameplayScreen_SwitchBack);
 }
 
-void NostalgiaAppearanceScreen_Show(void) {
-	MenuOptionsScreen_Show(NostalgiaAppearanceScreen_InitWidgets);
+void GameplayOptionsScreen_Show(void) {
+	MenuOptionsScreen_Show(GameplayOptionsScreen_InitWidgets);
 }
 
+static void MobBehaviorsScreen_SwitchBack(void* a, void* b) { GameplayOptionsScreen_Show(); }
 
-/*########################################################################################################################*
-*----------------------------------------------NostalgiaFunctionalityScreen-----------------------------------------------*
-*#########################################################################################################################*/
-static void NostalgiaScreen_UpdateVersionDisabled(void) {
-	struct ButtonWidget* gameVerBtn = &MenuOptionsScreen_Instance.buttons[3];
-	Widget_SetDisabled(gameVerBtn, Game_Version.HasCPE);
-}
-
-static cc_bool NF_GetTexs(void) { return Game_AllowServerTextures; }
-static void    NF_SetTexs(cc_bool v) { 
-	Game_AllowServerTextures = v;
-	Options_SetBool(OPT_SERVER_TEXTURES, v);
-}
-
-static cc_bool NF_GetCustom(void) { return Game_AllowCustomBlocks; }
-static void    NF_SetCustom(cc_bool v) { 
-	Game_AllowCustomBlocks = v;
-	Options_SetBool(OPT_CUSTOM_BLOCKS, v); 
-}
-
-static cc_bool NF_GetCPE(void) { return Game_Version.HasCPE; }
-static void    NF_SetCPE(cc_bool v) {
-	Options_SetBool(OPT_CPE, v); 
-	GameVersion_Load();
-	NostalgiaScreen_UpdateVersionDisabled();
-}
-
-static void NostalgiaScreen_Version(void* screen, void* widget) {
-	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
-	struct ButtonWidget* btn    = (struct ButtonWidget*)widget;
-
-	int ver = Game_Version.Version - 1;
-	if (ver < VERSION_0017) ver = VERSION_0030;
-
-	Options_SetInt(OPT_GAME_VERSION, ver);
-	GameVersion_Load();
-	MenuOptionsScreen_Update(s, btn);
-}
-
-static void NF_GetVersion(struct ButtonWidget* btn, cc_string* v) { 
-	String_AppendConst(v, Game_Version.Name); 
-}
-static void NF_SetVersion(struct ButtonWidget* btn, const cc_string* v) { }
-
-static struct TextWidget nostalgia_desc;
-static void NostalgiaScreen_RecreateExtra(struct MenuOptionsScreen* s) {
-	TextWidget_SetConst(&nostalgia_desc, "&eRequires restarting game to take full effect", &s->textFont);
-}
-
-static void NostalgiaFunctionalityScreen_InitWidgets(struct MenuOptionsScreen* s) {
+static void MobBehaviorsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
-		MenuOptionsScreen_AddBool(s, "Use server textures",
-			NF_GetTexs,    NF_SetTexs, NULL);
-		MenuOptionsScreen_AddBool(s, "Allow custom blocks",
-			NF_GetCustom,  NF_SetCustom, NULL);
-			
-		MenuOptionsScreen_AddBool(s, "Non-classic features",
-			NF_GetCPE,     NF_SetCPE, NULL);
-		MenuOptionsScreen_AddButton(s, "Game version", NostalgiaScreen_Version,
-			NF_GetVersion, NF_SetVersion,
-			"&eNote that support for versions earlier than 0.30 is incomplete.\n" \
-			"\n" \
-			"&cNote that some servers only support 0.30 game version");
+		MenuOptionsScreen_AddBool(s, "Enable spider wallclimb",
+			GP_GetSpiderWallclimb, GP_SetSpiderWallclimb, NULL);
+		MenuOptionsScreen_AddBool(s, "Skeletons shoot",
+			GP_GetSkeletonShoot,   GP_SetSkeletonShoot, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable creeper variants",
+			GP_GetCreeperVariants, GP_SetCreeperVariants, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable spider variants",
+			GP_GetSpiderVariants,  GP_SetSpiderVariants, NULL);
+		MenuOptionsScreen_AddEnum(s, "Creeper behavior",
+			CreeperBehavior_Names, CREEPER_BEHAVIOR_COUNT,
+			GP_GetCreeperBehavior, GP_SetCreeperBehavior, NULL);
+		MenuOptionsScreen_AddEnum(s, "Spider leap distance",
+			SpiderLeapDist_Names, SPIDER_LEAP_DIST_COUNT,
+			GP_GetSpiderLeapDist, GP_SetSpiderLeapDist, NULL);
+		MenuOptionsScreen_AddEnum(s, "Zombie speed",
+			ZombieSpeed_Names, ZOMBIE_SPEED_COUNT,
+			GP_GetZombieSpeed, GP_SetZombieSpeed, NULL);
 	}
-	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchNostalgia);
-	s->DoRecreateExtra = NostalgiaScreen_RecreateExtra;
+	MenuOptionsScreen_EndButtons(s, -1, MobBehaviorsScreen_SwitchBack);
 
-	TextWidget_Add(s, &nostalgia_desc);
-	Widget_SetLocation(&nostalgia_desc, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 100);
+	/* Row 1: wallclimb (0) and shoot (1) side by side */
+	Widget_SetLocation(&s->buttons[0], ANCHOR_CENTRE, ANCHOR_CENTRE, -160, -100);
+	Widget_SetLocation(&s->buttons[1], ANCHOR_CENTRE, ANCHOR_CENTRE,  160, -100);
+	/* Row 2: creeper variants (2) and spider variants (3) side by side */
+	Widget_SetLocation(&s->buttons[2], ANCHOR_CENTRE, ANCHOR_CENTRE, -160, -50);
+	Widget_SetLocation(&s->buttons[3], ANCHOR_CENTRE, ANCHOR_CENTRE,  160, -50);
+	/* Row 3: creeper behavior (4) centered and wider */
+	s->buttons[4].minWidth = (Window_Main.Width <= 320) ? 300 : 400;
+	Widget_SetLocation(&s->buttons[4], ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 0);
+	/* Row 4: spider leap distance (5) centered and wider */
+	s->buttons[5].minWidth = (Window_Main.Width <= 320) ? 300 : 400;
+	Widget_SetLocation(&s->buttons[5], ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 50);
+	/* Row 5: zombie speed (6) centered and wider */
+	s->buttons[6].minWidth = (Window_Main.Width <= 320) ? 300 : 400;
+	Widget_SetLocation(&s->buttons[6], ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 100);
 
-	NostalgiaScreen_UpdateVersionDisabled();
+	/* Disable creeper behavior when variants are enabled */
+	Widget_SetDisabled(&s->buttons[4], Game_CreeperVariants);
 }
 
-void NostalgiaFunctionalityScreen_Show(void) {
-	MenuOptionsScreen_Show(NostalgiaFunctionalityScreen_InitWidgets);
+void MobBehaviorsScreen_Show(void) {
+	MenuOptionsScreen_Show(MobBehaviorsScreen_InitWidgets);
 }
 

@@ -179,8 +179,26 @@ static cc_bool RayTrace(struct RayTracer* t, const Vec3* origin, const Vec3* dir
 		v.x = (float)x; v.y = (float)y; v.z = (float)z;
 
 		t->block = insideMap ? Picking_GetInside(x, y, z) : Picking_GetOutside(x, y, z, pOrigin);
-		Vec3_Add(&t->Min, &v, &Blocks.RenderMinBB[t->block]);
-		Vec3_Add(&t->Max, &v, &Blocks.RenderMaxBB[t->block]);
+		
+		/* Use dynamic render bounds for directional blocks like ladders, doors, and torches */
+		if (t->block == BLOCK_LADDER || t->block == BLOCK_DOOR_NS_BOTTOM || t->block == BLOCK_DOOR_NS_TOP ||
+		    t->block == BLOCK_DOOR_EW_BOTTOM || t->block == BLOCK_DOOR_EW_TOP || t->block == BLOCK_TORCH
+		    || t->block == BLOCK_RED_ORE_TORCH || t->block == BLOCK_RED_ORE_TORCH_OFF
+		    || t->block == BLOCK_RED_TORCH_ON_S || t->block == BLOCK_RED_TORCH_ON_N
+		    || t->block == BLOCK_RED_TORCH_ON_E || t->block == BLOCK_RED_TORCH_ON_W
+		    || t->block == BLOCK_RED_TORCH_OFF_S || t->block == BLOCK_RED_TORCH_OFF_N
+		    || t->block == BLOCK_RED_TORCH_OFF_E || t->block == BLOCK_RED_TORCH_OFF_W
+		    || t->block == BLOCK_RED_TORCH_UNMOUNTED || t->block == BLOCK_RED_TORCH_UNMOUNTED_OFF
+		    || t->block == BLOCK_BUTTON || t->block == BLOCK_BUTTON_PRESSED
+		    || t->block == BLOCK_LEVER || t->block == BLOCK_LEVER_ON) {
+			Vec3 min, max;
+			DirectionalBlock_GetRenderBounds(t->block, x, y, z, &min, &max);
+			Vec3_Add(&t->Min, &v, &min);
+			Vec3_Add(&t->Max, &v, &max);
+		} else {
+			Vec3_Add(&t->Min, &v, &Blocks.RenderMinBB[t->block]);
+			Vec3_Add(&t->Max, &v, &Blocks.RenderMaxBB[t->block]);
+		}
 
 		dxMin = Math_AbsF(origin->x - t->Min.x); dxMax = Math_AbsF(origin->x - t->Max.x);
 		dyMin = Math_AbsF(origin->y - t->Min.y); dyMax = Math_AbsF(origin->y - t->Max.y);

@@ -154,7 +154,7 @@ extern const char* const Weather_Names[3];
 #define ENV_DEFAULT_CLOUDS_COLOR    PackedCol_Make(0xFF, 0xFF, 0xFF, 0xFF)
 #define ENV_DEFAULT_SKYBOX_COLOR    PackedCol_Make(0xFF, 0xFF, 0xFF, 0xFF)
 #define ENV_DEFAULT_SUN_COLOR       PackedCol_Make(0xFF, 0xFF, 0xFF, 0xFF)
-#define ENV_DEFAULT_SHADOW_COLOR    PackedCol_Make(0x9B, 0x9B, 0x9B, 0xFF)
+#define ENV_DEFAULT_SHADOW_COLOR    PackedCol_Make(0x6B, 0x6B, 0x6B, 0xFF)
 #define ENV_DEFAULT_LAVALIGHT_COLOR PackedCol_Make(0xFF, 0xEB, 0xC6, 0xFF)
 #define ENV_DEFAULT_LAMPLIGHT_COLOR PackedCol_Make(0xFF, 0xFF, 0xFF, 0xFF)
 

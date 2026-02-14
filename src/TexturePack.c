@@ -615,11 +615,16 @@ static cc_result ExtractFromFile(const cc_string* path) {
 #endif
 
 static cc_result ExtractUserTextures(void) {
+	static const cc_string customTexPack = String_FromConst("texpacks/Minecraft.zip");
 	const char* default_path;
 	cc_string path;
 	cc_result res;
 
-	/* TODO: Log error for multiple default texture pack extract failure */
+	/* Force load custom Minecraft.zip texture pack */
+	res = ExtractFromFile(&customTexPack);
+	if (!res) return res; /* Successfully loaded custom texture pack */
+
+	/* Fallback to default if custom not found */
 	res = TexturePack_ExtractDefault(ExtractFromFile, &default_path);
 	/* Game shows a warning dialog if default textures are missing */
 	TexturePack_DefaultMissing = res == ReturnCode_FileNotFound;

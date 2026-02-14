@@ -117,7 +117,7 @@ cc_bool Launcher_StartGame(const cc_string* user, const cc_string* mppass, const
 	res = Process_StartGame2(args, numArgs);
 	if (res) { Logger_SysWarn(res, "starting game"); return false; }
 
-	Launcher_ShouldStop = Platform_IsSingleProcess() || Options_GetBool(LOPT_AUTO_CLOSE, false);
+	Launcher_ShouldStop = Platform_IsSingleProcess() || Options_GetBool(LOPT_AUTO_CLOSE, true);
 
 	return true;
 }
@@ -247,28 +247,12 @@ void Launcher_Setup(void) {
 
 	LWebTasks_Init();
 	Session_Load();
-	Launcher_LoadTheme();
-	Launcher_Init();
-
 	GameVersion_Load();
-	Launcher_TryLoadTexturePack();
-
 	Http_Component.Init();
-#ifdef CC_BUILD_NETWORKING
-	CheckUpdateTask_Run();
-#endif
 
-#ifdef CC_BUILD_RESOURCES
-	Resources_CheckExistence();
-
-	if (Resources_MissingCount) {
-		CheckResourcesScreen_SetActive();
-	} else {
-		MainScreen_SetActive();
-	}
-#else
-	MainScreen_SetActive();
-#endif
+	/* Skip launcher completely - auto-start singleplayer directly */
+	static const cc_string defUser = String_FromConst(DEFAULT_USERNAME);
+	Launcher_StartGame(&defUser, &String_Empty, &String_Empty, &String_Empty, &String_Empty, 1);
 }
 
 cc_bool Launcher_Tick(void) {

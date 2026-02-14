@@ -527,6 +527,7 @@ static cc_bool Collisions_CanSlideThrough(struct AABB* adjFinalBB) {
 			for (x = bbMin.x; x <= bbMax.x; x++) { v.x = (float)x;
 
 				block = World_GetPhysicsBlock(x, y, z);
+				
 				Vec3_Add(&blockBB.Min, &v, &Blocks.MinBB[block]);
 				Vec3_Add(&blockBB.Max, &v, &Blocks.MaxBB[block]);
 
@@ -962,7 +963,7 @@ void PhysicsComp_PhysicsTick(struct PhysicsComp* comp, Vec3 vel) {
 		PhysicsComp_MoveNormal(comp, vel, 0.02f * horSpeed, lavaDrag, LIQUID_GRAVITY, verSpeed);
 	} else if (Entity_TouchesAnyRope(entity) && !hacks->Floating) {
 		Vec3 ropeDrag = { 0.5f, 0.85f, 0.5f };
-		PhysicsComp_MoveNormal(comp, vel, 0.02f * 1.7f, ropeDrag, ROPE_GRAVITY, verSpeed);
+		PhysicsComp_MoveNormal(comp, vel, 0.1f, ropeDrag, ROPE_GRAVITY, verSpeed);
 	} else {
 		factor  = hacks->Floating || entity->OnGround ? 0.1f : 0.02f;
 		gravity = comp->UseLiquidGravity ? LIQUID_GRAVITY : comp->gravity;

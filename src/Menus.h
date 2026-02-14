@@ -56,13 +56,13 @@ void GuiOptionsScreen_Show(void);
 void GraphicsOptionsScreen_Show(void);
 void HacksSettingsScreen_Show(void);
 void EnvSettingsScreen_Show(void);
-void NostalgiaAppearanceScreen_Show(void);
-void NostalgiaFunctionalityScreen_Show(void);
-void NostalgiaMenuScreen_Show(void);
+void GameplayOptionsScreen_Show(void);
+void MobBehaviorsScreen_Show(void);
 
 void UrlWarningOverlay_Show(const cc_string* url);
 void TexIdsOverlay_Show(void);
 void TexPackOverlay_Show(const cc_string* url);
+void ResolutionConfirmOverlay_Show(int resWidth, int resHeight);
 #ifdef CC_BUILD_TOUCH
 void TouchCtrlsScreen_Show(void);
 void TouchMoreScreen_Show(void);

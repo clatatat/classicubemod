@@ -22,7 +22,15 @@ int Audio_SoundsVolume, Audio_MusicVolume;
 
 const char* const Sound_Names[SOUND_COUNT] = {
 	"none", "wood", "gravel", "grass", "stone",
-	"metal", "glass", "cloth", "sand", "snow",
+	"metal", "glass", "cloth", "sand", "snow", "door",
+	"on", "off", "fuse", "explode", "hurt", "shoot", "arrow",
+	"skeletonhurt", "skeletondeath",
+	"creeperhurt",  "creeperdeath",
+	"spiderhurt",   "spiderdeath",
+	"zombiehurt",   "zombiedeath",
+	"pighurt",      "pigdeath",
+	"sheep",
+	"explodebig",
 };
 
 #ifdef CC_BIG_ENDIAN
@@ -52,6 +60,7 @@ static void Sounds_Start(void) {
 
 void Audio_PlayDigSound(cc_uint8 type)  { }
 void Audio_PlayStepSound(cc_uint8 type) { }
+void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) { }
 
 void Sounds_LoadDefault(void) { }
 #else
@@ -183,6 +192,21 @@ static void Sounds_Play(cc_uint8 type, struct Soundboard* board) {
 
 	if (type == SOUND_NONE || !Audio_SoundsVolume) return;
 	snd = Soundboard_PickRandom(board, type);
+
+	/* Fallback: if no dedicated big explosion sound, use regular explosion at lower pitch */
+	if (!snd && type == SOUND_EXPLODE_BIG) {
+		snd = Soundboard_PickRandom(board, SOUND_EXPLODE);
+		if (!snd) return;
+		data.chunk      = snd->chunk;
+		data.channels   = snd->channels;
+		data.sampleRate = snd->sampleRate;
+		data.rate       = 60; /* lower pitch = deeper, bigger explosion */
+		data.volume     = min(Audio_SoundsVolume * 2, 100);
+		res = AudioPool_Play(&data);
+		if (res) Sounds_Fail(res);
+		return;
+	}
+
 	if (!snd) return;
 
 	data.chunk      = snd->chunk;
@@ -195,6 +219,13 @@ static void Sounds_Play(cc_uint8 type, struct Soundboard* board) {
 	/* https://minecraft.wiki/w/Grass#Sounds */
 	if (board == &digBoard) {
 		if (type == SOUND_METAL) data.rate = 120;
+		else if (type == SOUND_DOOR) data.rate = 100; /* Door sounds at normal speed */
+		else if (type == SOUND_BUTTON_ON || type == SOUND_BUTTON_OFF) data.rate = 100;
+		else if (type == SOUND_FUSE || type == SOUND_EXPLODE || type == SOUND_EXPLODE_BIG) data.rate = 100;
+		else if (type == SOUND_HURT) data.rate = 100;
+		else if (type == SOUND_SHOOT) data.rate = 100;
+		else if (type == SOUND_ARROW) data.rate = 100;
+		else if (type >= SOUND_SKELETON_HURT && type <= SOUND_SHEEP) data.rate = 100;
 		else data.rate = 80;
 	} else {
 		data.volume /= 2;
@@ -215,6 +246,232 @@ static void Audio_PlayBlockSound(void* obj, IVec3 coords, BlockID old, BlockID n
 	}
 }
 
+static void ProcessDoorSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string door_prefix = String_FromConst("door");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+	
+	/* door1.ogg -> door1 */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+	if (!String_CaselessStarts(&name, &door_prefix)) return;
+	
+	/* Get the "door" sound group */
+	group = Soundboard_FindGroup(&digBoard, &door_prefix);
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+	
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+	
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
+static void ProcessButtonSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string on_name  = String_FromConst("on");
+	static const cc_string off_name = String_FromConst("off");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+	
+	/* on.wav -> on, off.wav -> off */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+	
+	if (String_CaselessEquals(&name, &on_name)) {
+		group = Soundboard_FindGroup(&digBoard, &on_name);
+	} else if (String_CaselessEquals(&name, &off_name)) {
+		group = Soundboard_FindGroup(&digBoard, &off_name);
+	} else {
+		return;
+	}
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+	
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+	
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
+static void ProcessTNTSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string fuse_name    = String_FromConst("fuse");
+	static const cc_string explode_name = String_FromConst("explode");
+	static const cc_string explodebig_name    = String_FromConst("explodebig");
+	static const cc_string explosion_big_name = String_FromConst("explosion_big");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+	
+	/* fuse.wav -> fuse, explode.wav -> explode, explodebig.wav / explosion_big.wav */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+	
+	if (String_CaselessEquals(&name, &fuse_name)) {
+		group = Soundboard_FindGroup(&digBoard, &fuse_name);
+	} else if (String_CaselessEquals(&name, &explode_name)) {
+		group = Soundboard_FindGroup(&digBoard, &explode_name);
+	} else if (String_CaselessEquals(&name, &explodebig_name) || String_CaselessEquals(&name, &explosion_big_name)) {
+		group = &digBoard.groups[SOUND_EXPLODE_BIG];
+	} else {
+		return;
+	}
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+	
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+	
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
+static void ProcessHurtSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string hurt_name = String_FromConst("hurt");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+	
+	/* hurt.ogg -> hurt */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+	
+	if (!String_CaselessEquals(&name, &hurt_name)) return;
+	
+	group = Soundboard_FindGroup(&digBoard, &hurt_name);
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+	
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+	
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
+static void ProcessShootSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string shoot_name = String_FromConst("shoot");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+	
+	/* shoot.wav -> shoot */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+	
+	if (!String_CaselessEquals(&name, &shoot_name)) return;
+	
+	group = Soundboard_FindGroup(&digBoard, &shoot_name);
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+	
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+	
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
+static void ProcessMobSounds(const cc_string* file, struct Stream* stream) {
+	static const cc_string skeletonhurt_pfx  = String_FromConst("skeletonhurt");
+	static const cc_string skeletondeath_name = String_FromConst("skeletondeath");
+	static const cc_string creeperdeath_name  = String_FromConst("creeperdeath");
+	static const cc_string spiderdeath_name   = String_FromConst("spiderdeath");
+	static const cc_string zombiehurt_pfx     = String_FromConst("zombiehurt");
+	static const cc_string zombiedeath_name   = String_FromConst("zombiedeath");
+	static const cc_string pigdeath_name      = String_FromConst("pigdeath");
+	static const cc_string creeper_pfx        = String_FromConst("creeper");
+	static const cc_string spider_pfx         = String_FromConst("spider");
+	static const cc_string pig_pfx            = String_FromConst("pig");
+	static const cc_string sheep_pfx          = String_FromConst("sheep");
+
+	struct SoundGroup* group = NULL;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+
+	/* Check longer/more specific prefixes first to avoid false matches */
+	if (String_CaselessStarts(&name, &skeletonhurt_pfx)) {
+		group = &digBoard.groups[SOUND_SKELETON_HURT];
+	} else if (String_CaselessEquals(&name, &skeletondeath_name)) {
+		group = &digBoard.groups[SOUND_SKELETON_DEATH];
+	} else if (String_CaselessEquals(&name, &creeperdeath_name)) {
+		group = &digBoard.groups[SOUND_CREEPER_DEATH];
+	} else if (String_CaselessEquals(&name, &spiderdeath_name)) {
+		group = &digBoard.groups[SOUND_SPIDER_DEATH];
+	} else if (String_CaselessStarts(&name, &zombiehurt_pfx)) {
+		group = &digBoard.groups[SOUND_ZOMBIE_HURT];
+	} else if (String_CaselessEquals(&name, &zombiedeath_name)) {
+		group = &digBoard.groups[SOUND_ZOMBIE_DEATH];
+	} else if (String_CaselessEquals(&name, &pigdeath_name)) {
+		group = &digBoard.groups[SOUND_PIG_DEATH];
+	} else if (String_CaselessStarts(&name, &creeper_pfx)) {
+		group = &digBoard.groups[SOUND_CREEPER_HURT];
+	} else if (String_CaselessStarts(&name, &spider_pfx)) {
+		group = &digBoard.groups[SOUND_SPIDER_HURT];
+	} else if (String_CaselessStarts(&name, &pig_pfx)) {
+		group = &digBoard.groups[SOUND_PIG_HURT];
+	} else if (String_CaselessStarts(&name, &sheep_pfx)) {
+		group = &digBoard.groups[SOUND_SHEEP];
+	}
+
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
 static cc_bool SelectZipEntry(const cc_string* path) { return true; }
 static cc_result ProcessZipEntry(const cc_string* path, struct Stream* stream, struct ZipEntry* source) {
 	static const cc_string dig  = String_FromConst("dig_");
@@ -222,6 +479,18 @@ static cc_result ProcessZipEntry(const cc_string* path, struct Stream* stream, s
 	
 	Soundboard_Load(&digBoard,  &dig,  path, stream);
 	Soundboard_Load(&stepBoard, &step, path, stream);
+	/* Load door sounds (door1.ogg, door2.ogg) specially */
+	ProcessDoorSound(path, stream);
+	/* Load button sounds (on.wav, off.wav) */
+	ProcessButtonSound(path, stream);
+	/* Load TNT sounds (fuse.wav, explode.wav) */
+	ProcessTNTSound(path, stream);
+	/* Load hurt sound (hurt.ogg) */
+	ProcessHurtSound(path, stream);
+	/* Load shoot sound (shoot.wav) */
+	ProcessShootSound(path, stream);
+	/* Load mob sounds (skeletonhurt1-4, creeper1-4, etc.) */
+	ProcessMobSounds(path, stream);
 	return 0;
 }
 
@@ -274,6 +543,25 @@ static void Sounds_Free(void) { Sounds_Stop(); }
 
 void Audio_PlayDigSound(cc_uint8 type)  { Sounds_Play(type, &digBoard); }
 void Audio_PlayStepSound(cc_uint8 type) { Sounds_Play(type, &stepBoard); }
+
+void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) {
+	const struct Sound* snd;
+	struct AudioData data;
+	cc_result res;
+
+	if (type == SOUND_NONE || !Audio_SoundsVolume) return;
+	snd = Soundboard_PickRandom(&stepBoard, type);
+	if (!snd) return;
+
+	data.chunk      = snd->chunk;
+	data.channels   = snd->channels;
+	data.sampleRate = snd->sampleRate;
+	data.rate       = 100;
+	data.volume     = volume;
+
+	res = AudioPool_Play(&data);
+	if (res) Sounds_Fail(res);
+}
 #endif
 
 

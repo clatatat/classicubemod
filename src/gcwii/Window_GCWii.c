@@ -30,6 +30,11 @@ void* Window_XFB;
 struct _DisplayData DisplayInfo;
 struct cc_window WindowInfo;
 
+
+static void OnPowerOff(void) {
+	Window_Main.Exists = false;
+	Window_RequestClose();
+}
 static void InitVideo(void) {
 	VIDEO_Init();
 
@@ -53,6 +58,10 @@ static void InitVideo(void) {
 }
 
 void Window_PreInit(void) {
+	// TODO: SYS_SetResetCallback(reload); too? not sure how reset differs on GC/WII
+	#if defined HW_RVL
+	SYS_SetPowerCallback(OnPowerOff);
+	#endif
 	InitVideo();
 
 	DisplayInfo.Width  = cur_mode->fbWidth;
@@ -271,22 +280,15 @@ static void ProcessMouseInput(float delta) {
 /*########################################################################################################################*
 *----------------------------------------------------Input processing-----------------------------------------------------*
 *#########################################################################################################################*/
-void Window_ProcessEvents(float delta) {
-	if (!SYS_MainLoop()) {
-		Window_Main.Exists = false;
-		Window_RequestClose();
-		return;
-	}
-	#if defined HW_RVL
-	ProcessKeyboardInput();
-	ProcessMouseInput(delta);
-	#endif
-}
-
 #if defined HW_RVL
 static int dragCurX, dragCurY;
 static int dragStartX, dragStartY;
 static cc_bool dragActive;
+
+void Window_ProcessEvents(float delta) {
+	ProcessKeyboardInput();
+    ProcessMouseInput(delta);
+}
 
 static void GetIRPos(int res, int* x, int* y) {
 	if (res == WPAD_ERR_NONE) {
@@ -342,6 +344,9 @@ void Window_UpdateRawMouse(void)  {
 	dragCurX = x; dragCurY = y;
 }
 #else
+void Window_ProcessEvents(float delta) {
+}
+
 void Window_UpdateRawMouse(void) { }
 #endif
 

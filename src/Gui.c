@@ -26,6 +26,8 @@ static cc_uint8 priorities[GUI_MAX_SCREENS];
 static struct Texture touchBgTex;
 #endif
 static GfxResourceID bars_VB;
+static float gui_baseScaleX, gui_baseScaleY;
+static float gui_curScaleX,  gui_curScaleY;
 
 /*########################################################################################################################*
 *----------------------------------------------------------Gui------------------------------------------------------------*
@@ -118,11 +120,12 @@ static void LoadOptions(void) {
 	Gui.ClickableChat   = !Game_ClassicMode && Options_GetBool(OPT_CLICKABLE_CHAT,   !Input_TouchMode);
 	Gui.TabAutocomplete = !Game_ClassicMode && Options_GetBool(OPT_TAB_AUTOCOMPLETE, true);
 
-	Gui.ClassicTexture   = Options_GetBool(OPT_CLASSIC_GUI,        true) || Game_ClassicMode;
+	/* Force classic GUI */
+	Gui.ClassicTexture   = true;
 	Gui.ClassicTabList   = Options_GetBool(OPT_CLASSIC_TABLIST,   false) || Game_ClassicMode;
 	Gui.ClassicMenu      = Options_GetBool(OPT_CLASSIC_OPTIONS,   false) || Game_ClassicMode;
 	Gui.ClassicChat      = Options_GetBool(OPT_CLASSIC_CHAT,      false) || Game_PureClassic;
-	Gui.ClassicInventory = Options_GetBool(OPT_CLASSIC_INVENTORY, false) || Game_ClassicMode;
+	Gui.ClassicInventory = Options_GetBool(OPT_CLASSIC_INVENTORY, true) || Game_ClassicMode;
 	Gui.ShowFPS          = Options_GetBool(OPT_SHOW_FPS, true);
 	
 	Gui.RawInventoryScale = Options_GetFloat(OPT_INVENTORY_SCALE, 0.25f, 5.0f, 1.0f);
@@ -161,7 +164,29 @@ static void OnContextRecreated(void* obj) {
 	}
 }
 
-static void OnResize(void* obj) { Gui_LayoutAll(); }
+static void Gui_UpdateUIScale(void) {
+	float sx = (float)Window_Main.Width  / 640.0f;
+	float sy = (float)Window_Main.Height / 480.0f;
+	if (sx > 1.0f) sx = 1.0f;
+	if (sy > 1.0f) sy = 1.0f;
+	DisplayInfo.ScaleX = gui_baseScaleX * sx;
+	DisplayInfo.ScaleY = gui_baseScaleY * sy;
+}
+
+static void OnResize(void* obj) {
+	float oldSX = gui_curScaleX;
+	float oldSY = gui_curScaleY;
+	Gui_UpdateUIScale();
+	gui_curScaleX = DisplayInfo.ScaleX;
+	gui_curScaleY = DisplayInfo.ScaleY;
+
+	if (oldSX != gui_curScaleX || oldSY != gui_curScaleY) {
+		/* Scale changed - need full rebuild of fonts/buttons */
+		LoseAllScreens();
+		OnContextRecreated(NULL);
+	}
+	Gui_LayoutAll();
+}
 void Gui_LayoutAll(void) {
 	struct Screen* s;
 	int i;
@@ -750,6 +775,12 @@ static void OnInit(void) {
 	touchBgTex.width *= tilesX; touchBgTex.height *= tilesY;
 	touchBgTex.uv.u2 *= tilesX; touchBgTex.uv.v2  *= tilesY;
 #endif
+
+	gui_baseScaleX = DisplayInfo.ScaleX;
+	gui_baseScaleY = DisplayInfo.ScaleY;
+	Gui_UpdateUIScale();
+	gui_curScaleX = DisplayInfo.ScaleX;
+	gui_curScaleY = DisplayInfo.ScaleY;
 
 	Event_Register_(&ChatEvents.FontChanged,     NULL, OnFontChanged);
 	Event_Register_(&GfxEvents.ContextLost,      NULL, OnContextLost);

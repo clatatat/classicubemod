@@ -32,7 +32,6 @@
 #include <ogc/exi.h>
 #include <ogc/system.h>
 #include <ogc/wiilaunch.h>
-#include <tuxedo/sync.h>
 
 const cc_result ReturnCode_FileShareViolation = 1000000000; /* TODO: not used apparently */
 const cc_result ReturnCode_FileNotFound     = ENOENT;
@@ -219,54 +218,82 @@ void Thread_Join(void* handle) {
 *-----------------------------------------------------Synchronisation-----------------------------------------------------*
 *#########################################################################################################################*/
 void* Mutex_Create(const char* name) {
-	return (KMutex*)Mem_AllocCleared(1, sizeof(KMutex), "mutex");
+	mutex_t* ptr = (mutex_t*)Mem_Alloc(1, sizeof(mutex_t), "mutex");
+	int res = LWP_MutexInit(ptr, false);
+	if (res) Process_Abort2(res, "Creating mutex");
+	return ptr;
 }
 
 void Mutex_Free(void* handle) {
+	mutex_t* mutex = (mutex_t*)handle;
+	int res = LWP_MutexDestroy(*mutex);
+	if (res) Process_Abort2(res, "Destroying mutex");
 	Mem_Free(handle);
 }
 
 void Mutex_Lock(void* handle) {
-	KMutex* mutex = (KMutex*)handle;
-	KMutexLock(mutex);
+	mutex_t* mutex = (mutex_t*)handle;
+	int res = LWP_MutexLock(*mutex);
+	if (res) Process_Abort2(res, "Locking mutex");
 }
 
 void Mutex_Unlock(void* handle) {
-	KMutex* mutex = (KMutex*)handle;
-	KMutexUnlock(mutex);
+	mutex_t* mutex = (mutex_t*)handle;
+	int res = LWP_MutexUnlock(*mutex);
+	if (res) Process_Abort2(res, "Unlocking mutex");
 }
 
 // should really use a semaphore with max 1.. too bad no 'TimedWait' though
 struct WaitData {
-	KCondVar cond;
-	KMutex  mutex;
+	cond_t  cond;
+	mutex_t mutex;
 	int signalled; // For when Waitable_Signal is called before Waitable_Wait
 };
 
 void* Waitable_Create(const char* name) {
-	return (struct WaitData*)Mem_AllocCleared(1, sizeof(struct WaitData), "waitable");
+	struct WaitData* ptr = (struct WaitData*)Mem_Alloc(1, sizeof(struct WaitData), "waitable");
+	int res;
+	
+	res = LWP_CondInit(&ptr->cond);
+	if (res) Process_Abort2(res, "Creating waitable");
+	res = LWP_MutexInit(&ptr->mutex, false);
+	if (res) Process_Abort2(res, "Creating waitable mutex");
+
+	ptr->signalled = false;
+	return ptr;
 }
 
 void Waitable_Free(void* handle) {
+	struct WaitData* ptr = (struct WaitData*)handle;
+	int res;
+	
+	res = LWP_CondDestroy(ptr->cond);
+	if (res) Process_Abort2(res, "Destroying waitable");
+	res = LWP_MutexDestroy(ptr->mutex);
+	if (res) Process_Abort2(res, "Destroying waitable mutex");
 	Mem_Free(handle);
 }
 
 void Waitable_Signal(void* handle) {
 	struct WaitData* ptr = (struct WaitData*)handle;
+	int res;
 
 	Mutex_Lock(&ptr->mutex);
 	ptr->signalled = true;
 	Mutex_Unlock(&ptr->mutex);
 
-	KCondVarSignal(&ptr->cond);
+	res = LWP_CondSignal(ptr->cond);
+	if (res) Process_Abort2(res, "Signalling event");
 }
 
 void Waitable_Wait(void* handle) {
 	struct WaitData* ptr = (struct WaitData*)handle;
+	int res;
 
 	Mutex_Lock(&ptr->mutex);
 	if (!ptr->signalled) {
-		KCondVarWait(&ptr->cond, &ptr->mutex);
+		res = LWP_CondWait(ptr->cond, ptr->mutex);
+		if (res) Process_Abort2(res, "Waitable wait");
 	}
 	ptr->signalled = false;
 	Mutex_Unlock(&ptr->mutex);
@@ -274,25 +301,20 @@ void Waitable_Wait(void* handle) {
 
 void Waitable_WaitFor(void* handle, cc_uint32 milliseconds) {
 	struct WaitData* ptr = (struct WaitData*)handle;
-	u64 ticks = PPCMsToTicks(milliseconds);
+	struct timespec ts;
+	int res;
+
+	ts.tv_sec  = milliseconds  / TB_MSPERSEC;
+	ts.tv_nsec = (milliseconds % TB_MSPERSEC) * TB_NSPERMS;
 
 	Mutex_Lock(&ptr->mutex);
 	if (!ptr->signalled) {
-		KCondVarWaitTimeoutTicks(&ptr->cond, &ptr->mutex, ticks);
+		res = LWP_CondTimedWait(ptr->cond, ptr->mutex, &ts);
+		if (res && res != ETIMEDOUT) Process_Abort2(res, "Waitable wait for");
 	}
 	ptr->signalled = false;
 	Mutex_Unlock(&ptr->mutex);
 }
-
-
-/*########################################################################################################################*
-*--------------------------------------------------------Platform---------------------------------------------------------*
-*#########################################################################################################################*/
-void Platform_Init(void) {
-	InitFilesystem();
-	InitSockets();
-}
-void Platform_Free(void) { }
 
 
 /*########################################################################################################################*
