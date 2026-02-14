@@ -150,6 +150,13 @@ static cc_bool Physics_IsEdgeWater(int x, int y, int z) {
 		&& (x == 0 || z == 0 || x == World.MaxX || z == World.MaxZ);
 }
 
+static cc_bool Physics_IsEdgeLava(int x, int y, int z) {
+	return
+		(Env.EdgeBlock == BLOCK_LAVA || Env.EdgeBlock == BLOCK_STILL_LAVA)
+		&& (y >= Env_SidesHeight && y < Env.EdgeHeight)
+		&& (x == 0 || z == 0 || x == World.MaxX || z == World.MaxZ);
+}
+
 
 void Physics_OnBlockChanged(int x, int y, int z, BlockID old, BlockID now) {
 	PhysicsHandler handler;
@@ -159,6 +166,10 @@ void Physics_OnBlockChanged(int x, int y, int z, BlockID old, BlockID now) {
 	if (now == BLOCK_AIR && Physics_IsEdgeWater(x, y, z)) {
 		now = BLOCK_STILL_WATER;
 		Game_UpdateBlock(x, y, z, BLOCK_STILL_WATER);
+	}
+	if (now == BLOCK_AIR && Physics_IsEdgeLava(x, y, z)) {
+		now = BLOCK_STILL_LAVA;
+		Game_UpdateBlock(x, y, z, BLOCK_STILL_LAVA);
 	}
 	index = World_Pack(x, y, z);
 

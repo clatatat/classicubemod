@@ -32,7 +32,7 @@ static cc_bool directionalFacing_Enabled = true;
 *---------------------------------------------------Default properties----------------------------------------------------*
 *#########################################################################################################################*/
 #define FOG_NONE  0
-#define FOG_WATER PackedCol_Make(  5,   5,  51, 255)
+#define FOG_WATER PackedCol_Make( 10,  40, 120, 255)
 #define FOG_LAVA  PackedCol_Make(153,  25,   0, 255)
 
 /* Brightness */

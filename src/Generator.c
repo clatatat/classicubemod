@@ -158,10 +158,16 @@ static void FlatgrassGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		/* Sun off: SunCol = shadow gray so sky-exposed areas look shadowed, but torches can light */
+		Env_SetSunCol(PackedCol_Make(0x6B, 0x6B, 0x6B, 0xFF));
 		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
 		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
 		Env_SetSidesBlock(BLOCK_OBSIDIAN);
+	} else if (Gen_Theme == GEN_THEME_DESERT) {
+		/* Sandstorm-like yellowish/tan fog */
+		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
 	}
 }
 
@@ -910,10 +916,16 @@ static void NotchyGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		/* Sun off: SunCol = shadow gray so sky-exposed areas look shadowed, but torches can light */
+		Env_SetSunCol(PackedCol_Make(0x6B, 0x6B, 0x6B, 0xFF));
 		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
 		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
 		Env_SetSidesBlock(BLOCK_OBSIDIAN);
+	} else if (Gen_Theme == GEN_THEME_DESERT) {
+		/* Sandstorm-like yellowish/tan fog */
+		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
 	}
 }
 
@@ -1222,8 +1234,14 @@ static void FloatingGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		/* Sun off: SunCol = shadow gray so sky-exposed areas look shadowed, but torches can light */
+		Env_SetSunCol(PackedCol_Make(0x6B, 0x6B, 0x6B, 0xFF));
 		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_DESERT) {
+		/* Sandstorm-like yellowish/tan fog */
+		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
 	}
 }
 
@@ -1588,8 +1606,14 @@ static void CavesGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetSunCol(PackedCol_Make(0x60, 0x58, 0x50, 0xFF));
+		/* Sun off: SunCol = shadow gray so sky-exposed areas look shadowed, but torches can light */
+		Env_SetSunCol(PackedCol_Make(0x6B, 0x6B, 0x6B, 0xFF));
 		Env_SetShadowCol(PackedCol_Make(0x1A, 0x18, 0x18, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_DESERT) {
+		/* Sandstorm-like yellowish/tan fog */
+		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
 	}
 }
 
