@@ -14,16 +14,8 @@
 *.VC.db
 *.VC.VC.opendb
 
-# Android build results
-android/app/.cxx/
-android/.cxx/
-android/.idea/
-android/.gradle/
-android/build/
-android/app/build/
-android/app/.externalNativeBuild/
-android/local.properties
-*.iml
+# Android - not building for this platform
+android/
 
 #XCode stuff
 project.xcworkspace/
