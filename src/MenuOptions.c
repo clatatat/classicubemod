@@ -151,7 +151,7 @@ CC_NOINLINE static void MenuOptionsScreen_FreeExtHelp(struct MenuOptionsScreen* 
 }
 
 static void MenuOptionsScreen_LayoutExtHelp(struct MenuOptionsScreen* s) {
-	Widget_SetLocation(&s->extHelp, ANCHOR_MIN, ANCHOR_CENTRE_MIN, 0, 100);
+	Widget_SetLocation(&s->extHelp, ANCHOR_MIN, ANCHOR_MIN, 0, 10);
 	/* If use centre align above, then each line in extended help gets */
 	/* centered aligned separately - which is not the desired behaviour. */
 	s->extHelp.xOffset = Window_UI.Width / 2 - s->extHelp.width / 2;
@@ -465,6 +465,9 @@ static void MenuOptionsScreen_Render(void* screen, float delta) {
 
 	MenuScreen_Render2(s, delta);
 	if (!s->extHelp.lines) return;
+
+	/* Don't show tooltips on resolutions below 800x600 */
+	if (Window_UI.Width < 800 || Window_UI.Height < 600) return;
 
 	w = &s->extHelp;
 	Gfx_Draw2DFlat(w->x - EXTHELP_PAD, w->y - EXTHELP_PAD, 
