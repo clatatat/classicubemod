@@ -1560,6 +1560,21 @@ static cc_bool Mob_BlockIsSolid(int x, int y, int z) {
 	return Blocks.Collide[b] == COLLIDE_SOLID;
 }
 
+/* Check if a block would obstruct a mob at the given entity Y position (considering partial block heights) */
+static cc_bool Mob_BlockObstructsAt(int x, int blockY, int z, float entityY) {
+	BlockID b;
+	float blockTop;
+	if (!World_Contains(x, blockY, z)) return false;
+	b = World_GetBlock(x, blockY, z);
+	if (Blocks.Collide[b] != COLLIDE_SOLID) return false;
+	
+	/* Get the actual top height of this block */
+	blockTop = (float)blockY + Blocks.MaxBB[b].y;
+	
+	/* Block obstructs if its top is above the entity's feet */
+	return blockTop > entityY;
+}
+
 static cc_bool Mob_BlockIsPassable(int x, int y, int z) {
 	BlockID b;
 	if (!World_Contains(x, y, z)) return true;
@@ -1686,12 +1701,12 @@ static cc_bool Mob_MoveTowards(struct Entity* e, int id, Vec3 target, float spee
 	/* Check X-axis collision: block at new X, current Z (feet and head height) */
 	bx = (int)Math_Floor(newX);
 	bz = (int)Math_Floor(e->Position.z);
-	blockedX = Mob_BlockIsSolid(bx, feetY, bz) || Mob_BlockIsSolid(bx, feetY + 1, bz);
+	blockedX = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) || Mob_BlockIsSolid(bx, feetY + 1, bz);
 
 	/* Check Z-axis collision: current X, new Z (feet and head height) */
 	bx = (int)Math_Floor(e->Position.x);
 	bz = (int)Math_Floor(newZ);
-	blockedZ = Mob_BlockIsSolid(bx, feetY, bz) || Mob_BlockIsSolid(bx, feetY + 1, bz);
+	blockedZ = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) || Mob_BlockIsSolid(bx, feetY + 1, bz);
 
 	/* Try to jump over 1-block walls */
 	canJump = false;
@@ -1840,16 +1855,17 @@ static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
 	if (World_Contains(bx, by, bz)) {
 		below = World_GetBlock(bx, by, bz);
 		if (Blocks.Collide[below] == COLLIDE_SOLID) {
-			if (e->Velocity.y <= 0.0f) {
-				/* Falling or stationary: land on the block */
+			float blockTop = (float)by + Blocks.MaxBB[below].y;
+			if (e->Velocity.y <= 0.0f && e->Position.y <= blockTop + 0.05f) {
+				/* Falling/stationary and at or near block surface: land on it */
 				e->Velocity.y = 0.0f;
 				e->OnGround   = true;
-				if (e->Position.y < (float)(by + 1)) {
-					e->Position.y = (float)(by + 1);
-					e->next.pos.y = (float)(by + 1);
-					e->prev.pos.y = (float)(by + 1);
+				if (e->Position.y < blockTop) {
+					e->Position.y = blockTop;
+					e->next.pos.y = blockTop;
+					e->prev.pos.y = blockTop;
 				}
-			} else {
+			} else if (e->Velocity.y > 0.0f) {
 				/* Jumping upward: check ceiling collision */
 				newY = e->Position.y + e->Velocity.y;
 				{
@@ -1865,6 +1881,23 @@ static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
 				e->Velocity.y -= MOB_GRAVITY;
 				e->next.pos.y  = e->Position.y;
 				e->prev.pos.y  = e->Position.y;
+			} else {
+				/* Falling but still above block surface (partial block): keep falling */
+				newY = e->Position.y + e->Velocity.y;
+				if (newY <= blockTop) {
+					/* Would fall past block surface: land on it */
+					e->Velocity.y = 0.0f;
+					e->OnGround   = true;
+					e->Position.y = blockTop;
+					e->next.pos.y = blockTop;
+					e->prev.pos.y = blockTop;
+				} else {
+					e->OnGround    = false;
+					e->Position.y  = newY;
+					e->Velocity.y -= MOB_GRAVITY;
+					e->next.pos.y  = e->Position.y;
+					e->prev.pos.y  = e->Position.y;
+				}
 			}
 		} else {
 			/* In air: apply movement with ceiling check */

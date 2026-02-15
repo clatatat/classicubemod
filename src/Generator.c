@@ -22,7 +22,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
 		1.0f, 1, 1,                                        /* heightScale, treePatchMul, flowerPatchMul */
-		false, false, true, true, false, true, false, false, false, false,
+		false, false, true, true, false, true, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_HELL (1) */
@@ -36,7 +36,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		PackedCol_Make(0x30, 0x28, 0x28, 0xFF),            /* cloudsCol - dark brown-red */
 		0,            /* shadowCol - dark gray */
 		1.0f, 1, 1,
-		true, false, false, false, false, true, true, true, false, false,
+		true, false, false, false, false, true, true, true, false, false, false,
 		"Planting trees", "Flooding edge lava", "Flooding lava"
 	},
 	/* GEN_THEME_PARADISE (2) */
@@ -47,7 +47,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
 		0.5f, 1, 3,                                        /* flat terrain, 3x flowers */
-		false, false, true, true, false, true, false, false, true, false,
+		false, false, true, true, false, true, false, false, true, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_WOODS (3) */
@@ -58,35 +58,35 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
 		1.0f, 8, 1,                                        /* 8x trees */
-		false, false, true, true, false, true, false, false, false, false,
+		false, false, true, true, false, true, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_DESERT (4) */
 	{
 		BLOCK_SAND, BLOCK_SAND,
-		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
-		0, 0,
+		BLOCK_STILL_WATER, BLOCK_SAND,                    /* fluidBlock, edgeFluidBlock (sand border) */
+		BLOCK_SAND, BLOCK_SAND,                            /* edgeBlock, sidesBlock (sand border) */
 		BLOCK_STONE, BLOCK_SAND, BLOCK_SAND,               /* caves: sand gardens */
 		PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF),            /* skyCol - golden tan */
 		PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF),            /* fogCol - sandstorm */
 		PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF),            /* cloudsCol - light golden */
 		0,
 		0.5f, 1, 1,                                        /* flat terrain */
-		false, false, true, true, true, false, false, false, false, true,
-		"Planting cacti", "Flooding edge water", "Flooding water"
+		false, false, true, true, true, false, false, false, false, true, false,
+		"Planting cacti", "Filling edge sand", "Flooding water"
 	},
 	/* GEN_THEME_WINTER (5) */
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
-		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* normal water flooding, freeze top layer later */
-		0, 0,
+		BLOCK_ICE, BLOCK_ICE,                              /* all water as ice in winter theme */
+		BLOCK_ICE, 0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF),            /* skyCol - light blue */
 		PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF),            /* fogCol - very light blue */
 		PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF),            /* cloudsCol - white */
 		0,
 		1.0f, 1, 1,
-		false, true, true, true, false, false, false, false, false, false,
+		false, true, true, true, false, false, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_MOON (6) */
@@ -100,7 +100,18 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		PackedCol_Make(0x38, 0x38, 0x38, 0xFF),            /* cloudsCol - light gray */
 		0,
 		0.5f, 0, 1,
-		false, false, true, false, false, false, false, false, false, false,
+		false, false, true, false, false, false, false, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_JUNGLE (7) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* fluidBlock, edgeFluidBlock */
+		0, 0,                                              /* edgeBlock, sidesBlock (generator default) */
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
+		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
+		1.0f, 4, 4,                                        /* heightScale, 4x trees, 4x flowers */
+		false, false, true, true, false, true, false, false, false, false, true,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	}
 };
@@ -652,6 +663,10 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 	int index1, index2;
 	int x, z;
 	BlockRaw fluidBlock = t->edgeFluidBlock;
+
+	/* Desert: no edge flooding */
+	if (Gen_Theme == GEN_THEME_DESERT) return;
+
 	Gen_CurrentState = t->edgeFloodMsg;
 
 	index1 = World_Pack(0, waterY, 0);
@@ -681,6 +696,9 @@ static void NotchyGen_FloodFillWater(void) {
 	int i, x, y, z;
 	BlockRaw fluidBlock = t->fluidBlock;
 
+	/* Desert: no internal water */
+	if (Gen_Theme == GEN_THEME_DESERT) return;
+
 	numSources       = World.Width * World.Length / 800;
 	Gen_CurrentState = t->internalFloodMsg;
 	for (i = 0; i < numSources; i++) {
@@ -696,6 +714,9 @@ static void NotchyGen_FloodFillWater(void) {
 static void NotchyGen_FloodFillLava(void) {
 	int numSources;
 	int i, x, y, z;
+
+	/* Desert: no lava either */
+	if (Gen_Theme == GEN_THEME_DESERT) return;
 
 	numSources       = World.Width * World.Length / 20000;
 	Gen_CurrentState = "Flooding lava";
@@ -774,6 +795,13 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 				}
 			} else if (Gen_Theme == GEN_THEME_WOODS || Gen_Theme == GEN_THEME_NORMAL) {
 				/* Normal / Woods */
+				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
+				}
+			} else if (Gen_Theme == GEN_THEME_JUNGLE) {
+				/* Jungle: same as normal, gravel underwater, sand near beaches, grass elsewhere */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
 					Gen_Blocks[index] = BLOCK_GRAVEL;
 				} else if (above == BLOCK_AIR) {
@@ -944,9 +972,14 @@ static void NotchyGen_PlantTrees(void) {
 	BlockRaw under;
 	int i, j, k, m;
 	int cactusH, cy;
+	cc_bool isJungle = Gen_Themes[Gen_Theme].hasJungleTrees;
 
-	IVec3 coords[TREE_MAX_COUNT];
-	BlockRaw blocks[TREE_MAX_COUNT];
+	IVec3 coords_small[TREE_MAX_COUNT];
+	BlockRaw blocks_small[TREE_MAX_COUNT];
+	IVec3 coords_jungle[JUNGLE_TREE_MAX_COUNT];
+	BlockRaw blocks_jungle[JUNGLE_TREE_MAX_COUNT];
+	IVec3* coords;
+	BlockRaw* blocks;
 
 	Tree_Blocks = Gen_Blocks;
 	Tree_Rnd    = &rnd;
@@ -985,12 +1018,31 @@ static void NotchyGen_PlantTrees(void) {
 						}
 					}
 				} else {
-					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || (Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-						for (m = 0; m < count; m++) {
-							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-							Gen_Blocks[index] = blocks[m];
+					if (under != BLOCK_GRASS && !(Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT))
+						continue;
+
+					/* Jungle theme: 30% chance for large 2x2 jungle tree */
+					if (isJungle && Random_Float(&rnd) < 0.30f) {
+						treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
+						coords = coords_jungle;
+						blocks = blocks_jungle;
+						if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+							count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+							for (m = 0; m < count; m++) {
+								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+								Gen_Blocks[index] = blocks[m];
+							}
+						}
+					} else {
+						treeHeight = 5 + Random_Next(&rnd, 3);
+						coords = coords_small;
+						blocks = blocks_small;
+						if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+							count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+							for (m = 0; m < count; m++) {
+								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+								Gen_Blocks[index] = blocks[m];
+							}
 						}
 					}
 				}
@@ -1047,10 +1099,10 @@ static void NotchyGen_PlantTrees(void) {
 				if (Gen_Blocks[index - World.OneY] == BLOCK_GRASS) {
 					treeHeight = 5 + Random_Next(&rnd, 3);
 					if (TreeGen_CanGrow(tx, ty, tz, treeHeight)) {
-						count = TreeGen_Grow(tx, ty, tz, treeHeight, coords, blocks);
+						count = TreeGen_Grow(tx, ty, tz, treeHeight, coords_small, blocks_small);
 						for (j = 0; j < count; j++) {
-							index = World_Pack(coords[j].x, coords[j].y, coords[j].z);
-							Gen_Blocks[index] = blocks[j];
+							index = World_Pack(coords_small[j].x, coords_small[j].y, coords_small[j].z);
+							Gen_Blocks[index] = blocks_small[j];
 						}
 					}
 				}
@@ -1084,13 +1136,12 @@ static void NotchyGen_Generate(void) {
 		GEN_COOP_STEP( 8, NotchyGen_FloodFillWaterBorders() );
 		GEN_COOP_STEP( 9, NotchyGen_FloodFillWater() );
 		GEN_COOP_STEP(10, NotchyGen_FloodFillLava() );
-		GEN_COOP_STEP(11, NotchyGen_FreezeTopWater() );
 
-		GEN_COOP_STEP(12, NotchyGen_CreateSurfaceLayer() );
-		GEN_COOP_STEP(13, NotchyGen_PlantFlowers() );
-		GEN_COOP_STEP(14, NotchyGen_PlantMushrooms() );
-		GEN_COOP_STEP(15, NotchyGen_PlantTrees() );
-		GEN_COOP_STEP(16, NotchyGen_PlaceSnowLayer() );
+		GEN_COOP_STEP(11, NotchyGen_CreateSurfaceLayer() );
+		GEN_COOP_STEP(12, NotchyGen_PlantFlowers() );
+		GEN_COOP_STEP(13, NotchyGen_PlantMushrooms() );
+		GEN_COOP_STEP(14, NotchyGen_PlantTrees() );
+		GEN_COOP_STEP(15, NotchyGen_PlaceSnowLayer() );
 	GEN_COOP_END
 
 	Mem_Free(heightmap);
@@ -1970,6 +2021,238 @@ int TreeGen_Grow(int treeX, int treeY, int treeZ, int height, IVec3* coords, Blo
 
 	/* then place dirt */
 	TreeGen_Place(treeX, treeY - 1, treeZ, BLOCK_DIRT);
+
+	return count;
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------Jungle tree generation----------------------------------------------------*
+*#########################################################################################################################*/
+cc_bool JungleTreeGen_CanGrow(int treeX, int treeY, int treeZ, int treeHeight) {
+	int x, y, z, index;
+
+	/* check 2x2 trunk space (treeX,treeZ is the min corner) */
+	for (y = treeY; y < treeY + treeHeight; y++) {
+		for (z = treeZ; z <= treeZ + 1; z++) {
+			for (x = treeX; x <= treeX + 1; x++) {
+				if (!World_Contains(x, y, z)) return false;
+				index = World_Pack(x, y, z);
+				if (Tree_Blocks[index] != BLOCK_AIR) return false;
+			}
+		}
+	}
+
+	/* check top canopy area - must fit largest possible canopy (diameter 12) */
+	for (y = treeY + treeHeight - 5; y <= treeY + treeHeight + 1; y++) {
+		for (z = treeZ - 6; z <= treeZ + 6; z++) {
+			for (x = treeX - 6; x <= treeX + 6; x++) {
+				if (!World_Contains(x, y, z)) return false;
+				index = World_Pack(x, y, z);
+				if (Tree_Blocks[index] != BLOCK_AIR) return false;
+			}
+		}
+	}
+	return true;
+}
+
+/*
+ * Manually defined canopy layers for jungle trees.
+ * Each layer is a square grid of 0/1; '1' = place leaves.
+ * Grid is centered on the corner between 4 blocks (the 2x2 trunk center).
+ * Origin is at (cx - halfW, cz - halfW) where halfW = width/2.
+ */
+
+/* --- Large canopy (top of tree): 3 layers, each 12x12 --- */
+#define JUNGLE_BIG_W 12
+static const cc_uint8 jungle_big_layer0[JUNGLE_BIG_W * JUNGLE_BIG_W] = {
+	/* Bottom layer (widest) - row 0 is north edge */
+	0,0,0,0,0,1,1,0,0,0,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	1,1,1,1,1,1,1,1,1,1,1,1,
+	1,1,1,1,1,1,1,1,1,1,1,1,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,0,0,0,1,1,0,0,0,0,0,
+};
+static const cc_uint8 jungle_big_layer1[JUNGLE_BIG_W * JUNGLE_BIG_W] = {
+	/* Middle layer */
+	0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,1,1,0,0,0,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	0,1,1,1,1,1,1,1,1,1,1,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,0,0,0,1,1,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,
+};
+static const cc_uint8 jungle_big_layer2[JUNGLE_BIG_W * JUNGLE_BIG_W] = {
+	/* Top layer (smallest) */
+	0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,1,1,0,0,0,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,1,1,1,1,1,1,1,1,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,0,1,1,1,1,1,1,0,0,0,
+	0,0,0,0,0,1,1,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,
+	0,0,0,0,0,0,0,0,0,0,0,0,
+};
+static const cc_uint8* jungle_big_layers[3] = {
+	jungle_big_layer0, jungle_big_layer1, jungle_big_layer2
+};
+
+/* --- Small canopy (branch sub-canopy): 3 layers, each 6x6 --- */
+#define JUNGLE_SMALL_W 6
+static const cc_uint8 jungle_small_layer0[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
+	/* Bottom layer (widest) */
+	0,1,1,1,1,0,
+	1,1,1,1,1,1,
+	1,1,1,1,1,1,
+	1,1,1,1,1,1,
+	1,1,1,1,1,1,
+	0,1,1,1,1,0,
+};
+static const cc_uint8 jungle_small_layer1[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
+	/* Middle layer */
+	0,0,0,0,0,0,
+	0,1,1,1,1,0,
+	0,1,1,1,1,0,
+	0,1,1,1,1,0,
+	0,1,1,1,1,0,
+	0,0,0,0,0,0,
+};
+static const cc_uint8 jungle_small_layer2[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
+	/* Top layer */
+	0,0,0,0,0,0,
+	0,0,1,1,0,0,
+	0,1,1,1,1,0,
+	0,1,1,1,1,0,
+	0,0,1,1,0,0,
+	0,0,0,0,0,0,
+};
+static const cc_uint8* jungle_small_layers[3] = {
+	jungle_small_layer0, jungle_small_layer1, jungle_small_layer2
+};
+
+/* Places a canopy from manually defined layer bitmasks.
+   cx,cz is the center corner of the 2x2 trunk (lower-left of the upper-right block).
+   cy is the Y of the bottom layer. Layers go upward.
+   layers is an array of 3 grid pointers, w is the grid width (must be even). */
+static int JungleTreeGen_PlaceCanopy(int cx, int cy, int cz,
+									const cc_uint8* const* layers, int w,
+									IVec3* coords, BlockRaw* blocks, int count) {
+	int halfW = w / 2;
+	int layer, dx, dz, x, y, z, ox, oz;
+
+	for (layer = 0; layer < 3; layer++) {
+		const cc_uint8* grid = layers[layer];
+		y = cy + layer;
+
+		for (dz = 0; dz < w; dz++) {
+			for (dx = 0; dx < w; dx++) {
+				if (!grid[dz * w + dx]) continue;
+
+				x = cx - halfW + dx;
+				z = cz - halfW + dz;
+				if (!World_Contains(x, y, z)) continue;
+
+				/* Don't overwrite existing solid blocks (like trunk) */
+				if (Tree_Blocks[World_Pack(x, y, z)] != BLOCK_AIR) continue;
+
+				TreeGen_Place(x, y, z, BLOCK_LEAVES);
+			}
+		}
+	}
+	return count;
+}
+
+int JungleTreeGen_Grow(int treeX, int treeY, int treeZ, int height, IVec3* coords, BlockRaw* blocks) {
+	int count = 0;
+	int tx, tz, y;
+	int canopyBaseY, canopyBaseX, canopyBaseZ;
+	int numBranches, branchIdx, branchY, branchDir;
+	int branchX, branchZ, bx, bz;
+
+	/* --- Place top canopy first (so trunk overwrites leaf centers) --- */
+	/* Center canopy on the corner shared by all 4 trunk blocks: (treeX+1, treeZ+1) */
+	canopyBaseX = treeX + 1;
+	canopyBaseZ = treeZ + 1;
+	canopyBaseY = treeY + height - 2;
+	count = JungleTreeGen_PlaceCanopy(canopyBaseX, canopyBaseY, canopyBaseZ,
+									  jungle_big_layers, JUNGLE_BIG_W,
+									  coords, blocks, count);
+
+	/* --- Place sub-canopies (branches) along the trunk --- */
+	numBranches = 2 + Random_Next(Tree_Rnd, 2); /* 2-3 branches */
+	for (branchIdx = 0; branchIdx < numBranches; branchIdx++) {
+		/* Space branches vertically along the trunk */
+		branchY = treeY + (height * (2 + branchIdx)) / (numBranches + 3);
+		branchY += Random_Next(Tree_Rnd, 3) - 1; /* slight variation */
+		if (branchY < treeY + 4) branchY = treeY + 4;
+		if (branchY > treeY + height - 6) branchY = treeY + height - 6;
+
+		/* Pick a random direction for the branch (0=+x, 1=-x, 2=+z, 3=-z) */
+		branchDir = Random_Next(Tree_Rnd, 4);
+		branchX = treeX; branchZ = treeZ;
+		bx = 0; bz = 0;
+
+		switch (branchDir) {
+		case 0: bx =  1; break;
+		case 1: bx = -1; break;
+		case 2: bz =  1; break;
+		case 3: bz = -1; break;
+		}
+
+		/* Extend branch stub 1-2 blocks from trunk */
+		branchX += bx * 2;
+		branchZ += bz * 2;
+
+		/* Place branch log blocks */
+		if (World_Contains(treeX + bx, branchY, treeZ + bz)) {
+			TreeGen_Place(treeX + bx, branchY, treeZ + bz, BLOCK_LOG);
+		}
+		if (World_Contains(branchX, branchY, branchZ)) {
+			TreeGen_Place(branchX, branchY, branchZ, BLOCK_LOG);
+		}
+
+		/* Place sub-canopy at branch tip */
+		count = JungleTreeGen_PlaceCanopy(branchX, branchY + 1, branchZ,
+										  jungle_small_layers, JUNGLE_SMALL_W,
+										  coords, blocks, count);
+	}
+
+	/* --- Place 2x2 trunk --- */
+	for (y = 0; y < height - 1; y++) {
+		for (tz = treeZ; tz <= treeZ + 1; tz++) {
+			for (tx = treeX; tx <= treeX + 1; tx++) {
+				if (World_Contains(tx, treeY + y, tz)) {
+					TreeGen_Place(tx, treeY + y, tz, BLOCK_LOG);
+				}
+			}
+		}
+	}
+
+	/* Place dirt beneath trunk */
+	for (tz = treeZ; tz <= treeZ + 1; tz++) {
+		for (tx = treeX; tx <= treeX + 1; tx++) {
+			if (treeY > 0 && World_Contains(tx, treeY - 1, tz)) {
+				TreeGen_Place(tx, treeY - 1, tz, BLOCK_DIRT);
+			}
+		}
+	}
 
 	return count;
 }
