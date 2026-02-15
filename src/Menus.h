@@ -86,6 +86,12 @@ void MenuOptionsScreen_AddEnum(struct MenuOptionsScreen* s, const char* name,
 								const char* const* names, int namesCount,
 								Button_GetEnum getValue, Button_SetEnum setValue, const char* desc);
 
+typedef void (*DropdownDone)(int value, cc_bool valid);
+void MenuDropdownOverlay_Show(const char* titleName,
+								const char* const* names, int count,
+								Button_GetEnum getValue, DropdownDone onDone);
+void MenuDropdownOverlay_Close(cc_bool valid);
+
 typedef PackedCol (*Button_GetHex)(void);
 typedef void      (*Button_SetHex)(PackedCol value);
 void MenuOptionsScreen_AddHex(struct MenuOptionsScreen* s, const char* name, PackedCol defaultValue,

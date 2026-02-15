@@ -1108,10 +1108,16 @@ static void GenLevelScreen_UpdateType(struct GenLevelScreen* s) {
 	Font_Free(&titleFont);
 }
 
-static void GenLevelScreen_CycleType(void* screen, void* b) {
-	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
-	s->worldType = (s->worldType + 1) % GENLEVEL_TYPE_COUNT;
-	GenLevelScreen_UpdateType(s);
+static int  GenLevelScreen_GetType(void)  { return GenLevelScreen.worldType; }
+
+static void GenLevelScreen_TypeDone(int value, cc_bool valid) {
+	struct GenLevelScreen* s = &GenLevelScreen;
+	if (valid) { s->worldType = value; GenLevelScreen_UpdateType(s); }
+}
+
+static void GenLevelScreen_ClickType(void* screen, void* b) {
+	MenuDropdownOverlay_Show("Type", GenLevel_TypeNames, GENLEVEL_TYPE_COUNT,
+		GenLevelScreen_GetType, GenLevelScreen_TypeDone);
 }
 
 static void GenLevelScreen_UpdateTheme(struct GenLevelScreen* s) {
@@ -1124,10 +1130,16 @@ static void GenLevelScreen_UpdateTheme(struct GenLevelScreen* s) {
 	Font_Free(&titleFont);
 }
 
-static void GenLevelScreen_CycleTheme(void* screen, void* b) {
-	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
-	s->worldTheme = (s->worldTheme + 1) % GENLEVEL_THEME_COUNT;
-	GenLevelScreen_UpdateTheme(s);
+static int  GenLevelScreen_GetTheme(void) { return GenLevelScreen.worldTheme; }
+
+static void GenLevelScreen_ThemeDone(int value, cc_bool valid) {
+	struct GenLevelScreen* s = &GenLevelScreen;
+	if (valid) { s->worldTheme = value; GenLevelScreen_UpdateTheme(s); }
+}
+
+static void GenLevelScreen_ClickTheme(void* screen, void* b) {
+	MenuDropdownOverlay_Show("Theme", GenLevel_ThemeNames, GENLEVEL_THEME_COUNT,
+		GenLevelScreen_GetTheme, GenLevelScreen_ThemeDone);
 }
 
 static void GenLevelScreen_Generate(void* a, void* b) {
@@ -1309,8 +1321,8 @@ static void GenLevelScreen_Init(void* screen) {
 	TextWidget_Add(s,   &s->title);
 	s->worldType  = 1; /* default to Normal */
 	s->worldTheme = 0; /* default to Normal */
-	ButtonWidget_Add(s, &s->typeBtn,   200, GenLevelScreen_CycleType);
-	ButtonWidget_Add(s, &s->themeBtn,  200, GenLevelScreen_CycleTheme);
+	ButtonWidget_Add(s, &s->typeBtn,   200, GenLevelScreen_ClickType);
+	ButtonWidget_Add(s, &s->themeBtn,  200, GenLevelScreen_ClickTheme);
 	ButtonWidget_Add(s, &s->generate,  200, GenLevelScreen_Generate);
 	AddPrimaryButton(s, &s->cancel,         Menu_SwitchPause);
 

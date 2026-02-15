@@ -292,8 +292,24 @@ static void MenuOptionsScreen_EnumGet(struct ButtonWidget* btn, cc_string* v) {
 	String_AppendConst(v, meta->names[raw]);
 }
 
-static void MenuDropdownOverlay_Show(const char* const* names, int count,
-	Button_GetEnum getValue, Button_SetEnum setValue, struct ButtonWidget* sourceBtn);
+void MenuDropdownOverlay_Show(const char* titleName,
+	const char* const* names, int count,
+	Button_GetEnum getValue, DropdownDone onDone);
+
+static void MenuOptionsScreen_EnumDropdownDone(int value, cc_bool valid) {
+	struct MenuOptionsScreen* s = &MenuOptionsScreen_Instance;
+	struct ButtonWidget* btn = s->activeBtn;
+
+	if (valid && btn) {
+		struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
+		meta->SetValue(value);
+		MenuOptionsScreen_Update(s, btn);
+		s->dirty = true;
+	}
+
+	s->activeBtn = NULL;
+	if (s->selectedI >= 0) MenuOptionsScreen_SelectExtHelp(s, s->selectedI);
+}
 
 static void MenuOptionsScreen_EnumClick(void* screen, void* widget) {
 	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
@@ -303,8 +319,8 @@ static void MenuOptionsScreen_EnumClick(void* screen, void* widget) {
 	if (meta->count > 2) {
 		MenuOptionsScreen_FreeExtHelp(s);
 		s->activeBtn = btn;
-		MenuDropdownOverlay_Show(meta->names, meta->count,
-			meta->GetValue, meta->SetValue, btn);
+		MenuDropdownOverlay_Show(btn->optName, meta->names, meta->count,
+			meta->GetValue, MenuOptionsScreen_EnumDropdownDone);
 	} else {
 		int raw = meta->GetValue();
 		raw = (raw + 1) % meta->count;
@@ -485,7 +501,7 @@ static void MenuOptionsScreen_Render(void* screen, float delta) {
 	Elem_Render(&s->extHelp);
 }
 
-static void MenuDropdownOverlay_Close(cc_bool apply);
+void MenuDropdownOverlay_Close(cc_bool apply);
 
 static void MenuOptionsScreen_Free(void* screen) {
 	Event_Unregister_(&UserEvents.HackPermsChanged,     screen, MenuOptionsScreen_OnHacksChanged);
@@ -563,9 +579,9 @@ static struct MenuDropdownOverlay {
 	int totalCount;
 	float scrollAcc;
 	const char* const* optionNames;
+	const char* titleName;
 	Button_GetEnum getValue;
-	Button_SetEnum setValue;
-	struct ButtonWidget* sourceBtn;
+	DropdownDone onDone;
 	struct Widget* __widgets[1 + DROPDOWN_MAX_VISIBLE];
 } MenuDropdownOverlay_Instance;
 
@@ -595,22 +611,13 @@ static void MenuDropdownOverlay_SetScrollOffset(struct MenuDropdownOverlay* s, i
 	MenuDropdownOverlay_RedrawOptions(s);
 }
 
-static void MenuDropdownOverlay_Close(cc_bool apply) {
+void MenuDropdownOverlay_Close(cc_bool apply) {
 	struct MenuDropdownOverlay* s = &MenuDropdownOverlay_Instance;
-	struct MenuOptionsScreen* src = &MenuOptionsScreen_Instance;
 
 	Gui_Remove((struct Screen*)s);
 
-	if (apply && s->sourceBtn) {
-		s->setValue(s->currentValue);
-		MenuOptionsScreen_Update(src, s->sourceBtn);
-		src->dirty = true;
-	}
-
-	if (s->sourceBtn) {
-		src->activeBtn = NULL;
-		s->sourceBtn   = NULL;
-	}
+	if (s->onDone) s->onDone(s->currentValue, apply);
+	s->onDone = NULL;
 }
 
 static void MenuDropdownOverlay_OptionClick(void* screen, void* widget) {
@@ -762,8 +769,8 @@ static void MenuDropdownOverlay_ContextRecreated(void* screen) {
 	Screen_UpdateVb(s);
 
 	String_InitArray(titleStr, titleBuffer);
-	if (s->sourceBtn && s->sourceBtn->optName) {
-		String_AppendConst(&titleStr, s->sourceBtn->optName);
+	if (s->titleName) {
+		String_AppendConst(&titleStr, s->titleName);
 	}
 	TextWidget_Set(&s->title, &titleStr, &s->titleFont);
 
@@ -778,17 +785,18 @@ static const struct ScreenVTABLE MenuDropdownOverlay_VTABLE = {
 	MenuDropdownOverlay_Layout,      MenuDropdownOverlay_ContextLost, MenuDropdownOverlay_ContextRecreated
 };
 
-static void MenuDropdownOverlay_Show(const char* const* names, int count,
-	Button_GetEnum getValue, Button_SetEnum setValue, struct ButtonWidget* sourceBtn) {
+void MenuDropdownOverlay_Show(const char* titleName,
+	const char* const* names, int count,
+	Button_GetEnum getValue, DropdownDone onDone) {
 	struct MenuDropdownOverlay* s = &MenuDropdownOverlay_Instance;
 
 	s->grabsInput  = true;
 	s->closable    = false;
+	s->titleName   = titleName;
 	s->optionNames = names;
 	s->totalCount  = count;
 	s->getValue    = getValue;
-	s->setValue     = setValue;
-	s->sourceBtn   = sourceBtn;
+	s->onDone      = onDone;
 	s->VTABLE      = &MenuDropdownOverlay_VTABLE;
 
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENUINPUT);
