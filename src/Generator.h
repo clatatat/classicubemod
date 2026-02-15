@@ -2,6 +2,7 @@
 #define CC_MAP_GEN_H
 #include "ExtMath.h"
 #include "Vectors.h"
+#include "PackedCol.h"
 CC_BEGIN_HEADER
 
 /* Implements flatgrass map generator, and original classic vanilla map generation (with perlin noise)
@@ -45,6 +46,57 @@ extern Vec3 Gen_SpawnOverride;
 #define GEN_THEME_WINTER   5
 #define GEN_THEME_COUNT    6
 extern int Gen_Theme;
+
+/* Centralized theme properties for world generation */
+struct GenThemeData {
+	/* Terrain blocks */
+	BlockRaw surfaceBlock;    /* grass / sand / dirt */
+	BlockRaw fillBlock;       /* dirt / sand */
+	BlockRaw fluidBlock;      /* still_water / still_lava (internal flood fill) */
+	BlockRaw edgeFluidBlock;  /* still_water / still_lava / ice (border flood) */
+
+	/* Edge/sides overrides (0 = let generator decide its own default) */
+	BlockRaw edgeBlock;       /* hell=lava, else 0 */
+	BlockRaw sidesBlock;      /* hell=obsidian, else 0 */
+
+	/* Cave-specific blocks */
+	BlockRaw caveFillBlock;   /* stone / dirt */
+	BlockRaw gardenSurface;   /* grass / sand */
+	BlockRaw gardenFill;      /* dirt / sand */
+
+	/* Environment colors (0 = keep engine defaults) */
+	PackedCol skyCol;
+	PackedCol fogCol;
+	PackedCol cloudsCol;
+	PackedCol shadowCol;
+
+	/* Generation multipliers */
+	float heightScale;        /* 1.0 normal, 0.5 paradise/desert */
+	int   treePatchMul;       /* 1 normal, 8 woods */
+	int   flowerPatchMul;     /* 1 normal, 3 paradise */
+
+	/* Feature flags */
+	cc_bool hasShadowCeiling;
+	cc_bool hasSnowLayer;
+	cc_bool dirtToGrass;       /* dirt physics converts to grass when lit */
+	cc_bool hasCaveGardens;
+	cc_bool plantsCacti;       /* plant cacti instead of trees */
+	cc_bool generateFlowers;
+	cc_bool hasExtraCaveOres;  /* cobble + mossy in hell caves */
+	cc_bool treesOnDirt;       /* trees can grow on dirt (hell) */
+	cc_bool raiseWaterLevel;   /* raise water by Height/8 (paradise) */
+	cc_bool hasOases;          /* generate oasis patches (desert) */
+
+	/* Status messages */
+	const char* treePlantMsg;
+	const char* edgeFloodMsg;
+	const char* internalFloodMsg;
+};
+
+extern const struct GenThemeData Gen_Themes[GEN_THEME_COUNT];
+/* Applies theme-specific environment colors and edge/sides blocks */
+void GenTheme_ApplyEnvironment(void);
+
 /* Checks whether the map generator has completed yet */
 cc_bool Gen_IsDone(void);
 

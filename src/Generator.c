@@ -13,6 +13,94 @@ const struct MapGenerator* gen_active;
 BlockRaw* Gen_Blocks;
 int Gen_Theme;
 
+const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
+	/* GEN_THEME_NORMAL (0) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* fluidBlock, edgeFluidBlock */
+		0, 0,                                              /* edgeBlock, sidesBlock (generator default) */
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
+		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
+		1.0f, 1, 1,                                        /* heightScale, treePatchMul, flowerPatchMul */
+		false, false, true, true, false, true, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_HELL (1) */
+	{
+		BLOCK_DIRT, BLOCK_DIRT,
+		BLOCK_STILL_LAVA, BLOCK_STILL_LAVA,
+		BLOCK_STILL_LAVA, BLOCK_OBSIDIAN,
+		BLOCK_DIRT, BLOCK_GRASS, BLOCK_DIRT,               /* gardenSurface/Fill unused: hasCaveGardens=false */
+		PackedCol_Make(0x80, 0x10, 0x10, 0xFF),            /* skyCol - dark red */
+		PackedCol_Make(0x18, 0x14, 0x14, 0xFF),            /* fogCol - very dark red */
+		PackedCol_Make(0x30, 0x28, 0x28, 0xFF),            /* cloudsCol - dark brown-red */
+		PackedCol_Make(0x42, 0x41, 0x41, 0xFF),            /* shadowCol - dark gray */
+		1.0f, 1, 1,
+		true, false, false, false, false, true, true, true, false, false,
+		"Planting trees", "Flooding edge lava", "Flooding lava"
+	},
+	/* GEN_THEME_PARADISE (2) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
+		0, 0,
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
+		0, 0, 0, 0,
+		0.5f, 1, 3,                                        /* flat terrain, 3x flowers */
+		false, false, true, true, false, true, false, false, true, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_WOODS (3) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
+		0, 0,
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
+		0, 0, 0, 0,
+		1.0f, 8, 1,                                        /* 8x trees */
+		false, false, true, true, false, true, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_DESERT (4) */
+	{
+		BLOCK_SAND, BLOCK_SAND,
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
+		0, 0,
+		BLOCK_STONE, BLOCK_SAND, BLOCK_SAND,               /* caves: sand gardens */
+		PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF),            /* skyCol - golden tan */
+		PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF),            /* fogCol - sandstorm */
+		PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF),            /* cloudsCol - light golden */
+		0,
+		0.5f, 1, 1,                                        /* flat terrain */
+		false, false, true, true, true, false, false, false, false, true,
+		"Planting cacti", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_WINTER (5) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,
+		BLOCK_STILL_WATER, BLOCK_ICE,                      /* edge flooding uses ice */
+		0, 0,
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
+		PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF),            /* skyCol - light blue */
+		PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF),            /* fogCol - very light blue */
+		PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF),            /* cloudsCol - white */
+		0,
+		1.0f, 1, 1,
+		false, true, true, true, false, false, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	}
+};
+
+void GenTheme_ApplyEnvironment(void) {
+	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	if (t->skyCol)    Env_SetSkyCol(t->skyCol);
+	if (t->fogCol)    Env_SetFogCol(t->fogCol);
+	if (t->cloudsCol) Env_SetCloudsCol(t->cloudsCol);
+	if (t->shadowCol) Env_SetShadowCol(t->shadowCol);
+	if (t->edgeBlock)  Env_SetEdgeBlock(t->edgeBlock);
+	if (t->sidesBlock) Env_SetSidesBlock(t->sidesBlock);
+}
+
 volatile float Gen_CurrentProgress;
 volatile const char* Gen_CurrentState;
 volatile static cc_bool gen_done;
@@ -138,21 +226,9 @@ static cc_bool FlatgrassGen_Prepare(int seed) {
 }
 
 static void FlatgrassGen_Generate(void) {
-	BlockRaw surfaceBlock, fillBlock;
-
-	if (Gen_Theme == GEN_THEME_HELL) {
-		surfaceBlock = BLOCK_DIRT;
-		fillBlock    = BLOCK_DIRT;
-	} else if (Gen_Theme == GEN_THEME_DESERT) {
-		surfaceBlock = BLOCK_SAND;
-		fillBlock    = BLOCK_SAND;
-	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		surfaceBlock = BLOCK_GRASS;
-		fillBlock    = BLOCK_DIRT;
-	} else {
-		surfaceBlock = BLOCK_GRASS;
-		fillBlock    = BLOCK_DIRT;
-	}
+	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	BlockRaw surfaceBlock = t->surfaceBlock;
+	BlockRaw fillBlock    = t->fillBlock;
 
 	Gen_CurrentState = "Setting air blocks";
 	FlatgrassGen_MapSet(World.Height / 2, World.MaxY, BLOCK_AIR);
@@ -163,35 +239,17 @@ static void FlatgrassGen_Generate(void) {
 	Gen_CurrentState = "Setting surface blocks";
 	FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, surfaceBlock);
 
-	/* Winter theme: add snow layer on top */
-	if (Gen_Theme == GEN_THEME_WINTER) {
+	if (t->hasSnowLayer) {
 		FlatgrassGen_MapSet(World.Height / 2, World.Height / 2, BLOCK_SNOW);
 	}
 
-	if (Gen_Theme == GEN_THEME_HELL) Gen_PlaceShadowCeiling();
+	if (t->hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done = true;
 }
 
 static void FlatgrassGen_Setup(void) {
-	if (Gen_Theme == GEN_THEME_HELL) {
-		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetShadowCol(PackedCol_Make(0x42, 0x41, 0x41, 0xFF));
-		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
-		Env_SetSidesBlock(BLOCK_OBSIDIAN);
-	} else if (Gen_Theme == GEN_THEME_DESERT) {
-		/* Sandstorm-like yellowish/tan fog */
-		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		/* Cold, snowy atmosphere */
-		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
-	}
+	GenTheme_ApplyEnvironment();
 }
 
 const struct MapGenerator FlatgrassGen = {
@@ -418,9 +476,7 @@ static void NotchyGen_CreateHeightmap(void) {
 			height *= 0.5f;
 			if (height < 0) height *= 0.8f;
 
-			/* Paradise/Desert: flatten terrain */
-			if (Gen_Theme == GEN_THEME_PARADISE || Gen_Theme == GEN_THEME_DESERT)
-				height *= 0.5f;
+			height *= Gen_Themes[Gen_Theme].heightScale;
 
 			adjHeight = (int)(height + waterLevel);
 			minHeight = min(adjHeight, minHeight);
@@ -577,12 +633,12 @@ static void NotchyGen_CarveOreVeins(float abundance, const char* state, BlockRaw
 }
 
 static void NotchyGen_FloodFillWaterBorders(void) {
+	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
 	int waterY = waterLevel - 1;
 	int index1, index2;
 	int x, z;
-	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : 
-	                      (Gen_Theme == GEN_THEME_WINTER) ? BLOCK_ICE : BLOCK_STILL_WATER;
-	Gen_CurrentState = (Gen_Theme == GEN_THEME_HELL) ? "Flooding edge lava" : "Flooding edge water";
+	BlockRaw fluidBlock = t->edgeFluidBlock;
+	Gen_CurrentState = t->edgeFloodMsg;
 
 	index1 = World_Pack(0, waterY, 0);
 	index2 = World_Pack(0, waterY, World.Length - 1);
@@ -606,12 +662,13 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 }
 
 static void NotchyGen_FloodFillWater(void) {
+	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
 	int numSources;
 	int i, x, y, z;
-	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : BLOCK_STILL_WATER;
+	BlockRaw fluidBlock = t->fluidBlock;
 
 	numSources       = World.Width * World.Length / 800;
-	Gen_CurrentState = (Gen_Theme == GEN_THEME_HELL) ? "Flooding lava" : "Flooding water";
+	Gen_CurrentState = t->internalFloodMsg;
 	for (i = 0; i < numSources; i++) {
 		Gen_CurrentProgress = (float)i / numSources;
 
@@ -718,7 +775,7 @@ static void NotchyGen_PlaceSnowLayer(void) {
 	BlockRaw above, current;
 	int x, y, z;
 
-	if (Gen_Theme != GEN_THEME_WINTER) return;
+	if (!Gen_Themes[Gen_Theme].hasSnowLayer) return;
 
 	Gen_CurrentState = "Placing snow layer";
 	for (z = 0; z < World.Length; z++) {
@@ -769,11 +826,10 @@ static void NotchyGen_PlantFlowers(void) {
 	int i, j, k, index;
 
 	if (Game_Version.Version < VERSION_0023) return;
-	/* Skip flowers in winter theme */
-	if (Gen_Theme == GEN_THEME_WINTER) return;
-	
+	if (!Gen_Themes[Gen_Theme].generateFlowers) return;
+
 	numPatches       = World.Width * World.Length / 3000;
-	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
+	numPatches      *= Gen_Themes[Gen_Theme].flowerPatchMul;
 	Gen_CurrentState = "Planting flowers";
 
 	for (i = 0; i < numPatches; i++) {
@@ -854,9 +910,9 @@ static void NotchyGen_PlantTrees(void) {
 	Tree_Rnd    = &rnd;
 
 	numPatches = World.Width * World.Length / 4000;
-	if (Gen_Theme == GEN_THEME_WOODS) numPatches *= 8;
+	numPatches *= Gen_Themes[Gen_Theme].treePatchMul;
 
-	Gen_CurrentState = (Gen_Theme == GEN_THEME_DESERT) ? "Planting cacti" : "Planting trees";
+	Gen_CurrentState = Gen_Themes[Gen_Theme].treePlantMsg;
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
 
@@ -876,8 +932,7 @@ static void NotchyGen_PlantTrees(void) {
 				index = World_Pack(treeX, treeY, treeZ);
 				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
 
-				if (Gen_Theme == GEN_THEME_DESERT) {
-					/* Desert: place cacti on sand */
+				if (Gen_Themes[Gen_Theme].plantsCacti) {
 					if (under == BLOCK_SAND) {
 						cactusH = 1 + Random_Next(&rnd, 3);
 						for (cy = 0; cy < cactusH; cy++) {
@@ -888,9 +943,8 @@ static void NotchyGen_PlantTrees(void) {
 						}
 					}
 				} else {
-					/* Normal/Woods/Paradise/Hell/Winter: normal trees on grass (or dirt for Hell) */
 					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+					if ((under == BLOCK_GRASS || (Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
 						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
 						for (m = 0; m < count; m++) {
 							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
@@ -902,8 +956,7 @@ static void NotchyGen_PlantTrees(void) {
 		}
 	}
 
-	/* Desert: plant occasional oases (small grass patches with flowers and a tree) */
-	if (Gen_Theme == GEN_THEME_DESERT) {
+	if (Gen_Themes[Gen_Theme].hasOases) {
 		int numOases = World.Width * World.Length / 8000;
 		int ox, oz, oy, oRadius, dx, dz;
 		if (numOases < 3) numOases = 3;
@@ -967,8 +1020,7 @@ static void NotchyGen_PlantTrees(void) {
 static cc_bool NotchyGen_Prepare(int seed) {
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
-	/* Paradise: raise water level for more oceans and lagoons */
-	if (Gen_Theme == GEN_THEME_PARADISE)
+	if (Gen_Themes[Gen_Theme].raiseWaterLevel)
 		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
@@ -1001,30 +1053,13 @@ static void NotchyGen_Generate(void) {
 	Mem_Free(heightmap);
 	heightmap = NULL;
 
-	if (Gen_Theme == GEN_THEME_HELL) Gen_PlaceShadowCeiling();
+	if (Gen_Themes[Gen_Theme].hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done  = true;
 }
 
 static void NotchyGen_Setup(void) {
-	if (Gen_Theme == GEN_THEME_HELL) {
-		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetShadowCol(PackedCol_Make(0x42, 0x41, 0x41, 0xFF));
-		Env_SetEdgeBlock(BLOCK_STILL_LAVA);
-		Env_SetSidesBlock(BLOCK_OBSIDIAN);
-	} else if (Gen_Theme == GEN_THEME_DESERT) {
-		/* Sandstorm-like yellowish/tan fog */
-		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		/* Cold, snowy atmosphere */
-		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
-	}
+	GenTheme_ApplyEnvironment();
 }
 
 const struct MapGenerator NotchyGen = {
@@ -1189,20 +1224,14 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 			if (Gen_Blocks[index] != BLOCK_DIRT && Gen_Blocks[index] != BLOCK_STONE) continue;
 			above = y >= World.MaxY ? BLOCK_AIR : Gen_Blocks[index + World.OneY];
 			if (above == BLOCK_AIR) {
-				if (Gen_Theme == GEN_THEME_HELL)
-					Gen_Blocks[index] = BLOCK_DIRT;
-				else if (Gen_Theme == GEN_THEME_DESERT)
-					Gen_Blocks[index] = BLOCK_SAND;
-				else
-					Gen_Blocks[index] = BLOCK_GRASS;
+				Gen_Blocks[index] = Gen_Themes[Gen_Theme].surfaceBlock;
 			}
 		}
 	}
 
-	/* ----- Flowers (skip for Desert and Winter; Hell naturally skipped since no grass) ----- */
 	numPatches       = World.Width * World.Length / 3000;
-	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
-	if (Gen_Theme != GEN_THEME_DESERT && Gen_Theme != GEN_THEME_WINTER) {
+	numPatches      *= Gen_Themes[Gen_Theme].flowerPatchMul;
+	if (Gen_Themes[Gen_Theme].generateFlowers) {
 	Gen_CurrentState = "Planting flowers";
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
@@ -1230,8 +1259,8 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 	Tree_Blocks = Gen_Blocks;
 	Tree_Rnd    = &rnd;
 	numPatches       = World.Width * World.Length / 4000;
-	if (Gen_Theme == GEN_THEME_WOODS) numPatches *= 8;
-	Gen_CurrentState = (Gen_Theme == GEN_THEME_DESERT) ? "Planting cacti" : "Planting trees";
+	numPatches      *= Gen_Themes[Gen_Theme].treePatchMul;
+	Gen_CurrentState = Gen_Themes[Gen_Theme].treePlantMsg;
 
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
@@ -1249,7 +1278,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				index = World_Pack(treeX, treeY, treeZ);
 				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
 
-				if (Gen_Theme == GEN_THEME_DESERT) {
+				if (Gen_Themes[Gen_Theme].plantsCacti) {
 					if (under == BLOCK_SAND) {
 						int cactusH = 1 + Random_Next(&rnd, 3);
 						int cy;
@@ -1262,7 +1291,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 					}
 				} else {
 					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+					if ((under == BLOCK_GRASS || (Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
 						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
 						for (m = 0; m < count; m++) {
 							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
@@ -1274,8 +1303,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 		}
 	}
 	
-	/* ----- Snow layer (winter theme only) ----- */
-	if (Gen_Theme == GEN_THEME_WINTER) {
+	if (Gen_Themes[Gen_Theme].hasSnowLayer) {
 		Gen_CurrentState = "Placing snow layer";
 		hIndex = 0;
 		for (z = 0; z < World.Length; z++) {
@@ -1297,8 +1325,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 		}
 	}
 	
-	/* ----- Place snow on tree leaves (winter theme only) ----- */
-	if (Gen_Theme == GEN_THEME_WINTER) {
+	if (Gen_Themes[Gen_Theme].hasSnowLayer) {
 		Gen_CurrentState = "Placing snow on trees";
 		for (z = 0; z < World.Length; z++) {
 			Gen_CurrentProgress = (float)z / World.Length;
@@ -1323,8 +1350,7 @@ static cc_bool FloatingGen_Prepare(int seed) {
 	int mapArea = World.Width * World.Length;
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
-	/* Paradise: raise water level for more oceans and lagoons */
-	if (Gen_Theme == GEN_THEME_PARADISE)
+	if (Gen_Themes[Gen_Theme].raiseWaterLevel)
 		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
@@ -1402,34 +1428,16 @@ static void FloatingGen_Generate(void) {
 	Mem_Free(heightmap);   heightmap   = NULL;
 	Mem_Free(floatCutoff); floatCutoff = NULL;
 
-	if (Gen_Theme == GEN_THEME_HELL) Gen_PlaceShadowCeiling();
+	if (Gen_Themes[Gen_Theme].hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done = true;
 }
 
 static void FloatingGen_Setup(void) {
-	/* Hide map borders: set edge/sides to air so they don't render */
 	Env_SetEdgeBlock(BLOCK_AIR);
 	Env_SetSidesBlock(BLOCK_AIR);
-	/* Move clouds below the world so they're invisible */
 	Env_SetCloudsHeight(-16);
-
-	if (Gen_Theme == GEN_THEME_HELL) {
-		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetShadowCol(PackedCol_Make(0x42, 0x41, 0x41, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_DESERT) {
-		/* Sandstorm-like yellowish/tan fog */
-		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		/* Cold, snowy atmosphere */
-		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
-	}
+	GenTheme_ApplyEnvironment();
 }
 
 const struct MapGenerator FloatingGen = {
@@ -1448,7 +1456,7 @@ const struct MapGenerator FloatingGen = {
 Vec3 Gen_SpawnOverride = { 0, -1.0f, 0 };
 
 static void CavesGen_FillStone(void) {
-	BlockRaw fillBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_DIRT : BLOCK_STONE;
+	BlockRaw fillBlock = Gen_Themes[Gen_Theme].caveFillBlock;
 	Gen_CurrentState = "Filling world";
 	Mem_Set(Gen_Blocks, fillBlock, World.Volume);
 }
@@ -1551,20 +1559,13 @@ static void CavesGen_CarveCaverns(void) {
 		floorY = cenY - (int)radiusV;
 		if (floorY < 1 || floorY >= World.MaxY) continue;
 
-		/* ~40% of caverns get garden floors (grass/sand) with trees/cacti and flowers */
+		/* ~40% of caverns get garden floors with trees/cacti and flowers */
 		hasGrass = Random_Float(&rnd) < 0.4f;
-		/* Hell theme: never has garden rooms */
-		if (Gen_Theme == GEN_THEME_HELL) hasGrass = 0;
+		if (!Gen_Themes[Gen_Theme].hasCaveGardens) hasGrass = 0;
 
 		if (hasGrass) {
-			BlockRaw gardenSurface, gardenFill;
-			if (Gen_Theme == GEN_THEME_DESERT) {
-				gardenSurface = BLOCK_SAND;
-				gardenFill    = BLOCK_SAND;
-			} else {
-				gardenSurface = BLOCK_GRASS;
-				gardenFill    = BLOCK_DIRT;
-			}
+			BlockRaw gardenSurface = Gen_Themes[Gen_Theme].gardenSurface;
+			BlockRaw gardenFill    = Gen_Themes[Gen_Theme].gardenFill;
 
 			/* Place surface + fill on the cavern floor */
 			for (z = minZ; z <= maxZ; z++) {
@@ -1590,8 +1591,7 @@ static void CavesGen_CarveCaverns(void) {
 				}
 			}
 
-			if (Gen_Theme == GEN_THEME_DESERT) {
-				/* Desert caverns: plant cacti instead of flowers/trees */
+			if (Gen_Themes[Gen_Theme].plantsCacti) {
 				for (m = 0; m < 12; m++) {
 					int cactusH, cy;
 					fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
@@ -1658,7 +1658,7 @@ static void CavesGen_CarveCaverns(void) {
 			}
 		} else {
 			/* Non-garden room: scatter brown and red mushrooms on the floor */
-			BlockRaw mushroomFloor = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_DIRT : BLOCK_STONE;
+			BlockRaw mushroomFloor = Gen_Themes[Gen_Theme].caveFillBlock;
 			for (m = 0; m < 8; m++) {
 				fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
 				fz = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
@@ -1770,8 +1770,7 @@ static void CavesGen_Generate(void) {
 	CavesGen_CarveTunnels();
 	CavesGen_CarveCaverns();
 	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
-	/* Cobblestone and mossy cobblestone only in hell caves */
-	if (Gen_Theme == GEN_THEME_HELL) {
+	if (Gen_Themes[Gen_Theme].hasExtraCaveOres) {
 		NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
 		NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
 	}
@@ -1787,27 +1786,10 @@ static void CavesGen_Generate(void) {
 }
 
 static void CavesGen_Setup(void) {
-	/* Hide sky and borders */
 	Env_SetEdgeBlock(BLOCK_BEDROCK);
 	Env_SetSidesBlock(BLOCK_BEDROCK);
 	Env_SetCloudsHeight(-16);
-
-	if (Gen_Theme == GEN_THEME_HELL) {
-		Env_SetSkyCol(PackedCol_Make(0x80, 0x10, 0x10, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0x18, 0x14, 0x14, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0x30, 0x28, 0x28, 0xFF));
-		Env_SetShadowCol(PackedCol_Make(0x42, 0x41, 0x41, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_DESERT) {
-		/* Sandstorm-like yellowish/tan fog */
-		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
-	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		/* Cold, snowy atmosphere */
-		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
-		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
-		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
-	}
+	GenTheme_ApplyEnvironment();
 }
 
 const struct MapGenerator CavesGen = {

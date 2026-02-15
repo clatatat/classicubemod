@@ -2292,8 +2292,7 @@ static void Physics_HandleDirt(int index, BlockID block) {
 	int x, y, z;
 	World_Unpack(index, x, y, z);
 
-	/* Hell theme: dirt should never convert to grass */
-	if (Gen_Theme == GEN_THEME_HELL) return;
+	if (!Gen_Themes[Gen_Theme].dirtToGrass) return;
 
 	if (Lighting.IsLit(x, y, z)) {
 		Game_UpdateBlock(x, y, z, BLOCK_GRASS);
