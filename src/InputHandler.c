@@ -2287,12 +2287,12 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		}
 	}
 
-	/* Lava damage: 10 damage per second */
+	/* Lava damage: 5 damage per half second */
 	if (Mob_IsInLava(e)) {
 		mobLavaDamageTimer[id] += delta;
-		if (mobLavaDamageTimer[id] >= 1.0f) {
-			mobLavaDamageTimer[id] -= 1.0f;
-			Mob_DamageMob(id, 10, false);
+		if (mobLavaDamageTimer[id] >= 0.5f) {
+			mobLavaDamageTimer[id] -= 0.5f;
+			Mob_DamageMob(id, 5, false);
 		}
 	} else {
 		mobLavaDamageTimer[id] = 0.0f;

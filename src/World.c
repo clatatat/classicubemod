@@ -288,6 +288,8 @@ float Respawn_HighestSolidY(struct AABB* bb) {
 				/* Not sure if this is really necessary though, it seems to work */
 				/* just fine already when you're standing on the bottom of the map. */
 				block = World_SafeGetBlock(x, y, z);
+				/* Skip shadow ceiling block (invisible ceiling for hell theme) */
+				if (block == BLOCK_SHADOW_CEILING) continue;
 				Vec3_Add(&blockBB.Min, &v, &Blocks.MinBB[block]);
 				Vec3_Add(&blockBB.Max, &v, &Blocks.MaxBB[block]);
 

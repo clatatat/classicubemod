@@ -308,8 +308,14 @@ static void NotchyGen_FillOblateSpheroid(int x, int y, int z, float radius, Bloc
 
 				if ((dx * dx + 2 * dy * dy + dz * dz) < radiusSq) {
 					index = World_Pack(xx, yy, zz);
-					if (Gen_Blocks[index] == BLOCK_STONE || Gen_Blocks[index] == BLOCK_DIRT)
+					if (Gen_Blocks[index] == BLOCK_STONE || Gen_Blocks[index] == BLOCK_DIRT) {
+						/* Ores cannot generate in dirt unless hell theme + caves generator */
+						if (Gen_Blocks[index] == BLOCK_DIRT && block != BLOCK_AIR) {
+							if (!(Gen_Theme == GEN_THEME_HELL && gen_active == &CavesGen))
+								continue;
+						}
 						Gen_Blocks[index] = block;
+					}
 				}
 			}
 		}
@@ -1212,6 +1218,40 @@ static cc_bool FloatingGen_Prepare(int seed) {
 	return true;
 }
 
+/* Find a spawn point on a floating island near the center of the map */
+static void FloatingGen_FindSpawn(void) {
+	int cx = World.Width / 2;
+	int cz = World.Length / 2;
+	int radius, x, y, z, index;
+
+	Gen_CurrentState = "Finding spawn";
+	/* Search outward from center, scanning downward from top */
+	for (radius = 0; radius < World.Width / 2; radius += 2) {
+		for (y = World.Height - 1; y > 0; y--) {
+			for (x = cx - radius; x <= cx + radius; x++) {
+				for (z = cz - radius; z <= cz + radius; z++) {
+					if (!World_ContainsXZ(x, z)) continue;
+					/* Only check perimeter of each radius ring to avoid redundancy */
+					if (radius > 0 && x != cx - radius && x != cx + radius &&
+					    z != cz - radius && z != cz + radius) continue;
+
+					index = World_Pack(x, y, z);
+					/* Need: solid block, air above */
+					if (Gen_Blocks[index] == BLOCK_AIR) continue;
+					if (y + 1 >= World.Height || Gen_Blocks[index + World.OneY] != BLOCK_AIR) continue;
+
+					Gen_SpawnOverride.x = (float)x + 0.5f;
+					Gen_SpawnOverride.y = (float)(y + 1);
+					Gen_SpawnOverride.z = (float)z + 0.5f;
+					return;
+				}
+			}
+		}
+	}
+	
+	Gen_SpawnOverride.y = -1.0f; /* reset if not found */
+}
+
 static void FloatingGen_Generate(void) {
 	int layer;
 
@@ -1234,6 +1274,8 @@ static void FloatingGen_Generate(void) {
 	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore", BLOCK_GOLD_ORE);
 	NotchyGen_CarveOreVeins(0.6f, "Carving red ore", BLOCK_RED_ORE);
 	NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
+
+	FloatingGen_FindSpawn();
 
 	Mem_Free(heightmap);   heightmap   = NULL;
 	Mem_Free(floatCutoff); floatCutoff = NULL;
@@ -1601,8 +1643,11 @@ static void CavesGen_Generate(void) {
 	CavesGen_CarveTunnels();
 	CavesGen_CarveCaverns();
 	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
-	NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
-	NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
+	/* Cobblestone and mossy cobblestone only in hell caves */
+	if (Gen_Theme == GEN_THEME_HELL) {
+		NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
+		NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
+	}
 	NotchyGen_CarveOreVeins(0.7f, "Carving iron ore",    BLOCK_IRON_ORE);
 	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore",    BLOCK_GOLD_ORE);
 	NotchyGen_CarveOreVeins(0.6f, "Carving red ore",     BLOCK_RED_ORE);
