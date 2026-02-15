@@ -1106,6 +1106,8 @@ static int Adv_Lit(int x, int y, int z, int cIndex) {
 	/* Use fact Light(Y.YMin) == Light((Y-1).YMax) */
 	offset = (lightFlags >> LIGHT_FLAG_SHADES_FROM_BELOW) & 1;
 	flags |= Lighting.IsLit_Fast(x, y - offset, z) ? LIT_M1 : 0;
+	/* Also check y-1 directly for torch light to fix torch lighting on top/bottom faces */
+	if (!offset && Lighting.IsLit_Fast(x, y - 1, z)) flags |= LIT_M1;
 
 	/* Light is same for all the horizontal faces */
 	flags |= Lighting.IsLit_Fast(x, y, z) ? LIT_CC : 0;
@@ -1113,6 +1115,8 @@ static int Adv_Lit(int x, int y, int z, int cIndex) {
 	/* Use fact Light((Y+1).YMin) == Light(Y.YMax) */
 	offset = (lightFlags >> LIGHT_FLAG_SHADES_FROM_BELOW) & 1;
 	flags |= Lighting.IsLit_Fast(x, (y + 1) - offset, z) ? LIT_P1 : 0;
+	/* Also check y+1 directly for torch light to fix torch lighting on top/bottom faces */
+	if (offset && Lighting.IsLit_Fast(x, y + 1, z)) flags |= LIT_P1;
 
 	/* If a block is fullbright, it should also look as if that spot is lit */
 	if (Blocks.Brightness[Builder_Chunk[cIndex - 324]]) flags |= LIT_M1;

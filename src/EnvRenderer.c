@@ -82,20 +82,12 @@ static PackedCol CalcFog(float* density) {
 }
 
 static void UpdateFogMinimal(float fogDensity) {
-	int dist;
-	/* TODO: rewrite this to avoid raising the event? want to avoid recreating vbos too many times often */
-
-	if (fogDensity != 0.0f) {
-		/* Exp fog mode: f = e^(-density*coord) */
-		/* Solve coord for f = 0.05 (good approx for fog end) */
-		/*   i.e. log(0.05) = -density * coord */
-		#define LOG_005 -2.99573227355399f
-
-		dist = (int)(LOG_005 / -fogDensity);
-		Game_SetViewDistance(min(dist, Game_UserViewDistance));
-	} else {
+	/* Don't change view distance when underwater - let scaled fog handle visibility */
+	/* This prevents the "solid wall" effect when lowering render distance */
+	if (fogDensity == 0.0f) {
 		Game_SetViewDistance(Game_UserViewDistance);
 	}
+	/* When underwater, maintain user view distance and rely on scaled fog density */
 }
 
 static void UpdateFogNormal(float fogDensity, PackedCol fogColor) {
@@ -136,8 +128,10 @@ void EnvRenderer_UpdateFog(void) {
 		/*  Same blended colour as normal fog, but simpler method  */
 		Gfx_ClearColor(fogColor);
 		if (fogDensity != 0.0f) {
+			/* Scale fog density based on render distance to avoid solid wall effect */
+			float scaledDensity = fogDensity * (Game_ViewDistance / 128.0f);
 			Gfx_SetFogMode(FOG_EXP);
-			Gfx_SetFogDensity(fogDensity);
+			Gfx_SetFogDensity(scaledDensity);
 			Gfx_SetFogCol(fogColor);
 		} else {
 			Gfx_SetFogMode(FOG_LINEAR);

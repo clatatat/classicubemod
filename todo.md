@@ -18,3 +18,7 @@
 - add slimes (them green bouncy things that split apart)
 
 
+- Instead of mobs taking 10 damage per second in lava, make them take 5 damage per half second so they actually sound like they are being hurt and dont just die pretty much silently
+- make the player not able to spawn on the invisible cieling on hell mode, and on floating mode, the player should always spawn on one of the islands and not on the invisible floor.
+- make ores unable to generate in dirt unless the hell theme is enabled, and the generation type is caves
+- remove cobblestone and mossy cobblestone from cave world type generation, unless the hell world type is enabled
