@@ -1166,6 +1166,49 @@ static struct TextInputWidget* GenLevelScreen_SelectedInput(struct GenLevelScree
 	return NULL;
 }
 
+static int GenLevelScreen_InputDown(void* screen, int key, struct InputDevice* device) {
+	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
+	struct TextInputWidget* selected;
+	int i, currentInputIndex = -1;
+	int newIndex;
+
+	/* Handle Tab navigation through input fields */
+	if (key == CCKEY_TAB) {
+		/* Find which input is currently selected */
+		for (i = 0; i < GENLEVEL_NUM_INPUTS; i++) {
+			if (&s->inputs[i] == (struct TextInputWidget*)s->widgets[s->selectedI]) {
+				currentInputIndex = i;
+				break;
+			}
+		}
+
+		/* If an input is selected, move to next/previous */
+		if (currentInputIndex >= 0) {
+			if (Input_IsShiftPressed()) {
+				/* Shift+Tab: go to previous input, wrap to last */
+				newIndex = (currentInputIndex - 1 + GENLEVEL_NUM_INPUTS) % GENLEVEL_NUM_INPUTS;
+			} else {
+				/* Tab: go to next input, wrap to first */
+				newIndex = (currentInputIndex + 1) % GENLEVEL_NUM_INPUTS;
+			}
+
+			/* Find the widget index for this input */
+			for (i = 0; i < s->numWidgets; i++) {
+				if (s->widgets[i] == (struct Widget*)&s->inputs[newIndex]) {
+					s->selectedI = i;
+					selected = &s->inputs[newIndex];
+					OnscreenKeyboard_SetText(&selected->base.text);
+					return true;
+				}
+			}
+		}
+	}
+
+	/* Fall back to default menu input handling */
+	Menu_DoInputDown(screen, key, device);
+	return Screen_InputDown(screen, key, device);
+}
+
 static int GenLevelScreen_KeyPress(void* screen, char keyChar) {
 	struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
 	struct TextInputWidget* selected = GenLevelScreen_SelectedInput(s);
@@ -1277,7 +1320,7 @@ static void GenLevelScreen_Init(void* screen) {
 static const struct ScreenVTABLE GenLevelScreen_VTABLE = {
 	GenLevelScreen_Init,        GenLevelScreen_Update, Menu_CloseKeyboard,
 	MenuScreen_Render2,         Screen_BuildMesh,
-	Menu_InputDown,             Screen_InputUp,    GenLevelScreen_KeyPress, GenLevelScreen_TextChanged,
+	GenLevelScreen_InputDown,   Screen_InputUp,    GenLevelScreen_KeyPress, GenLevelScreen_TextChanged,
 	GenLevelScreen_PointerDown, Screen_PointerUp,  Menu_PointerMove,        Screen_TMouseScroll,
 	GenLevelScreen_Layout,      GenLevelScreen_ContextLost, GenLevelScreen_ContextRecreated,
 	Menu_PadAxis
