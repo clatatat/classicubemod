@@ -2647,7 +2647,7 @@ void TNT_Explode(int x, int y, int z) {
 }
 
 /* TNT tracking array - for checking redstone power each tick */
-#define TNT_TRACK_MAX 64
+#define TNT_TRACK_MAX 2048
 static struct { int x, y, z; } tnt_positions[TNT_TRACK_MAX];
 static int tnt_count = 0;
 
@@ -2676,7 +2676,7 @@ static void TNT_Unregister(int x, int y, int z) {
 }
 
 /* TNT fuse queue - right-clicked TNT waits 5 seconds (100 ticks) before exploding */
-#define TNT_FUSE_MAX 64
+#define TNT_FUSE_MAX 2048
 #define TNT_FUSE_TICKS 60  /* 3 seconds at 20Hz */
 typedef struct TNTFuseEntry_ {
 	int x, y, z;
