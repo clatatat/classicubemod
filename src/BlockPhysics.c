@@ -316,6 +316,23 @@ static void Physics_HandleTorch(int index, BlockID block) {
 	}
 }
 
+static void Physics_HandleSnow(int index, BlockID block) {
+	BlockID neighbor;
+	int x, y, z;
+	
+	World_Unpack(index, x, y, z);
+	
+	/* Check block below - snow needs solid support */
+	if (y > 0) {
+		neighbor = World_GetBlock(x, y - 1, z);
+		if (neighbor != BLOCK_AIR) return; /* Has support */
+	}
+	
+	/* No support - break the snow */
+	Game_UpdateBlock(x, y, z, BLOCK_AIR);
+	Physics_ActivateNeighbours(x, y, z, index);
+}
+
 /*########################################################################################################################*
 *-------------------------------------------------Redstone shared data----------------------------------------------------*
 *#########################################################################################################################*/
@@ -2867,6 +2884,9 @@ void Physics_Init(void) {
 	
 	/* Torch breaks when all support blocks are removed */
 	Physics.OnActivate[BLOCK_TORCH]    = Physics_HandleTorch;
+	
+	/* Snow breaks when block below is removed */
+	Physics.OnActivate[BLOCK_SNOW]     = Physics_HandleSnow;
 	
 	/* Red Ore Torch: support check + redstone power logic */
 	Physics.OnActivate[BLOCK_RED_ORE_TORCH]     = Physics_HandleRedstoneTorch;

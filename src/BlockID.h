@@ -77,11 +77,15 @@ enum BLOCKID {
 	BLOCK_LEVER = 64, /* Lever off (direction from cache) */
 	BLOCK_PRESSURE_PLATE = 65, /* Pressure plate (unpressed) */
 	BLOCK_IRON_DOOR = 66, /* Iron Door (closed NS bottom) - opened by redstone only */
+	BLOCK_SNOW = 67, /* Snow layer - 2 pixels tall */
+	BLOCK_ICE = 68, /* Ice block */
+	BLOCK_SNOWY_GRASS = 69, /* Grass with snow on top */
+	BLOCK_SNOW_BLOCK = 70, /* Full snow block */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,
 	/* Max block ID used in original classic plus CPE blocks. */
-	BLOCK_MAX_CPE = BLOCK_IRON_DOOR,
+	BLOCK_MAX_CPE = BLOCK_SNOW_BLOCK,
 	
 	/* Non-placeable blocks (auto-placed, not in inventory) */
 	BLOCK_DOOR_NS_TOP = 200, /* Door facing North/South - top half */

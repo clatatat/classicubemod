@@ -42,7 +42,8 @@ extern Vec3 Gen_SpawnOverride;
 #define GEN_THEME_PARADISE 2
 #define GEN_THEME_WOODS    3
 #define GEN_THEME_DESERT   4
-#define GEN_THEME_COUNT    5
+#define GEN_THEME_WINTER   5
+#define GEN_THEME_COUNT    6
 extern int Gen_Theme;
 /* Checks whether the map generator has completed yet */
 cc_bool Gen_IsDone(void);

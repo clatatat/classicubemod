@@ -146,8 +146,11 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Lever",            16, 16, 16, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_NONE,  SOUND_NONE  },
 { "Pressure Plate",    4,  4,  4, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },
 { "Iron Door",        55, 55, 55, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL },
+{ "Snow",            116,116,116,  2, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
+{ "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GLASS, SOUND_GLASS  },
+{ "Snowy Grass",     116,118,  2, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS,  SOUND_GRASS  },
+{ "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,   SOUND_SNOW   },
 
-{ "Invalid",           0,  0,  0, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_NONE,   SOUND_NONE   },
 { "Invalid",           0,  0,  0, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_NONE,   SOUND_NONE   }
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
 /*                    TEX ES  TOM GHT            ITY   NESS      LIGHT  ITY                                                         */

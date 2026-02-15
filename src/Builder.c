@@ -664,7 +664,7 @@ static void Builder_DrawLeverHandle(int x, int y, int z) {
 	float x1t,z1t, x2t,z2t;
 	float y2;
 	float d_up, d_out;
-	float hw = 5.5f/16.0f; /* half-width of crossed sprite planes (same as torch) */
+	float hw = 6.5f/16.0f; /* half-width of crossed sprite planes (slightly thicker than torch) */
 	cc_bool leverOn;
 	float cx, cz; /* center of the base on the wall */
 	
@@ -678,8 +678,8 @@ static void Builder_DrawLeverHandle(int x, int y, int z) {
 	/* Only show bottom 10/16 of texture (skip top 6 rows, like a regular torch) */
 	v1  = v1 + (6.0f/16.0f) * Atlas1D.InvTileSize * UV2_Scale;
 	
-	d_up  = 9.0f/16.0f * 0.7f;  /* handleLen * sin(45) */
-	d_out = 9.0f/16.0f * 0.7f;  /* handleLen * cos(45) */
+	d_up  = 9.0f/16.0f * 0.6428f;  /* handleLen * sin(40) */
+	d_out = 9.0f/16.0f * 0.7660f;  /* handleLen * cos(40) */
 	
 	if (!leverOn) d_up = -d_up;
 	

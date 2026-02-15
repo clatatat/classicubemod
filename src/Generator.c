@@ -146,6 +146,9 @@ static void FlatgrassGen_Generate(void) {
 	} else if (Gen_Theme == GEN_THEME_DESERT) {
 		surfaceBlock = BLOCK_SAND;
 		fillBlock    = BLOCK_SAND;
+	} else if (Gen_Theme == GEN_THEME_WINTER) {
+		surfaceBlock = BLOCK_SNOWY_GRASS;
+		fillBlock    = BLOCK_DIRT;
 	} else {
 		surfaceBlock = BLOCK_GRASS;
 		fillBlock    = BLOCK_DIRT;
@@ -159,6 +162,11 @@ static void FlatgrassGen_Generate(void) {
 
 	Gen_CurrentState = "Setting surface blocks";
 	FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, surfaceBlock);
+
+	/* Winter theme: add snow layer on top */
+	if (Gen_Theme == GEN_THEME_WINTER) {
+		FlatgrassGen_MapSet(World.Height / 2, World.Height / 2, BLOCK_SNOW);
+	}
 
 	if (Gen_Theme == GEN_THEME_HELL) Gen_PlaceShadowCeiling();
 
@@ -178,6 +186,11 @@ static void FlatgrassGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_WINTER) {
+		/* Cold, snowy atmosphere */
+		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
 	}
 }
 
@@ -567,7 +580,8 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 	int waterY = waterLevel - 1;
 	int index1, index2;
 	int x, z;
-	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : BLOCK_STILL_WATER;
+	BlockRaw fluidBlock = (Gen_Theme == GEN_THEME_HELL) ? BLOCK_STILL_LAVA : 
+	                      (Gen_Theme == GEN_THEME_WINTER) ? BLOCK_ICE : BLOCK_STILL_WATER;
 	Gen_CurrentState = (Gen_Theme == GEN_THEME_HELL) ? "Flooding edge lava" : "Flooding edge water";
 
 	index1 = World_Pack(0, waterY, 0);
@@ -680,6 +694,13 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel + 2 && (OctaveNoise_Calc(n1, (float)x, (float)z) > 2)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
+			} else if (Gen_Theme == GEN_THEME_WINTER) {
+				/* Winter: snowy grass on surface, ice for water, gravel underwater */
+				if (above == BLOCK_ICE && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = BLOCK_GRAVEL;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = BLOCK_SNOWY_GRASS;
+				}
 			} else {
 				/* Normal / Woods */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
@@ -687,6 +708,32 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
+			}
+		}
+	}
+}
+
+static void NotchyGen_PlaceSnowLayer(void) {
+	int hIndex = 0, index;
+	BlockRaw above;
+	int x, y, z;
+
+	if (Gen_Theme != GEN_THEME_WINTER) return;
+
+	Gen_CurrentState = "Placing snow layer";
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+
+		for (x = 0; x < World.Width; x++) {
+			y = heightmap[hIndex++];
+			if (y < 0 || y >= World.MaxY) continue;
+
+			/* Place snow on top of exposed blocks */
+			index = World_Pack(x, y + 1, z);
+			above = (y + 1 >= World.Height) ? BLOCK_AIR : Gen_Blocks[index];
+			
+			if (above == BLOCK_AIR) {
+				Gen_Blocks[index] = BLOCK_SNOW;
 			}
 		}
 	}
@@ -816,9 +863,9 @@ static void NotchyGen_PlantTrees(void) {
 						}
 					}
 				} else {
-					/* Normal/Woods/Paradise/Hell: normal trees on grass (or dirt for Hell) */
+					/* Normal/Woods/Paradise/Hell/Winter: normal trees on grass (or snowy grass for Winter, or dirt for Hell) */
 					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+					if ((under == BLOCK_GRASS || under == BLOCK_SNOWY_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
 						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
 						for (m = 0; m < count; m++) {
 							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
@@ -923,6 +970,7 @@ static void NotchyGen_Generate(void) {
 		GEN_COOP_STEP(12, NotchyGen_PlantFlowers() );
 		GEN_COOP_STEP(13, NotchyGen_PlantMushrooms() );
 		GEN_COOP_STEP(14, NotchyGen_PlantTrees() );
+		GEN_COOP_STEP(15, NotchyGen_PlaceSnowLayer() );
 	GEN_COOP_END
 
 	Mem_Free(heightmap);
@@ -946,6 +994,11 @@ static void NotchyGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_WINTER) {
+		/* Cold, snowy atmosphere */
+		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
 	}
 }
 
@@ -1302,6 +1355,11 @@ static void FloatingGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_WINTER) {
+		/* Cold, snowy atmosphere */
+		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
 	}
 }
 
@@ -1675,6 +1733,11 @@ static void CavesGen_Setup(void) {
 		Env_SetSkyCol(PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF));
 		Env_SetFogCol(PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF));
 		Env_SetCloudsCol(PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF));
+	} else if (Gen_Theme == GEN_THEME_WINTER) {
+		/* Cold, snowy atmosphere */
+		Env_SetSkyCol(PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF));
+		Env_SetFogCol(PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF));
+		Env_SetCloudsCol(PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF));
 	}
 }
 
