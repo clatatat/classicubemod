@@ -127,6 +127,8 @@ enum BLOCKID {
 	BLOCK_DCHEST_W_L = 231, /* Front -X, left half (+Z block) */
 	BLOCK_DCHEST_W_R = 232, /* Front -X, right half (-Z block) */
 
+	BLOCK_SHADOW_CEILING = 233, /* Invisible light-blocking ceiling for hell theme */
+
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM

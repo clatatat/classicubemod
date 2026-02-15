@@ -66,6 +66,7 @@ static const struct SimpleBlockDef lever_on_def = {"Lever On", 16, 16, 16, 16, F
 static const struct SimpleBlockDef pressure_plate_pressed_def = {"Pressure Plate Pressed", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
 static const struct SimpleBlockDef iron_door_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
 static const struct SimpleBlockDef double_chest_def = {"Double Chest", 26, 27, 26, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef shadow_ceiling_def = {"Shadow Ceiling", 0, 0, 0, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_GAS, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
 
 /* Properties for all built-in blocks (Classic and CPE blocks) */
 static const struct SimpleBlockDef core_blockDefs[] = {
@@ -1251,6 +1252,8 @@ void Block_ResetProps(BlockID block) {
 		def = &iron_door_def;
 	} else if (block >= BLOCK_DCHEST_S_L && block <= BLOCK_DCHEST_W_R) {
 		def = &double_chest_def;
+	} else if (block == BLOCK_SHADOW_CEILING) {
+		def = &shadow_ceiling_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1813,7 +1816,10 @@ static void OnReset(void) {
 	Inventory_Remove(BLOCK_DCHEST_E_R);
 	Inventory_Remove(BLOCK_DCHEST_W_L);
 	Inventory_Remove(BLOCK_DCHEST_W_R);
-	
+
+	/* Remove shadow ceiling from inventory (auto-placed during hell theme generation) */
+	Inventory_Remove(BLOCK_SHADOW_CEILING);
+
 	DirectionalCache_Clear();
 }
 
