@@ -132,7 +132,7 @@ static struct MenuOptionsScreen {
 static union  MenuOptionMeta menuOpts_meta[MENUOPTS_MAX_OPTS];
 static struct Widget* menuOpts_widgets[MENUOPTS_MAX_OPTS + 1];
 
-static void MenuOptionsScreen_Update(struct MenuOptionsScreen* s, struct ButtonWidget* btn) {
+void MenuOptionsScreen_Update(struct MenuOptionsScreen* s, struct ButtonWidget* btn) {
 	struct MenuOptionMetaBool* meta = (struct MenuOptionMetaBool*)btn->meta.ptr;
 	cc_string title; char titleBuffer[STRING_SIZE];
 	String_InitArray(title, titleBuffer);
@@ -141,7 +141,7 @@ static void MenuOptionsScreen_Update(struct MenuOptionsScreen* s, struct ButtonW
 	if (meta->GetText) {
 		String_AppendConst(&title, ": ");
 		meta->GetText(btn, &title);
-	}	
+	}
 	ButtonWidget_Set(btn, &title, &s->titleFont);
 }
 
@@ -295,13 +295,28 @@ static void MenuOptionsScreen_EnumGet(struct ButtonWidget* btn, cc_string* v) {
 static void MenuOptionsScreen_EnumClick(void* screen, void* widget) {
 	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
 	struct ButtonWidget* btn    = (struct ButtonWidget*)widget;
-	
-	struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
-	int raw = meta->GetValue();
 
-	raw = (raw + 1) % meta->count;
-	meta->SetValue(raw);
-	MenuOptionsScreen_Update(s, btn);
+	struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
+
+	/* Use dropdown for 3+ options, cycle for 2 options (boolean-like) */
+	if (meta->count >= 3) {
+		MenuDropdownOverlay_Show(
+			btn->optName,      /* Setting name e.g. "FPS mode" */
+			meta->names,       /* Array of option names */
+			meta->count,       /* Number of options */
+			meta->GetValue,    /* Callback to get current value */
+			meta->SetValue,    /* Callback to set new value */
+			screen,            /* Source MenuOptionsScreen */
+			btn,               /* Source button to update */
+			Gui_TouchUI        /* Use screenMode on touch devices */
+		);
+	} else {
+		/* Original cycling behavior for 2-option settings */
+		int raw = meta->GetValue();
+		raw = (raw + 1) % meta->count;
+		meta->SetValue(raw);
+		MenuOptionsScreen_Update(s, btn);
+	}
 }
 
 void MenuOptionsScreen_AddEnum(struct MenuOptionsScreen* s, const char* name,
