@@ -234,8 +234,7 @@ void Launcher_Setup(void) {
 	}
 #endif
 	Drawer2D_Component.Init();
-	SystemFonts_Component.Init();
-	Drawer2D.BitmappedText    = false;
+	Drawer2D.BitmappedText    = true;
 	Drawer2D.BlackTextShadows = true;
 
 	LBackend_Init();
@@ -577,8 +576,7 @@ void Launcher_DrawTitle(struct FontDesc* font, const char* text, struct Context2
 #endif
 
 void Launcher_MakeTitleFont(struct FontDesc* font) {
-	Drawer2D.BitmappedText = Launcher_BitmappedText();
+	Drawer2D.BitmappedText = true;
 	Font_Make(font, 32, FONT_FLAGS_NONE);
-	Drawer2D.BitmappedText = false;
 }
 #endif

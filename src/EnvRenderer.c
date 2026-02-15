@@ -138,6 +138,7 @@ void EnvRenderer_UpdateFog(void) {
 		if (fogDensity != 0.0f) {
 			Gfx_SetFogMode(FOG_EXP);
 			Gfx_SetFogDensity(fogDensity);
+			Gfx_SetFogCol(fogColor);
 		} else {
 			Gfx_SetFogMode(FOG_LINEAR);
 			Gfx_SetFogCol(fogColor);

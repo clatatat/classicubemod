@@ -1532,6 +1532,8 @@ static float    mobSpiderLeapTimer[MAX_NET_PLAYERS];    /* cooldown between spid
 static float    mobFallStartY[MAX_NET_PLAYERS];         /* Y position when mob started falling */
 static cc_bool  mobIsBrownSpider[MAX_NET_PLAYERS];      /* true = brown spider variant (hostile type, passive behavior) */
 static float    mobSunDamageTimer[MAX_NET_PLAYERS];     /* accumulates time in sunlight for light sensitivity */
+static float    mobLavaDamageTimer[MAX_NET_PLAYERS];    /* accumulates time in lava for lava damage */
+static float    mobCactusDamageTimer[MAX_NET_PLAYERS];  /* accumulates time touching cactus for cactus damage */
 static cc_uint8 mobCreeperVariant[MAX_NET_PLAYERS];     /* creeper variant type (only valid when mobModelIdx == MOB_IDX_CREEPER) */
 
 /* Creeper variant constants */
@@ -1592,6 +1594,35 @@ static cc_bool Mob_IsInWater(struct Entity* e) {
 	if (!World_Contains(bx, by, bz)) return false;
 	b = World_GetBlock(bx, by, bz);
 	return b == BLOCK_WATER || b == BLOCK_STILL_WATER;
+}
+
+static cc_bool Mob_IsInLava(struct Entity* e) {
+	int bx = (int)Math_Floor(e->Position.x);
+	int by = (int)Math_Floor(e->Position.y);
+	int bz = (int)Math_Floor(e->Position.z);
+	BlockID b;
+	if (!World_Contains(bx, by, bz)) return false;
+	b = World_GetBlock(bx, by, bz);
+	return b == BLOCK_LAVA || b == BLOCK_STILL_LAVA;
+}
+
+static cc_bool Mob_IsTouchingCactus(struct Entity* e) {
+	int bx = (int)Math_Floor(e->Position.x);
+	int by = (int)Math_Floor(e->Position.y);
+	int bz = (int)Math_Floor(e->Position.z);
+	int dx, dy;
+	/* Check the block at feet and head level, plus adjacent blocks */
+	for (dy = 0; dy <= 1; dy++) {
+		for (dx = -1; dx <= 1; dx++) {
+			int dz;
+			for (dz = -1; dz <= 1; dz++) {
+				int cx = bx + dx, cy = by + dy, cz = bz + dz;
+				if (World_Contains(cx, cy, cz) && World_GetBlock(cx, cy, cz) == BLOCK_CACTUS)
+					return true;
+			}
+		}
+	}
+	return false;
 }
 
 static void Mob_PickWanderTarget(int id, struct Entity* e) {
@@ -2256,6 +2287,28 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		}
 	}
 
+	/* Lava damage: 10 damage per second */
+	if (Mob_IsInLava(e)) {
+		mobLavaDamageTimer[id] += delta;
+		if (mobLavaDamageTimer[id] >= 1.0f) {
+			mobLavaDamageTimer[id] -= 1.0f;
+			Mob_DamageMob(id, 10, false);
+		}
+	} else {
+		mobLavaDamageTimer[id] = 0.0f;
+	}
+
+	/* Cactus damage: 1 damage per second */
+	if (Mob_IsTouchingCactus(e)) {
+		mobCactusDamageTimer[id] += delta;
+		if (mobCactusDamageTimer[id] >= 1.0f) {
+			mobCactusDamageTimer[id] -= 1.0f;
+			Mob_DamageMob(id, 1, false);
+		}
+	} else {
+		mobCactusDamageTimer[id] = 0.0f;
+	}
+
 	/* Push mob out of solid blocks (prevents getting stuck in walls) */
 	{
 		int mx = (int)Math_Floor(e->Position.x);
@@ -2724,6 +2777,8 @@ void Mob_RemoveAllMobs(void) {
 			mobFallStartY[i] = 0.0f;
 			mobIsBrownSpider[i] = false;
 			mobSunDamageTimer[i] = 0.0f;
+			mobLavaDamageTimer[i] = 0.0f;
+			mobCactusDamageTimer[i] = 0.0f;
 			mobCreeperVariant[i] = CREEPER_VAR_STANDARD;
 		}
 	}
@@ -2851,6 +2906,8 @@ static void SpawnRandomMob(void) {
 	mobFallStartY[id] = spawnPos.y;
 	mobIsBrownSpider[id] = false;
 	mobSunDamageTimer[id] = 0.0f;
+	mobLavaDamageTimer[id] = 0.0f;
+	mobCactusDamageTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_STANDARD;
 
 	/* Set model */
@@ -3062,6 +3119,8 @@ static void BoomCommand_Execute(const cc_string* args, int argsCount) {
 	mobFallStartY[id] = spawnPos.y;
 	mobIsBrownSpider[id] = false;
 	mobSunDamageTimer[id] = 0.0f;
+	mobLavaDamageTimer[id] = 0.0f;
+	mobCactusDamageTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_NUKE;
 
 	model = String_FromReadonly("creeperc");
@@ -3150,12 +3209,14 @@ static cc_bool Mob_FindNaturalSpawnPos(Vec3* outPos, int lightMode) {
 		/* Ensure 2 blocks of air above */
 		if (!Mob_BlockIsPassable(tx, ty, tz) || !Mob_BlockIsPassable(tx, ty + 1, tz)) continue;
 
-		/* Don't spawn underwater */
+		/* Don't spawn underwater or in lava */
 		{
 			BlockID b0 = World_GetBlock(tx, ty, tz);
 			BlockID b1 = World_GetBlock(tx, ty + 1, tz);
 			if (b0 == BLOCK_WATER || b0 == BLOCK_STILL_WATER ||
 				b1 == BLOCK_WATER || b1 == BLOCK_STILL_WATER) continue;
+			if (b0 == BLOCK_LAVA || b0 == BLOCK_STILL_LAVA ||
+				b1 == BLOCK_LAVA || b1 == BLOCK_STILL_LAVA) continue;
 		}
 
 		/* Light check: hostile must be in shadow, passive must be in light */

@@ -1030,11 +1030,10 @@ static void    GuO_SetTabAuto(cc_bool v) {
 	Options_SetBool(OPT_TAB_AUTOCOMPLETE, v); 
 }
 
-static cc_bool GuO_GetUseFont(void) { return !Drawer2D.BitmappedText; }
+static cc_bool GuO_GetUseFont(void) { return false; }
 static void    GuO_SetUseFont(cc_bool v) {
-	Drawer2D.BitmappedText = !v;
-	Options_SetBool(OPT_USE_CHAT_FONT, v);
-	Event_RaiseVoid(&ChatEvents.FontChanged);
+	/* Always use built-in bitmap font */
+	Drawer2D.BitmappedText = true;
 }
 
 static void GuiOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {

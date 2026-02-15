@@ -713,7 +713,7 @@ static void OnInit(void) {
 	OnReset();
 	TextureEntry_Register(&default_entry);
 
-	Drawer2D.BitmappedText    = Game_ClassicMode || !Options_GetBool(OPT_USE_CHAT_FONT, false);
+	Drawer2D.BitmappedText    = true;
 	Drawer2D.BlackTextShadows = Options_GetBool(OPT_BLACK_TEXT, false);
 }
 

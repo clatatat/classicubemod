@@ -878,7 +878,10 @@ static void NotchyGen_PlantTrees(void) {
 
 static cc_bool NotchyGen_Prepare(int seed) {
 	Random_Seed(&rnd, seed);
-	waterLevel = World.Height / 2;	
+	waterLevel = World.Height / 2;
+	/* Paradise: raise water level for more oceans and lagoons */
+	if (Gen_Theme == GEN_THEME_PARADISE)
+		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
 	heightmap  = (cc_int16*)Mem_TryAlloc(World.Width * World.Length, 2);
@@ -1181,6 +1184,9 @@ static cc_bool FloatingGen_Prepare(int seed) {
 	int mapArea = World.Width * World.Length;
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
+	/* Paradise: raise water level for more oceans and lagoons */
+	if (Gen_Theme == GEN_THEME_PARADISE)
+		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
 	/* Calculate number of layers based on world height */

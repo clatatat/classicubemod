@@ -16,9 +16,3 @@
 - add room and corridor generation to be able to make randomly generated structures
 - add minecarts, rails, minecart chest/furnace/tnt, powered rails
 - add slimes (them green bouncy things that split apart)
-
-
-# optimization ideas
-- Looking at task manager, it's only using 100mb of RAM.
-- Maybe allow it to use more, depending on a configuration file (maybe RAM.CFG to set the maximum ram usage)
-- maybe allow it to use the 400 extra mb to speed up rendering and offload stuff from the GPU to the CPU

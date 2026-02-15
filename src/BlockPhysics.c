@@ -317,6 +317,55 @@ static void Physics_HandleTorch(int index, BlockID block) {
 }
 
 /*########################################################################################################################*
+*-------------------------------------------------Redstone shared data----------------------------------------------------*
+*#########################################################################################################################*/
+/* BFS queue size for redstone power propagation */
+#define REDSTONE_MAX_QUEUE 4096
+#define REDSTONE_MAX_POWER 15
+
+/* Shared constant offset arrays used by multiple redstone functions */
+static const int adjOffsets6[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
+static const int hOffsets4[4][2] = {{-1,0},{1,0},{0,-1},{0,1}};
+
+/* Static buffers for Redstone_PropagatePower - avoids ~88KB+ of stack allocations */
+/* Safe because redstone_propagating flag prevents concurrent use */
+static int pp_dustPositions[REDSTONE_MAX_QUEUE][3];
+static int pp_dustPower[REDSTONE_MAX_QUEUE];
+/* Visited bitset for dust discovery - indexed by World_Pack position */
+/* Allocated once when world loads, avoids O(n^2) linear visited checks */
+static cc_uint8* pp_visitedBits = NULL;
+static int pp_visitedCapacity = 0; /* in bytes */
+/* Positions touched in visited bitset, for fast clearing */
+static int pp_visitedPositions[REDSTONE_MAX_QUEUE];
+static int pp_visitedCount = 0;
+
+static void Redstone_AllocVisited(void) {
+	int worldVolume = World.Width * World.Height * World.Length;
+	int needed = (worldVolume + 7) / 8;
+	if (pp_visitedBits && pp_visitedCapacity >= needed) return;
+	if (pp_visitedBits) Mem_Free(pp_visitedBits);
+	pp_visitedBits = (cc_uint8*)Mem_AllocCleared(needed, 1, "redstone visited");
+	pp_visitedCapacity = needed;
+}
+
+static void Redstone_FreeVisited(void) {
+	if (pp_visitedBits) { Mem_Free(pp_visitedBits); pp_visitedBits = NULL; }
+	pp_visitedCapacity = 0;
+}
+
+#define PP_VISITED_SET(idx) pp_visitedBits[(idx) >> 3] |= (1 << ((idx) & 7))
+#define PP_VISITED_GET(idx) (pp_visitedBits[(idx) >> 3] & (1 << ((idx) & 7)))
+
+static void PP_ClearVisited(void) {
+	int i;
+	for (i = 0; i < pp_visitedCount; i++) {
+		int idx = pp_visitedPositions[i];
+		pp_visitedBits[idx >> 3] = 0;
+	}
+	pp_visitedCount = 0;
+}
+
+/*########################################################################################################################*
 *-------------------------------------------------Redstone power system---------------------------------------------------*
 *#########################################################################################################################*/
 /* Check if a block is any form of redstone dust */
@@ -581,9 +630,6 @@ static void Plate_CancelRelease(int x, int y, int z) {
 }
 
 /* BFS queue for redstone power propagation */
-#define REDSTONE_MAX_QUEUE 4096
-#define REDSTONE_MAX_POWER 15
-
 typedef struct RedstoneNode_ {
 	int x, y, z;
 	int power; /* Signal strength 0-15 */
@@ -674,6 +720,7 @@ static void Redstone_Reset(void) {
 	button_queueCount = 0;
 	redstone_depth = 0;
 	redstone_propagating = false;
+	Redstone_AllocVisited();
 	IronDoor_ScanWorld();
 	TNT_ScanWorld();
 }
@@ -705,30 +752,29 @@ static void Redstone_ScheduleTorchToggle(int x, int y, int z, BlockID targetBloc
    They also strongly power the block above, which emits to all 6 sides. */
 static void Redstone_PropagateTorchPower(int x, int y, int z) {
 	int adx, ady, adz, s;
-	int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 	BlockID block = World_GetBlock(x, y, z);
-	
+
 	if (!Redstone_GetTorchAttachDir(block, &adx, &ady, &adz)) return;
-	
+
 	/* Direct power: dust in all 5 adjacent positions except attach direction */
 	for (s = 0; s < 6; s++) {
-		int sx = x + adjOff[s][0];
-		int sy = y + adjOff[s][1];
-		int sz = z + adjOff[s][2];
-		if (adjOff[s][0] == adx && adjOff[s][1] == ady && adjOff[s][2] == adz)
+		int sx = x + adjOffsets6[s][0];
+		int sy = y + adjOffsets6[s][1];
+		int sz = z + adjOffsets6[s][2];
+		if (adjOffsets6[s][0] == adx && adjOffsets6[s][1] == ady && adjOffsets6[s][2] == adz)
 			continue; /* skip attach direction */
 		if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 			Redstone_PropagatePower(sx, sy, sz);
 	}
-	
+
 	/* Strong power: if block above is opaque, propagate to dust on all 6 sides */
 	if (World_Contains(x, y + 1, z)) {
 		BlockID above = World_GetBlock(x, y + 1, z);
 		if (Blocks.Draw[above] == DRAW_OPAQUE) {
 			for (s = 0; s < 6; s++) {
-				int sx = x + adjOff[s][0];
-				int sy = (y + 1) + adjOff[s][1];
-				int sz = z + adjOff[s][2];
+				int sx = x + adjOffsets6[s][0];
+				int sy = (y + 1) + adjOffsets6[s][1];
+				int sz = z + adjOffsets6[s][2];
 				if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 					Redstone_PropagatePower(sx, sy, sz);
 			}
@@ -809,18 +855,17 @@ static void Redstone_TickTorchQueue(void) {
    Pressed buttons strongly power the attached block, which emits to all 6 sides. */
 static void Redstone_PropagateButtonPower(int bx, int by, int bz) {
 	int ax, ay, az, s;
-	int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-	
+
 	if (!Redstone_GetButtonAttachBlock(bx, by, bz, &ax, &ay, &az)) return;
-	
+
 	/* Strong power: if attached block is opaque, propagate to dust on all 6 sides */
 	if (World_Contains(ax, ay, az)) {
 		BlockID attachBlock = World_GetBlock(ax, ay, az);
 		if (Blocks.Draw[attachBlock] == DRAW_OPAQUE) {
 			for (s = 0; s < 6; s++) {
-				int sx = ax + adjOff[s][0];
-				int sy = ay + adjOff[s][1];
-				int sz = az + adjOff[s][2];
+				int sx = ax + adjOffsets6[s][0];
+				int sy = ay + adjOffsets6[s][1];
+				int sz = az + adjOffsets6[s][2];
 				if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 					Redstone_PropagatePower(sx, sy, sz);
 			}
@@ -868,46 +913,44 @@ static void Redstone_TickButtonQueue(void) {
    and emit redstone power to all 4 horizontal neighbors at the same level. */
 static void Redstone_PropagatePlatePower(int bx, int by, int bz) {
 	int ax, ay, az, s;
-	int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-	int hOff[4][2] = {{-1,0},{1,0},{0,-1},{0,1}};
-	
+
 	/* Block below the pressure plate */
 	ax = bx; ay = by - 1; az = bz;
-	
+
 	/* Strong power the block below: if opaque, propagate to dust on all 6 sides */
 	if (World_Contains(ax, ay, az)) {
 		BlockID belowBlock = World_GetBlock(ax, ay, az);
 		if (Blocks.Draw[belowBlock] == DRAW_OPAQUE) {
 			for (s = 0; s < 6; s++) {
-				int sx = ax + adjOff[s][0];
-				int sy = ay + adjOff[s][1];
-				int sz = az + adjOff[s][2];
+				int sx = ax + adjOffsets6[s][0];
+				int sy = ay + adjOffsets6[s][1];
+				int sz = az + adjOffsets6[s][2];
 				if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 					Redstone_PropagatePower(sx, sy, sz);
 			}
 		}
 	}
-	
+
 	/* Also emit power to all 4 horizontal neighbors at plate level */
 	for (s = 0; s < 4; s++) {
-		int nx = bx + hOff[s][0];
-		int nz = bz + hOff[s][1];
+		int nx = bx + hOffsets4[s][0];
+		int nz = bz + hOffsets4[s][1];
 		if (!World_Contains(nx, by, nz)) continue;
-		
+
 		/* Direct dust neighbors */
 		if (Redstone_IsDust(World_GetBlock(nx, by, nz))) {
 			Redstone_PropagatePower(nx, by, nz);
 		}
-		
+
 		/* Strongly power opaque blocks to the side (emit redstone signal from sides) */
 		{
 			BlockID sideBlock = World_GetBlock(nx, by, nz);
 			if (Blocks.Draw[sideBlock] == DRAW_OPAQUE) {
 				int t;
 				for (t = 0; t < 6; t++) {
-					int sx = nx + adjOff[t][0];
-					int sy = by + adjOff[t][1];
-					int sz = nz + adjOff[t][2];
+					int sx = nx + adjOffsets6[t][0];
+					int sy = by + adjOffsets6[t][1];
+					int sz = nz + adjOffsets6[t][2];
 					if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 						Redstone_PropagatePower(sx, sy, sz);
 				}
@@ -954,7 +997,7 @@ static void Redstone_TickPlateQueue(void) {
    When no entity is on the plate, the timer counts down and releases. */
 static void Redstone_TickPressurePlates(void) {
 	int i, px, py, pz;
-	
+
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
 		struct Entity* e = Entities.List[i];
 		if (!e) continue;
@@ -1043,26 +1086,23 @@ static void Redstone_AddDustNeighbor(int nx, int ny, int nz, int power) {
 /* An ON torch powers the opaque block directly above it */
 static cc_bool Redstone_BlockReceivesPower(int bx, int by, int bz) {
 	int i;
-	/* Horizontal neighbor offsets: dirX, dirZ */
-	int hOffsets[4][2] = {{-1,0},{1,0},{0,-1},{0,1}};
-	
 	/* Lit dust directly on TOP of the block always powers it */
 	if (World_Contains(bx, by + 1, bz) && World_GetBlock(bx, by + 1, bz) == BLOCK_LIT_RED_ORE_DUST)
 		return true;
-	
+
 	/* Lit dust on the same Y to a horizontal side only powers if the dust connects toward this block */
 	for (i = 0; i < 4; i++) {
-		int dx = bx + hOffsets[i][0];
-		int dz = bz + hOffsets[i][1];
+		int dx = bx + hOffsets4[i][0];
+		int dz = bz + hOffsets4[i][1];
 		BlockID neighbor;
-		
+
 		if (!World_Contains(dx, by, dz)) continue;
 		neighbor = World_GetBlock(dx, by, dz);
-		
+
 		if (neighbor == BLOCK_LIT_RED_ORE_DUST) {
 			/* Direction FROM dust TOWARD the block being tested */
-			int towardX = -hOffsets[i][0];
-			int towardZ = -hOffsets[i][1];
+			int towardX = -hOffsets4[i][0];
+			int towardZ = -hOffsets4[i][1];
 			if (Redstone_DustConnectsToward(dx, by, dz, towardX, towardZ))
 				return true;
 		}
@@ -1084,12 +1124,11 @@ static cc_bool Redstone_BlockReceivesPower(int bx, int by, int bz) {
 	
 	/* A pressed button attached to this block powers it */
 	{
-		int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 		int s;
 		for (s = 0; s < 6; s++) {
-			int nx = bx + adjOff[s][0];
-			int ny = by + adjOff[s][1];
-			int nz = bz + adjOff[s][2];
+			int nx = bx + adjOffsets6[s][0];
+			int ny = by + adjOffsets6[s][1];
+			int nz = bz + adjOffsets6[s][2];
 			if (World_Contains(nx, ny, nz)) {
 				BlockID neighbor = World_GetBlock(nx, ny, nz);
 				if (Redstone_IsButtonPressed(neighbor)) {
@@ -1110,18 +1149,18 @@ static cc_bool Redstone_BlockReceivesPower(int bx, int by, int bz) {
 			}
 		}
 	}
-	
+
 	/* A pressed pressure plate directly above this block powers it */
 	if (World_Contains(bx, by + 1, bz)) {
 		BlockID above = World_GetBlock(bx, by + 1, bz);
 		if (Redstone_IsPressurePlatePressed(above))
 			return true;
 	}
-	
+
 	/* A pressed pressure plate horizontally adjacent at the same level powers this block */
 	for (i = 0; i < 4; i++) {
-		int px = bx + hOffsets[i][0];
-		int pz = bz + hOffsets[i][1];
+		int px = bx + hOffsets4[i][0];
+		int pz = bz + hOffsets4[i][1];
 		if (World_Contains(px, by, pz)) {
 			BlockID plateNeighbor = World_GetBlock(px, by, pz);
 			if (Redstone_IsPressurePlatePressed(plateNeighbor))
@@ -1154,12 +1193,11 @@ static cc_bool Redstone_BlockStronglyPowered(int bx, int by, int bz) {
 	
 	/* A pressed button attached to this block strongly powers it */
 	{
-		int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 		int s;
 		for (s = 0; s < 6; s++) {
-			int nx = bx + adjOff[s][0];
-			int ny = by + adjOff[s][1];
-			int nz = bz + adjOff[s][2];
+			int nx = bx + adjOffsets6[s][0];
+			int ny = by + adjOffsets6[s][1];
+			int nz = bz + adjOffsets6[s][2];
 			if (World_Contains(nx, ny, nz)) {
 				BlockID neighbor = World_GetBlock(nx, ny, nz);
 				if (Redstone_IsButtonPressed(neighbor)) {
@@ -1191,138 +1229,174 @@ static cc_bool Redstone_BlockStronglyPowered(int bx, int by, int bz) {
 	return false;
 }
 
-/* Propagate redstone power through the world using BFS from all power sources */
+/* Propagate redstone power through the world from all power sources */
 /* This recalculates the entire connected redstone network */
 static void Redstone_PropagatePower(int startX, int startY, int startZ) {
-	int visitedPower[REDSTONE_MAX_QUEUE];
-	int i, x, y, z;
+	int i, x, y, z, dustCount = 0;
 	BlockID block, startBlock;
-	
-	/* Collect all dust positions in the network first */
-	int dustPositions[REDSTONE_MAX_QUEUE][3];
-	int dustCount = 0;
-	
+
 	/* Recursion depth guard to prevent infinite loops from torch cascading */
 	if (redstone_depth >= 3) return;
 	redstone_depth++;
-	
-	/* Seed BFS with the start position */
+
 	startBlock = World_GetBlock(startX, startY, startZ);
-	block = startBlock;
-	if (Redstone_IsDust(startBlock)) {
-		redstone_queueHead = 0;
-		redstone_queueTail = 0;
-		redstone_queue[redstone_queueTail].x = startX;
-		redstone_queue[redstone_queueTail].y = startY;
-		redstone_queue[redstone_queueTail].z = startZ;
-		redstone_queue[redstone_queueTail].power = 0;
-		redstone_queueTail++;
-		
-		/* First pass: find all connected dust */
-		while (redstone_queueHead < redstone_queueTail) {
-			cc_bool alreadyVisited = false;
-			x = redstone_queue[redstone_queueHead].x;
-			y = redstone_queue[redstone_queueHead].y;
-			z = redstone_queue[redstone_queueHead].z;
-			redstone_queueHead++;
-			
-			/* Check if already visited */
-			for (i = 0; i < dustCount; i++) {
-				if (dustPositions[i][0] == x && dustPositions[i][1] == y && dustPositions[i][2] == z) {
-					alreadyVisited = true;
-					break;
-				}
-			}
-			if (alreadyVisited) continue;
-			if (dustCount >= REDSTONE_MAX_QUEUE) break;
-			
-			block = World_GetBlock(x, y, z);
-			if (!Redstone_IsDust(block)) continue;
-			
-			dustPositions[dustCount][0] = x;
-			dustPositions[dustCount][1] = y;
-			dustPositions[dustCount][2] = z;
-			dustCount++;
-			
-			/* Add all connected positions (with power=1 just to traverse) */
-			Redstone_AddDustNeighbor(x - 1, y, z, 1);
-			Redstone_AddDustNeighbor(x + 1, y, z, 1);
-			Redstone_AddDustNeighbor(x, y, z - 1, 1);
-			Redstone_AddDustNeighbor(x, y, z + 1, 1);
-		}
-	}
-	
+
 	/* Also check if the start position is near a torch */
 	if (Redstone_IsTorch(startBlock)) {
 		Redstone_PropagateTorchPower(startX, startY, startZ);
 		redstone_depth--;
 		return;
 	}
-	
-	if (dustCount == 0) { redstone_depth--; return; }
-	
-	/* Second pass: find active torch sources for each dust position */
-	for (i = 0; i < dustCount; i++) {
-		visitedPower[i] = 0;
+
+	if (!Redstone_IsDust(startBlock)) { redstone_depth--; return; }
+	if (!pp_visitedBits) { redstone_depth--; return; }
+
+	/* First pass: BFS to find all connected dust using bitset for O(1) visited checks */
+	redstone_queueHead = 0;
+	redstone_queueTail = 0;
+	pp_visitedCount = 0;
+
+	{
+		int idx = World_Pack(startX, startY, startZ);
+		redstone_queue[redstone_queueTail].x = startX;
+		redstone_queue[redstone_queueTail].y = startY;
+		redstone_queue[redstone_queueTail].z = startZ;
+		redstone_queue[redstone_queueTail].power = 0;
+		redstone_queueTail++;
+		PP_VISITED_SET(idx);
+		pp_visitedPositions[pp_visitedCount++] = idx;
 	}
-	
+
+	while (redstone_queueHead < redstone_queueTail) {
+		x = redstone_queue[redstone_queueHead].x;
+		y = redstone_queue[redstone_queueHead].y;
+		z = redstone_queue[redstone_queueHead].z;
+		redstone_queueHead++;
+
+		block = World_GetBlock(x, y, z);
+		if (!Redstone_IsDust(block)) continue;
+		if (dustCount >= REDSTONE_MAX_QUEUE) break;
+
+		pp_dustPositions[dustCount][0] = x;
+		pp_dustPositions[dustCount][1] = y;
+		pp_dustPositions[dustCount][2] = z;
+		pp_dustPower[dustCount] = 0;
+		dustCount++;
+
+		/* Add all connected positions using Redstone_AddDustNeighbor-style checks */
+		/* but with O(1) visited bitset instead of O(n) linear scan */
+		{
+			int d;
+			for (d = 0; d < 4; d++) {
+				int nx2 = x + hOffsets4[d][0];
+				int nz2 = z + hOffsets4[d][1];
+				BlockID nb;
+				int nIdx;
+				if (!World_Contains(nx2, y, nz2)) continue;
+
+				nIdx = World_Pack(nx2, y, nz2);
+				nb = World_GetBlock(nx2, y, nz2);
+
+				if (Redstone_IsDust(nb)) {
+					if (!PP_VISITED_GET(nIdx) && redstone_queueTail < REDSTONE_MAX_QUEUE) {
+						PP_VISITED_SET(nIdx);
+						if (pp_visitedCount < REDSTONE_MAX_QUEUE) pp_visitedPositions[pp_visitedCount++] = nIdx;
+						redstone_queue[redstone_queueTail].x = nx2;
+						redstone_queue[redstone_queueTail].y = y;
+						redstone_queue[redstone_queueTail].z = nz2;
+						redstone_queue[redstone_queueTail].power = 0;
+						redstone_queueTail++;
+					}
+				} else if (nb == BLOCK_AIR && y > 0) {
+					/* Pour-over down */
+					int belowIdx = World_Pack(nx2, y - 1, nz2);
+					if (Redstone_IsDust(World_GetBlock(nx2, y - 1, nz2))) {
+						if (!PP_VISITED_GET(belowIdx) && redstone_queueTail < REDSTONE_MAX_QUEUE) {
+							PP_VISITED_SET(belowIdx);
+							if (pp_visitedCount < REDSTONE_MAX_QUEUE) pp_visitedPositions[pp_visitedCount++] = belowIdx;
+							redstone_queue[redstone_queueTail].x = nx2;
+							redstone_queue[redstone_queueTail].y = y - 1;
+							redstone_queue[redstone_queueTail].z = nz2;
+							redstone_queue[redstone_queueTail].power = 0;
+							redstone_queueTail++;
+						}
+					}
+				}
+				if (Blocks.Draw[nb] == DRAW_OPAQUE && y < World.MaxY) {
+					/* Pour-over up */
+					int aboveIdx = World_Pack(nx2, y + 1, nz2);
+					if (Redstone_IsDust(World_GetBlock(nx2, y + 1, nz2))) {
+						if (!PP_VISITED_GET(aboveIdx) && redstone_queueTail < REDSTONE_MAX_QUEUE) {
+							PP_VISITED_SET(aboveIdx);
+							if (pp_visitedCount < REDSTONE_MAX_QUEUE) pp_visitedPositions[pp_visitedCount++] = aboveIdx;
+							redstone_queue[redstone_queueTail].x = nx2;
+							redstone_queue[redstone_queueTail].y = y + 1;
+							redstone_queue[redstone_queueTail].z = nz2;
+							redstone_queue[redstone_queueTail].power = 0;
+							redstone_queueTail++;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	PP_ClearVisited();
+
+	if (dustCount == 0) { redstone_depth--; return; }
+
+	/* Second pass: find power sources for each dust position */
 	for (i = 0; i < dustCount; i++) {
 		int j;
-		int adjOffsets2[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-		
-		x = dustPositions[i][0];
-		y = dustPositions[i][1];
-		z = dustPositions[i][2];
-		
-		/* Check all 6 adjacent positions for ON torches that directly power this dust */
-		/* Torches power all 5 neighbors except their attach direction */
+		x = pp_dustPositions[i][0];
+		y = pp_dustPositions[i][1];
+		z = pp_dustPositions[i][2];
+
+		/* Check all 6 adjacent positions for power sources */
 		for (j = 0; j < 6; j++) {
-			int tx = x + adjOffsets2[j][0];
-			int ty = y + adjOffsets2[j][1];
-			int tz = z + adjOffsets2[j][2];
+			int tx = x + adjOffsets6[j][0];
+			int ty = y + adjOffsets6[j][1];
+			int tz = z + adjOffsets6[j][2];
 			BlockID tBlock;
 			int adx, ady, adz;
-			
+
 			if (!World_Contains(tx, ty, tz)) continue;
 			tBlock = World_GetBlock(tx, ty, tz);
-			
+
 			/* Direct torch power */
 			if (Redstone_IsTorchOn(tBlock)) {
 				if (Redstone_GetTorchAttachDir(tBlock, &adx, &ady, &adz)) {
-					/* Direction from torch to dust = negative of adjOffset */
-					int dirX = -adjOffsets2[j][0];
-					int dirY = -adjOffsets2[j][1];
-					int dirZ = -adjOffsets2[j][2];
+					int dirX = -adjOffsets6[j][0];
+					int dirY = -adjOffsets6[j][1];
+					int dirZ = -adjOffsets6[j][2];
 					if (dirX != adx || dirY != ady || dirZ != adz) {
-						visitedPower[i] = REDSTONE_MAX_POWER;
+						pp_dustPower[i] = REDSTONE_MAX_POWER;
 						continue;
 					}
 				}
 			}
-			
-			/* Strong power through opaque blocks (torch below the block) */
+
+			/* Strong power through opaque blocks */
 			if (Blocks.Draw[tBlock] == DRAW_OPAQUE && Redstone_BlockStronglyPowered(tx, ty, tz)) {
-				visitedPower[i] = REDSTONE_MAX_POWER;
+				pp_dustPower[i] = REDSTONE_MAX_POWER;
 			}
-			
-			/* Pressed pressure plate adjacent to dust directly powers it */
+
 			if (Redstone_IsPressurePlatePressed(tBlock)) {
-				visitedPower[i] = REDSTONE_MAX_POWER;
+				pp_dustPower[i] = REDSTONE_MAX_POWER;
 			}
-			
-			/* Pressed button adjacent to dust directly powers it */
+
 			if (Redstone_IsButtonPressed(tBlock)) {
-				visitedPower[i] = REDSTONE_MAX_POWER;
+				pp_dustPower[i] = REDSTONE_MAX_POWER;
 			}
-			
-			/* Lever ON adjacent to dust directly powers it */
+
 			if (Redstone_IsLeverOn(tBlock)) {
-				visitedPower[i] = REDSTONE_MAX_POWER;
+				pp_dustPower[i] = REDSTONE_MAX_POWER;
 			}
 		}
 	}
-	
-	/* Iterative pass: propagate power from powered dust to neighbors with decay */
+
+	/* Iterative power decay: propagate power from sources through connected dust */
+	/* Uses convergent relaxation to correctly handle complex multi-source networks */
 	{
 		int changed = 1;
 		int iter;
@@ -1330,23 +1404,23 @@ static void Redstone_PropagatePower(int startX, int startY, int startZ) {
 			changed = 0;
 			for (i = 0; i < dustCount; i++) {
 				int j;
-				if (visitedPower[i] <= 1) continue;
-				
-				x = dustPositions[i][0];
-				y = dustPositions[i][1];
-				z = dustPositions[i][2];
-				
+				if (pp_dustPower[i] <= 1) continue;
+
+				x = pp_dustPositions[i][0];
+				y = pp_dustPositions[i][1];
+				z = pp_dustPositions[i][2];
+
 				for (j = 0; j < dustCount; j++) {
 					int jx, jy, jz, dist;
 					cc_bool connected = false;
 					if (i == j) continue;
-					
-					jx = dustPositions[j][0];
-					jy = dustPositions[j][1];
-					jz = dustPositions[j][2];
-					
+
+					jx = pp_dustPositions[j][0];
+					jy = pp_dustPositions[j][1];
+					jz = pp_dustPositions[j][2];
+
 					dist = Math_AbsI(x - jx) + Math_AbsI(y - jy) + Math_AbsI(z - jz);
-					
+
 					if (dist == 1) {
 						connected = true;
 					} else if (dist == 2 && Math_AbsI(y - jy) == 1) {
@@ -1358,29 +1432,28 @@ static void Redstone_PropagatePower(int startX, int startY, int startZ) {
 								connected = true;
 						}
 					}
-					
-					if (connected && visitedPower[j] < visitedPower[i] - 1) {
-						visitedPower[j] = visitedPower[i] - 1;
+
+					if (connected && pp_dustPower[j] < pp_dustPower[i] - 1) {
+						pp_dustPower[j] = pp_dustPower[i] - 1;
 						changed = 1;
 					}
 				}
 			}
 		}
 	}
-	
-	/* Third pass: update all dust blocks based on calculated power */
-	/* Set propagating flag to prevent re-entrant propagation from triggered handlers */
+
+	/* Update pass: set all dust blocks based on calculated power */
 	{
 		cc_bool wasPropagating = redstone_propagating;
 		redstone_propagating = true;
-		
+
 		for (i = 0; i < dustCount; i++) {
-			x = dustPositions[i][0];
-			y = dustPositions[i][1];
-			z = dustPositions[i][2];
+			x = pp_dustPositions[i][0];
+			y = pp_dustPositions[i][1];
+			z = pp_dustPositions[i][2];
 			block = World_GetBlock(x, y, z);
-			
-			if (visitedPower[i] > 0) {
+
+			if (pp_dustPower[i] > 0) {
 				if (block != BLOCK_LIT_RED_ORE_DUST) {
 					Game_UpdateBlock(x, y, z, BLOCK_LIT_RED_ORE_DUST);
 				}
@@ -1390,76 +1463,70 @@ static void Redstone_PropagatePower(int startX, int startY, int startZ) {
 				}
 			}
 		}
-		
+
 		redstone_propagating = wasPropagating;
 	}
-	
-	/* Fourth pass: find opaque blocks adjacent to dust, then update torches attached to them */
+
+	/* Torch update pass: find opaque blocks adjacent to dust, update attached torches */
+	/* Uses visited bitset for O(1) dedup instead of O(n) linear scan */
 	{
 		int opaquePositions[2048][3];
 		int opaqueCount = 0;
-		
-		/* Collect all opaque blocks adjacent to any dust in the network */
+
 		for (i = 0; i < dustCount; i++) {
 			int j;
-			int adjOffsets[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
-			
-			x = dustPositions[i][0];
-			y = dustPositions[i][1];
-			z = dustPositions[i][2];
-			
+			x = pp_dustPositions[i][0];
+			y = pp_dustPositions[i][1];
+			z = pp_dustPositions[i][2];
+
 			for (j = 0; j < 6; j++) {
-				int ox = x + adjOffsets[j][0];
-				int oy = y + adjOffsets[j][1];
-				int oz = z + adjOffsets[j][2];
+				int ox = x + adjOffsets6[j][0];
+				int oy = y + adjOffsets6[j][1];
+				int oz = z + adjOffsets6[j][2];
 				BlockID oBlock;
-				cc_bool alreadyAdded = false;
-				int k;
-				
+				int oIdx;
+
 				if (!World_Contains(ox, oy, oz)) continue;
 				oBlock = World_GetBlock(ox, oy, oz);
 				if (Blocks.Draw[oBlock] != DRAW_OPAQUE) continue;
-				
-				for (k = 0; k < opaqueCount; k++) {
-					if (opaquePositions[k][0] == ox && opaquePositions[k][1] == oy && opaquePositions[k][2] == oz) {
-						alreadyAdded = true;
-						break;
-					}
-				}
-				if (alreadyAdded || opaqueCount >= 2048) continue;
-				
+
+				oIdx = World_Pack(ox, oy, oz);
+				if (PP_VISITED_GET(oIdx)) continue;
+				PP_VISITED_SET(oIdx);
+				if (pp_visitedCount < REDSTONE_MAX_QUEUE) pp_visitedPositions[pp_visitedCount++] = oIdx;
+
+				if (opaqueCount >= 2048) continue;
 				opaquePositions[opaqueCount][0] = ox;
 				opaquePositions[opaqueCount][1] = oy;
 				opaquePositions[opaqueCount][2] = oz;
 				opaqueCount++;
 			}
 		}
-		
-		/* For each opaque block, find torches attached to it and update based on power */
+
+		PP_ClearVisited();
+
 		for (i = 0; i < opaqueCount; i++) {
 			int j;
-			int torchSearchOffsets[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 			int ox = opaquePositions[i][0];
 			int oy = opaquePositions[i][1];
 			int oz = opaquePositions[i][2];
 			cc_bool opaquePowered = Redstone_BlockReceivesPower(ox, oy, oz);
-			
+
 			for (j = 0; j < 6; j++) {
-				int tx = ox + torchSearchOffsets[j][0];
-				int ty = oy + torchSearchOffsets[j][1];
-				int tz = oz + torchSearchOffsets[j][2];
+				int tx = ox + adjOffsets6[j][0];
+				int ty = oy + adjOffsets6[j][1];
+				int tz = oz + adjOffsets6[j][2];
 				int ax, ay, az;
 				BlockID tBlock;
-				
+
 				if (!World_Contains(tx, ty, tz)) continue;
 				tBlock = World_GetBlock(tx, ty, tz);
-				
+
 				if (!Redstone_IsTorch(tBlock)) continue;
-				
-				/* Verify this torch is actually attached to this opaque block */
+
 				if (!Redstone_GetTorchAttachBlock(tx, ty, tz, &ax, &ay, &az)) continue;
 				if (ax != ox || ay != oy || az != oz) continue;
-				
+
 				if (opaquePowered && Redstone_IsTorchOn(tBlock)) {
 					Redstone_ScheduleTorchToggle(tx, ty, tz, Redstone_GetTorchOffVariant(tBlock));
 				} else if (!opaquePowered && Redstone_IsTorchOff(tBlock)) {
@@ -1468,7 +1535,7 @@ static void Redstone_PropagatePower(int startX, int startY, int startZ) {
 			}
 		}
 	}
-	
+
 	redstone_depth--;
 }
 
@@ -1477,25 +1544,23 @@ static void Redstone_PropagatePower(int startX, int startY, int startZ) {
    pass inside Redstone_PropagatePower might not fire at the right depth. */
 static void Redstone_EvalNearbyTorches(int cx, int cy, int cz) {
 	/* Scan 2-block radius for opaque blocks, then check their adjacent torches */
-	int dx, dy, dz;
-	int offsets[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 	int d, t;
-	
+
 	for (d = 0; d < 6; d++) {
-		int ox = cx + offsets[d][0];
-		int oy = cy + offsets[d][1];
-		int oz = cz + offsets[d][2];
-		
+		int ox = cx + adjOffsets6[d][0];
+		int oy = cy + adjOffsets6[d][1];
+		int oz = cz + adjOffsets6[d][2];
+
 		if (!World_Contains(ox, oy, oz)) continue;
 		if (Blocks.Draw[World_GetBlock(ox, oy, oz)] != DRAW_OPAQUE) continue;
-		
+
 		/* Found an opaque block - check all 6 neighbors for torches */
 		{
 			cc_bool powered = Redstone_BlockReceivesPower(ox, oy, oz);
 			for (t = 0; t < 6; t++) {
-				int tx = ox + offsets[t][0];
-				int ty = oy + offsets[t][1];
-				int tz = oz + offsets[t][2];
+				int tx = ox + adjOffsets6[t][0];
+				int ty = oy + adjOffsets6[t][1];
+				int tz = oz + adjOffsets6[t][2];
 				int tax, tay, taz;
 				BlockID tBlock;
 				
@@ -2080,9 +2145,8 @@ static void Physics_PlaceRedstoneTorch(int index, BlockID block) {
 static void Physics_DeleteRedstoneTorch(int index, BlockID block) {
 	int x, y, z, s;
 	int adx, ady, adz;
-	int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 	World_Unpack(index, x, y, z);
-	
+
 	/* Clear burn-out for this position so player can re-place the torch */
 	{
 		int b;
@@ -2094,15 +2158,15 @@ static void Physics_DeleteRedstoneTorch(int index, BlockID block) {
 			}
 		}
 	}
-	
+
 	/* Recalculate power for all dust this torch was powering:
 	   direct neighbors (5 directions except attach) + through opaque block above */
 	if (Redstone_GetTorchAttachDir(block, &adx, &ady, &adz)) {
 		for (s = 0; s < 6; s++) {
-			int sx = x + adjOff[s][0];
-			int sy = y + adjOff[s][1];
-			int sz = z + adjOff[s][2];
-			if (adjOff[s][0] == adx && adjOff[s][1] == ady && adjOff[s][2] == adz)
+			int sx = x + adjOffsets6[s][0];
+			int sy = y + adjOffsets6[s][1];
+			int sz = z + adjOffsets6[s][2];
+			if (adjOffsets6[s][0] == adx && adjOffsets6[s][1] == ady && adjOffsets6[s][2] == adz)
 				continue;
 			if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 				Redstone_PropagatePower(sx, sy, sz);
@@ -2112,9 +2176,9 @@ static void Physics_DeleteRedstoneTorch(int index, BlockID block) {
 		BlockID above = World_GetBlock(x, y + 1, z);
 		if (Blocks.Draw[above] == DRAW_OPAQUE) {
 			for (s = 0; s < 6; s++) {
-				int sx = x + adjOff[s][0];
-				int sy = (y + 1) + adjOff[s][1];
-				int sz = z + adjOff[s][2];
+				int sx = x + adjOffsets6[s][0];
+				int sy = (y + 1) + adjOffsets6[s][1];
+				int sz = z + adjOffsets6[s][2];
 				if (World_Contains(sx, sy, sz) && Redstone_IsDust(World_GetBlock(sx, sy, sz)))
 					Redstone_PropagatePower(sx, sy, sz);
 			}
@@ -2657,13 +2721,12 @@ static void Redstone_TickTNT(void) {
 		
 		/* Also check if any adjacent block is strongly powered */
 		{
-			int adjOff[6][3] = {{-1,0,0},{1,0,0},{0,-1,0},{0,1,0},{0,0,-1},{0,0,1}};
 			int s;
 			cc_bool adjPowered = false;
 			for (s = 0; s < 6; s++) {
-				int nx = tx + adjOff[s][0];
-				int ny = ty + adjOff[s][1];
-				int nz = tz + adjOff[s][2];
+				int nx = tx + adjOffsets6[s][0];
+				int ny = ty + adjOffsets6[s][1];
+				int nz = tz + adjOffsets6[s][2];
 				if (World_Contains(nx, ny, nz) && Redstone_BlockStronglyPowered(nx, ny, nz)) {
 					adjPowered = true;
 					break;
@@ -2917,6 +2980,7 @@ void Physics_Init(void) {
 
 void Physics_Free(void) {
 	Event_Unregister_(&WorldEvents.MapLoaded,    NULL, Physics_OnNewMapLoaded);
+	Redstone_FreeVisited();
 }
 
 void Physics_Tick(void) {
