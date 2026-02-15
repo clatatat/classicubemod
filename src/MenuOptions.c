@@ -292,16 +292,25 @@ static void MenuOptionsScreen_EnumGet(struct ButtonWidget* btn, cc_string* v) {
 	String_AppendConst(v, meta->names[raw]);
 }
 
+static void MenuDropdownOverlay_Show(const char* const* names, int count,
+	Button_GetEnum getValue, Button_SetEnum setValue, struct ButtonWidget* sourceBtn);
+
 static void MenuOptionsScreen_EnumClick(void* screen, void* widget) {
 	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
 	struct ButtonWidget* btn    = (struct ButtonWidget*)widget;
-	
 	struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
-	int raw = meta->GetValue();
 
-	raw = (raw + 1) % meta->count;
-	meta->SetValue(raw);
-	MenuOptionsScreen_Update(s, btn);
+	if (meta->count > 2) {
+		MenuOptionsScreen_FreeExtHelp(s);
+		s->activeBtn = btn;
+		MenuDropdownOverlay_Show(meta->names, meta->count,
+			meta->GetValue, meta->SetValue, btn);
+	} else {
+		int raw = meta->GetValue();
+		raw = (raw + 1) % meta->count;
+		meta->SetValue(raw);
+		MenuOptionsScreen_Update(s, btn);
+	}
 }
 
 void MenuOptionsScreen_AddEnum(struct MenuOptionsScreen* s, const char* name,
@@ -476,10 +485,13 @@ static void MenuOptionsScreen_Render(void* screen, float delta) {
 	Elem_Render(&s->extHelp);
 }
 
+static void MenuDropdownOverlay_Close(cc_bool apply);
+
 static void MenuOptionsScreen_Free(void* screen) {
 	Event_Unregister_(&UserEvents.HackPermsChanged,     screen, MenuOptionsScreen_OnHacksChanged);
 	Event_Unregister_(&WorldEvents.LightingModeChanged, screen, MenuOptionsScreen_OnLightingModeServerChanged);
 	MenuInputOverlay_Close(false);
+	MenuDropdownOverlay_Close(false);
 }
 
 static void MenuOptionsScreen_Layout(void* screen) {
@@ -532,6 +544,254 @@ void MenuOptionsScreen_Show(InitMenuOptions init) {
 	s->DoRecreateExtra = NULL;
 	s->OnHacksChanged  = NULL;
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
+}
+
+
+/*########################################################################################################################*
+*-------------------------------------------------MenuDropdownOverlay-----------------------------------------------------*
+*#########################################################################################################################*/
+#define DROPDOWN_MAX_VISIBLE 8
+
+static struct MenuDropdownOverlay {
+	Screen_Body
+	struct FontDesc titleFont, textFont;
+	struct TextWidget title;
+	struct ButtonWidget options[DROPDOWN_MAX_VISIBLE];
+	int currentValue;
+	int scrollOffset;
+	int visibleCount;
+	int totalCount;
+	float scrollAcc;
+	const char* const* optionNames;
+	Button_GetEnum getValue;
+	Button_SetEnum setValue;
+	struct ButtonWidget* sourceBtn;
+	struct Widget* __widgets[1 + DROPDOWN_MAX_VISIBLE];
+} MenuDropdownOverlay_Instance;
+
+static void MenuDropdownOverlay_RedrawOptions(struct MenuDropdownOverlay* s) {
+	int i, optIdx;
+	cc_string text; char textBuffer[STRING_SIZE];
+
+	for (i = 0; i < s->visibleCount; i++) {
+		optIdx = s->scrollOffset + i;
+		String_InitArray(text, textBuffer);
+
+		if (optIdx == s->currentValue) {
+			String_AppendConst(&text, "&a> ");
+		}
+		String_AppendConst(&text, s->optionNames[optIdx]);
+		ButtonWidget_Set(&s->options[i], &text, &s->textFont);
+	}
+}
+
+static void MenuDropdownOverlay_SetScrollOffset(struct MenuDropdownOverlay* s, int offset) {
+	int maxOffset = s->totalCount - s->visibleCount;
+	if (maxOffset < 0) maxOffset = 0;
+	if (offset < 0) offset = 0;
+	if (offset > maxOffset) offset = maxOffset;
+
+	s->scrollOffset = offset;
+	MenuDropdownOverlay_RedrawOptions(s);
+}
+
+static void MenuDropdownOverlay_Close(cc_bool apply) {
+	struct MenuDropdownOverlay* s = &MenuDropdownOverlay_Instance;
+	struct MenuOptionsScreen* src = &MenuOptionsScreen_Instance;
+
+	Gui_Remove((struct Screen*)s);
+
+	if (apply && s->sourceBtn) {
+		s->setValue(s->currentValue);
+		MenuOptionsScreen_Update(src, s->sourceBtn);
+		src->dirty = true;
+	}
+
+	if (s->sourceBtn) {
+		src->activeBtn = NULL;
+		s->sourceBtn   = NULL;
+	}
+}
+
+static void MenuDropdownOverlay_OptionClick(void* screen, void* widget) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	struct ButtonWidget* btn = (struct ButtonWidget*)widget;
+	int i;
+
+	for (i = 0; i < s->visibleCount; i++) {
+		if (&s->options[i] == btn) {
+			int selected = s->scrollOffset + i;
+			if (selected < s->totalCount) {
+				s->currentValue = selected;
+				MenuDropdownOverlay_Close(true);
+			}
+			return;
+		}
+	}
+}
+
+static void MenuDropdownOverlay_Init(void* screen) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	int i;
+
+	s->widgets    = s->__widgets;
+	s->numWidgets = 0;
+	s->maxWidgets = Array_Elems(s->__widgets);
+	s->selectedI  = -1;
+	s->scrollAcc  = 0.0f;
+
+	s->visibleCount = min(s->totalCount, DROPDOWN_MAX_VISIBLE);
+
+	s->currentValue = s->getValue();
+	if (s->currentValue < 0) s->currentValue = 0;
+	if (s->currentValue >= s->totalCount) s->currentValue = s->totalCount - 1;
+
+	/* Center scroll so current selection is visible */
+	s->scrollOffset = s->currentValue - (s->visibleCount / 2);
+	if (s->scrollOffset < 0) s->scrollOffset = 0;
+	if (s->scrollOffset > s->totalCount - s->visibleCount)
+		s->scrollOffset = s->totalCount - s->visibleCount;
+	if (s->scrollOffset < 0) s->scrollOffset = 0;
+
+	TextWidget_Add(s, &s->title);
+
+	for (i = 0; i < s->visibleCount; i++) {
+		ButtonWidget_Add(s, &s->options[i], 300, MenuDropdownOverlay_OptionClick);
+	}
+
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
+}
+
+static int MenuDropdownOverlay_KeyDown(void* screen, int key, struct InputDevice* device) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+
+	if (key == CCKEY_ESCAPE) {
+		MenuDropdownOverlay_Close(false);
+		return true;
+	}
+	if (key == CCKEY_ENTER || key == CCKEY_KP_ENTER) {
+		MenuDropdownOverlay_Close(true);
+		return true;
+	}
+	if (key == CCKEY_UP || key == CCWHEEL_UP) {
+		if (s->currentValue > 0) {
+			s->currentValue--;
+			if (s->currentValue < s->scrollOffset)
+				MenuDropdownOverlay_SetScrollOffset(s, s->scrollOffset - 1);
+			else
+				MenuDropdownOverlay_RedrawOptions(s);
+			s->dirty = true;
+		}
+		return true;
+	}
+	if (key == CCKEY_DOWN || key == CCWHEEL_DOWN) {
+		if (s->currentValue < s->totalCount - 1) {
+			s->currentValue++;
+			if (s->currentValue >= s->scrollOffset + s->visibleCount)
+				MenuDropdownOverlay_SetScrollOffset(s, s->scrollOffset + 1);
+			else
+				MenuDropdownOverlay_RedrawOptions(s);
+			s->dirty = true;
+		}
+		return true;
+	}
+	return Screen_InputDown(s, key, device);
+}
+
+static int MenuDropdownOverlay_PointerDown(void* screen, int id, int x, int y) {
+	int result = Screen_DoPointerDown(screen, id, x, y);
+	if (result < 0) {
+		MenuDropdownOverlay_Close(false);
+	}
+	return true;
+}
+
+static int MenuDropdownOverlay_PointerMove(void* screen, int id, int x, int y) {
+	Menu_DoPointerMove(screen, id, x, y);
+	return true;
+}
+
+static int MenuDropdownOverlay_MouseScroll(void* screen, float delta) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	int steps;
+
+	if (s->totalCount <= s->visibleCount) return true;
+
+	steps = Utils_AccumulateWheelDelta(&s->scrollAcc, delta);
+	if (steps != 0) {
+		MenuDropdownOverlay_SetScrollOffset(s, s->scrollOffset - steps);
+		s->dirty = true;
+	}
+	return true;
+}
+
+static void MenuDropdownOverlay_Render(void* screen, float delta) {
+	MenuScreen_Render2(screen, delta);
+}
+
+static void MenuDropdownOverlay_Layout(void* screen) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	int i, startY, spacing;
+
+	spacing = 50;
+	startY = -(s->visibleCount * spacing) / 2;
+
+	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, startY - 30);
+
+	for (i = 0; i < s->visibleCount; i++) {
+		Widget_SetLocation(&s->options[i], ANCHOR_CENTRE, ANCHOR_CENTRE,
+			0, startY + i * spacing);
+	}
+
+	Screen_Layout(s);
+}
+
+static void MenuDropdownOverlay_ContextLost(void* screen) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	Font_Free(&s->titleFont);
+	Font_Free(&s->textFont);
+	Screen_ContextLost(s);
+}
+
+static void MenuDropdownOverlay_ContextRecreated(void* screen) {
+	struct MenuDropdownOverlay* s = (struct MenuDropdownOverlay*)screen;
+	cc_string titleStr; char titleBuffer[STRING_SIZE];
+
+	Gui_MakeTitleFont(&s->titleFont);
+	Gui_MakeBodyFont(&s->textFont);
+	Screen_UpdateVb(s);
+
+	String_InitArray(titleStr, titleBuffer);
+	if (s->sourceBtn && s->sourceBtn->optName) {
+		String_AppendConst(&titleStr, s->sourceBtn->optName);
+	}
+	TextWidget_Set(&s->title, &titleStr, &s->titleFont);
+
+	MenuDropdownOverlay_RedrawOptions(s);
+}
+
+static const struct ScreenVTABLE MenuDropdownOverlay_VTABLE = {
+	MenuDropdownOverlay_Init,        Screen_NullUpdate,              Screen_NullFunc,
+	MenuDropdownOverlay_Render,      Screen_BuildMesh,
+	MenuDropdownOverlay_KeyDown,     Screen_InputUp,                 Screen_TKeyPress, Screen_TText,
+	MenuDropdownOverlay_PointerDown, Screen_PointerUp,               MenuDropdownOverlay_PointerMove, MenuDropdownOverlay_MouseScroll,
+	MenuDropdownOverlay_Layout,      MenuDropdownOverlay_ContextLost, MenuDropdownOverlay_ContextRecreated
+};
+
+static void MenuDropdownOverlay_Show(const char* const* names, int count,
+	Button_GetEnum getValue, Button_SetEnum setValue, struct ButtonWidget* sourceBtn) {
+	struct MenuDropdownOverlay* s = &MenuDropdownOverlay_Instance;
+
+	s->grabsInput  = true;
+	s->closable    = false;
+	s->optionNames = names;
+	s->totalCount  = count;
+	s->getValue    = getValue;
+	s->setValue     = setValue;
+	s->sourceBtn   = sourceBtn;
+	s->VTABLE      = &MenuDropdownOverlay_VTABLE;
+
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENUINPUT);
 }
 
 
