@@ -715,7 +715,7 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 
 static void NotchyGen_PlaceSnowLayer(void) {
 	int hIndex = 0, index;
-	BlockRaw above;
+	BlockRaw above, current;
 	int x, y, z;
 
 	if (Gen_Theme != GEN_THEME_WINTER) return;
@@ -728,12 +728,34 @@ static void NotchyGen_PlaceSnowLayer(void) {
 			y = heightmap[hIndex++];
 			if (y < 0 || y >= World.MaxY) continue;
 
-			/* Place snow on top of exposed blocks */
+			/* Place snow on top of exposed blocks at heightmap level */
 			index = World_Pack(x, y + 1, z);
 			above = (y + 1 >= World.Height) ? BLOCK_AIR : Gen_Blocks[index];
 			
 			if (above == BLOCK_AIR) {
 				Gen_Blocks[index] = BLOCK_SNOW;
+			}
+		}
+	}
+	
+	/* Second pass: place snow on top of all leaf blocks */
+	Gen_CurrentState = "Placing snow on trees";
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		
+		for (x = 0; x < World.Width; x++) {
+			for (y = 0; y < World.Height - 1; y++) {
+				index = World_Pack(x, y, z);
+				current = Gen_Blocks[index];
+				
+				/* If we found leaves, place snow on top if there's air above */
+				if (current == BLOCK_LEAVES) {
+					index = World_Pack(x, y + 1, z);
+					above = Gen_Blocks[index];
+					if (above == BLOCK_AIR) {
+						Gen_Blocks[index] = BLOCK_SNOW;
+					}
+				}
 			}
 		}
 	}
