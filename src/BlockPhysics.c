@@ -2382,7 +2382,7 @@ static void Physics_PropagateWater(int posIndex, int x, int y, int z) {
 	if (block >= BLOCK_WATER && block <= BLOCK_STILL_LAVA) {
 		/* Water spreading into lava turns the lava solid */
 		if (block == BLOCK_LAVA || block == BLOCK_STILL_LAVA) {
-			Game_UpdateBlock(x, y, z, BLOCK_STONE);
+			Game_UpdateBlock(x, y, z, BLOCK_OBSIDIAN);
 		}
 	} else if (Blocks.Collide[block] == COLLIDE_NONE) {
 		/* Sponge check */		
