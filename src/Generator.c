@@ -559,7 +559,7 @@ static void NotchyGen_CreateStrata(void) {
 			stoneHeight = max(stoneHeight, 0);
 			index = World_Pack(x, (stoneHeight + 1), z);
 			for (y = stoneHeight + 1; y <= dirtHeight; y++) {
-				Gen_Blocks[index] = BLOCK_DIRT; index += World.OneY;
+				Gen_Blocks[index] = Gen_Themes[Gen_Theme].fillBlock; index += World.OneY;
 			}
 		}
 	}
