@@ -78,7 +78,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	/* GEN_THEME_WINTER (5) */
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
-		BLOCK_STILL_WATER, BLOCK_ICE,                      /* edge flooding uses ice */
+		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* normal water flooding, freeze top layer later */
 		0, 0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF),            /* skyCol - light blue */
@@ -766,8 +766,8 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 					Gen_Blocks[index] = (y <= waterLevel + 2 && (OctaveNoise_Calc(n1, (float)x, (float)z) > 2)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
 			} else if (Gen_Theme == GEN_THEME_WINTER) {
-				/* Winter: grass on surface (will appear snowy when snow is on top), ice for water, gravel underwater */
-				if (above == BLOCK_ICE && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+				/* Winter: grass on surface (will appear snowy when snow is on top), water/ice, gravel underwater */
+				if ((above == BLOCK_STILL_WATER || above == BLOCK_ICE) && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
 					Gen_Blocks[index] = BLOCK_GRAVEL;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_GRASS;
@@ -786,7 +786,32 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 		}
 	}
 }
+static void NotchyGen_FreezeTopWater(void) {
+	int x, y, z, index;
+	BlockRaw block, above;
 
+	if (Gen_Theme != GEN_THEME_WINTER) return;
+
+	Gen_CurrentState = "Freezing top water";
+	for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			for (y = World.Height - 1; y >= 0; y--) {
+				index = World_Pack(x, y, z);
+				block = Gen_Blocks[index];
+				
+				if (block == BLOCK_STILL_WATER) {
+					/* Check if air is above - if so, freeze this water block */
+					above = (y + 1 >= World.Height) ? BLOCK_AIR : Gen_Blocks[index + World.OneY];
+					if (above == BLOCK_AIR) {
+						Gen_Blocks[index] = BLOCK_ICE;
+					}
+					break; /* Found water column, no need to check lower blocks */
+				}
+			}
+		}
+	}
+}
 static void NotchyGen_PlaceSnowLayer(void) {
 	int hIndex = 0, index;
 	BlockRaw above, current;
@@ -1059,12 +1084,13 @@ static void NotchyGen_Generate(void) {
 		GEN_COOP_STEP( 8, NotchyGen_FloodFillWaterBorders() );
 		GEN_COOP_STEP( 9, NotchyGen_FloodFillWater() );
 		GEN_COOP_STEP(10, NotchyGen_FloodFillLava() );
+		GEN_COOP_STEP(11, NotchyGen_FreezeTopWater() );
 
-		GEN_COOP_STEP(11, NotchyGen_CreateSurfaceLayer() );
-		GEN_COOP_STEP(12, NotchyGen_PlantFlowers() );
-		GEN_COOP_STEP(13, NotchyGen_PlantMushrooms() );
-		GEN_COOP_STEP(14, NotchyGen_PlantTrees() );
-		GEN_COOP_STEP(15, NotchyGen_PlaceSnowLayer() );
+		GEN_COOP_STEP(12, NotchyGen_CreateSurfaceLayer() );
+		GEN_COOP_STEP(13, NotchyGen_PlantFlowers() );
+		GEN_COOP_STEP(14, NotchyGen_PlantMushrooms() );
+		GEN_COOP_STEP(15, NotchyGen_PlantTrees() );
+		GEN_COOP_STEP(16, NotchyGen_PlaceSnowLayer() );
 	GEN_COOP_END
 
 	Mem_Free(heightmap);

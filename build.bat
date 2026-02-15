@@ -83,5 +83,11 @@ echo.
 echo Copy the contents of %OUTPUT_DIR% to your Windows 2000 machine.
 echo On first run, ClassiCube will download required assets automatically.
 echo ========================================
+echo.
+echo Starting ClassiCube...
+echo.
+
+cd "%OUTPUT_DIR%"
+start ClassiCube.exe
 
 endlocal
