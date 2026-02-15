@@ -850,10 +850,18 @@ static PackedCol Normal_LightColor(int x, int y, int z, Face face, BlockID block
 	return 0; /* should never happen */
 }
 
+/* Check if a grass block has snow or snow block above it */
+static cc_bool HasSnowAbove(int x, int y, int z) {
+	BlockID above = World_SafeGetBlock(x, y + 1, z);
+	return above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK;
+}
+
 static cc_bool Normal_CanStretch(BlockID initial, int chunkIndex, int x, int y, int z, Face face) {
 	BlockID cur = Builder_Chunk[chunkIndex];
 
 	if (cur != initial || Block_IsFaceHidden(cur, Builder_Chunk[chunkIndex + Builder_Offsets[face]], face)) return false;
+	/* Grass blocks with different snow state above have different textures, can't merge */
+	if (cur == BLOCK_GRASS && HasSnowAbove(Builder_X, Builder_Y, Builder_Z) != HasSnowAbove(x, y, z)) return false;
 	if (Builder_FullBright) return true;
 
 	return Normal_LightColor(Builder_X, Builder_Y, Builder_Z, face, initial) == Normal_LightColor(x, y, z, face, cur);
@@ -1173,8 +1181,10 @@ static cc_bool Adv_CanStretch(BlockID initial, int chunkIndex, int x, int y, int
 	BlockID cur = Builder_Chunk[chunkIndex];
 	adv_bitFlags[chunkIndex] = Adv_ComputeLightFlags(x, y, z, chunkIndex);
 
-	return cur == initial
-		&& !Block_IsFaceHidden(cur, Builder_Chunk[chunkIndex + Builder_Offsets[face]], face)
+	if (cur != initial) return false;
+	/* Grass blocks with different snow state above have different textures, can't merge */
+	if (cur == BLOCK_GRASS && HasSnowAbove(adv_blockX, adv_blockY, adv_blockZ) != HasSnowAbove(x, y, z)) return false;
+	return !Block_IsFaceHidden(cur, Builder_Chunk[chunkIndex + Builder_Offsets[face]], face)
 		&& (adv_initBitFlags == adv_bitFlags[chunkIndex]
 		/* Check that this face is either fully bright or fully in shadow */
 		&& (adv_initBitFlags == 0 || (adv_initBitFlags & adv_masks[face]) == adv_masks[face]));
