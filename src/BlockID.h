@@ -79,8 +79,7 @@ enum BLOCKID {
 	BLOCK_IRON_DOOR = 66, /* Iron Door (closed NS bottom) - opened by redstone only */
 	BLOCK_SNOW = 67, /* Snow layer - 2 pixels tall */
 	BLOCK_ICE = 68, /* Ice block */
-	BLOCK_SNOWY_GRASS = 69, /* Grass with snow on top */
-	BLOCK_SNOW_BLOCK = 70, /* Full snow block */
+	BLOCK_SNOW_BLOCK = 69, /* Full snow block */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,

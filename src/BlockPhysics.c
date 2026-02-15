@@ -316,6 +316,13 @@ static void Physics_HandleTorch(int index, BlockID block) {
 	}
 }
 
+static void Physics_DeleteIce(int index, BlockID block) {
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+	/* Replace ice with water when broken */
+	Game_UpdateBlock(x, y, z, BLOCK_STILL_WATER);
+}
+
 static void Physics_HandleSnow(int index, BlockID block) {
 	BlockID neighbor;
 	int x, y, z;
@@ -2301,6 +2308,20 @@ static void Physics_HandleGrass(int index, BlockID block) {
 	/* Convert grass to dirt only when a solid block is directly above */
 	if (y + 1 < World.Height) {
 		above = World_GetBlock(x, y + 1, z);
+		
+		/* Don't decay under snow, snow blocks, or doors (they're transparent/decorative) */
+		if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) return;
+		
+		/* Don't decay under regular doors */
+		if (above == BLOCK_DOOR_NS_BOTTOM || above == BLOCK_DOOR_NS_TOP ||
+		    above == BLOCK_DOOR_EW_BOTTOM || above == BLOCK_DOOR_EW_TOP) return;
+		
+		/* Don't decay under iron doors */
+		if (above == BLOCK_IRON_DOOR || above == BLOCK_IRON_DOOR_NS_TOP ||
+		    above == BLOCK_IRON_DOOR_EW_BOTTOM || above == BLOCK_IRON_DOOR_EW_TOP ||
+		    above == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_NS_OPEN_TOP ||
+		    above == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_EW_OPEN_TOP) return;
+		
 		if (Blocks.Collide[above] == COLLIDE_SOLID) {
 			Game_UpdateBlock(x, y, z, BLOCK_DIRT);
 		}
@@ -2887,6 +2908,9 @@ void Physics_Init(void) {
 	
 	/* Snow breaks when block below is removed */
 	Physics.OnActivate[BLOCK_SNOW]     = Physics_HandleSnow;
+	
+	/* Ice turns into water when broken */
+	Physics.OnDelete[BLOCK_ICE]        = Physics_DeleteIce;
 	
 	/* Red Ore Torch: support check + redstone power logic */
 	Physics.OnActivate[BLOCK_RED_ORE_TORCH]     = Physics_HandleRedstoneTorch;

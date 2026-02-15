@@ -147,7 +147,7 @@ static void FlatgrassGen_Generate(void) {
 		surfaceBlock = BLOCK_SAND;
 		fillBlock    = BLOCK_SAND;
 	} else if (Gen_Theme == GEN_THEME_WINTER) {
-		surfaceBlock = BLOCK_SNOWY_GRASS;
+		surfaceBlock = BLOCK_GRASS;
 		fillBlock    = BLOCK_DIRT;
 	} else {
 		surfaceBlock = BLOCK_GRASS;
@@ -695,11 +695,11 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 					Gen_Blocks[index] = (y <= waterLevel + 2 && (OctaveNoise_Calc(n1, (float)x, (float)z) > 2)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
 			} else if (Gen_Theme == GEN_THEME_WINTER) {
-				/* Winter: snowy grass on surface, ice for water, gravel underwater */
+				/* Winter: grass on surface (will appear snowy when snow is on top), ice for water, gravel underwater */
 				if (above == BLOCK_ICE && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
 					Gen_Blocks[index] = BLOCK_GRAVEL;
 				} else if (above == BLOCK_AIR) {
-					Gen_Blocks[index] = BLOCK_SNOWY_GRASS;
+					Gen_Blocks[index] = BLOCK_GRASS;
 				}
 			} else {
 				/* Normal / Woods */
@@ -769,6 +769,9 @@ static void NotchyGen_PlantFlowers(void) {
 	int i, j, k, index;
 
 	if (Game_Version.Version < VERSION_0023) return;
+	/* Skip flowers in winter theme */
+	if (Gen_Theme == GEN_THEME_WINTER) return;
+	
 	numPatches       = World.Width * World.Length / 3000;
 	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
 	Gen_CurrentState = "Planting flowers";
@@ -885,9 +888,9 @@ static void NotchyGen_PlantTrees(void) {
 						}
 					}
 				} else {
-					/* Normal/Woods/Paradise/Hell/Winter: normal trees on grass (or snowy grass for Winter, or dirt for Hell) */
+					/* Normal/Woods/Paradise/Hell/Winter: normal trees on grass (or dirt for Hell) */
 					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || under == BLOCK_SNOWY_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+					if ((under == BLOCK_GRASS || (Gen_Theme == GEN_THEME_HELL && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
 						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
 						for (m = 0; m < count; m++) {
 							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
@@ -1196,10 +1199,10 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 		}
 	}
 
-	/* ----- Flowers (skip for Desert; Hell naturally skipped since no grass) ----- */
+	/* ----- Flowers (skip for Desert and Winter; Hell naturally skipped since no grass) ----- */
 	numPatches       = World.Width * World.Length / 3000;
 	if (Gen_Theme == GEN_THEME_PARADISE) numPatches *= 3;
-	if (Gen_Theme != GEN_THEME_DESERT) {
+	if (Gen_Theme != GEN_THEME_DESERT && Gen_Theme != GEN_THEME_WINTER) {
 	Gen_CurrentState = "Planting flowers";
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
@@ -1264,6 +1267,50 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 						for (m = 0; m < count; m++) {
 							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
 							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				}
+			}
+		}
+	}
+	
+	/* ----- Snow layer (winter theme only) ----- */
+	if (Gen_Theme == GEN_THEME_WINTER) {
+		Gen_CurrentState = "Placing snow layer";
+		hIndex = 0;
+		for (z = 0; z < World.Length; z++) {
+			Gen_CurrentProgress = (float)z / World.Length;
+			for (x = 0; x < World.Width; x++) {
+				y = heightmap[hIndex++];
+				if (y < 0 || y >= World.MaxY) continue;
+				
+				/* Only place snow if there's actually a solid block below it */
+				index = World_Pack(x, y, z);
+				if (Gen_Blocks[index] == BLOCK_AIR) continue;
+				
+				index = World_Pack(x, y + 1, z);
+				above = (y + 1 >= World.Height) ? BLOCK_AIR : Gen_Blocks[index];
+				if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = BLOCK_SNOW;
+				}
+			}
+		}
+	}
+	
+	/* ----- Place snow on tree leaves (winter theme only) ----- */
+	if (Gen_Theme == GEN_THEME_WINTER) {
+		Gen_CurrentState = "Placing snow on trees";
+		for (z = 0; z < World.Length; z++) {
+			Gen_CurrentProgress = (float)z / World.Length;
+			for (x = 0; x < World.Width; x++) {
+				for (y = 0; y < World.Height - 1; y++) {
+					index = World_Pack(x, y, z);
+					block = Gen_Blocks[index];
+					if (block == BLOCK_LEAVES) {
+						index = World_Pack(x, y + 1, z);
+						above = Gen_Blocks[index];
+						if (above == BLOCK_AIR) {
+							Gen_Blocks[index] = BLOCK_SNOW;
 						}
 					}
 				}

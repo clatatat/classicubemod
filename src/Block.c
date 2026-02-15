@@ -148,10 +148,8 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Iron Door",        55, 55, 55, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL },
 { "Snow",            116,116,116,  2, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
 { "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GLASS, SOUND_GLASS  },
-{ "Snowy Grass",     116,118,  2, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS,  SOUND_GRASS  },
-{ "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,   SOUND_SNOW   },
+{ "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
 
-{ "Invalid",           0,  0,  0, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_NONE,   SOUND_NONE   }
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
 /*                    TEX ES  TOM GHT            ITY   NESS      LIGHT  ITY                                                         */
 };
@@ -664,6 +662,7 @@ static void DirectionalCache_Rebuild(void) {
 TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face face) {
 	cc_uint8 facing;
 	TextureLoc frontTex, sideTex, topTex, bottomTex;
+	BlockID above;
 	
 	/* Red ore dust uses connection-based textures */
 	if (block == BLOCK_RED_ORE_DUST) {
@@ -673,6 +672,17 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 	/* Lit red ore dust uses lit connection-based textures */
 	if (block == BLOCK_LIT_RED_ORE_DUST) {
 		return RedOreDust_GetTexture(x, y, z, face, true);
+	}
+	
+	/* Grass block with snow/snow block on top uses snowy textures */
+	if (block == BLOCK_GRASS && y < World.MaxY) {
+		above = World_GetBlock(x, y + 1, z);
+		if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) {
+			/* Use snowy grass textures: 116 top, 118 sides, 2 bottom */
+			if (face == FACE_YMAX) return 116;
+			if (face == FACE_YMIN) return 2;
+			return 118; /* All side faces */
+		}
 	}
 	
 	if (!directionalFacing_Enabled || !IsDirectionalBlock(block)) {

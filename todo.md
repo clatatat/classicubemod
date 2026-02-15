@@ -22,3 +22,4 @@
 - make the player not able to spawn on the invisible cieling on hell mode, and on floating mode, the player should always spawn on one of the islands and not on the invisible floor.
 - make ores unable to generate in dirt unless the hell theme is enabled, and the generation type is caves
 - remove cobblestone and mossy cobblestone from cave world type generation, unless the hell world type is enabled
+
