@@ -678,8 +678,8 @@ static void Builder_DrawLeverHandle(int x, int y, int z) {
 	/* Only show bottom 10/16 of texture (skip top 6 rows, like a regular torch) */
 	v1  = v1 + (6.0f/16.0f) * Atlas1D.InvTileSize * UV2_Scale;
 	
-	d_up  = 10.0f/16.0f * 0.5f;    /* handleLen * sin(30) = 5/16 */
-	d_out = 10.0f/16.0f * 0.866f;  /* handleLen * cos(30) = ~8.7/16 */
+	d_up  = 9.0f/16.0f * 0.7f;  /* handleLen * sin(45) */
+	d_out = 9.0f/16.0f * 0.7f;  /* handleLen * cos(45) */
 	
 	if (!leverOn) d_up = -d_up;
 	
