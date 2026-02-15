@@ -77,7 +77,7 @@ void MenuInputOverlay_Close(cc_bool valid);
 
 typedef cc_bool (*Button_GetBool)(void);
 typedef void    (*Button_SetBool)(cc_bool value);
-void MenuOptionsScreen_AddBool(struct MenuOptionsScreen* s, const char* name,
+void MenuOptionsScreen_AddBool(struct MenuOptionsScreen* s, const char* name, 
 								Button_GetBool getValue, Button_SetBool setValue, const char* desc);
 
 typedef int  (*Button_GetEnum)(void);
@@ -85,12 +85,6 @@ typedef void (*Button_SetEnum)(int value);
 void MenuOptionsScreen_AddEnum(struct MenuOptionsScreen* s, const char* name,
 								const char* const* names, int namesCount,
 								Button_GetEnum getValue, Button_SetEnum setValue, const char* desc);
-
-void MenuDropdownOverlay_Show(const char* optionName, const char* const* names, int count,
-							  Button_GetEnum getValue, Button_SetEnum setValue,
-							  void* sourceScreen, struct ButtonWidget* sourceBtn, cc_bool screenMode);
-
-void MenuOptionsScreen_Update(struct MenuOptionsScreen* s, struct ButtonWidget* btn);
 
 typedef PackedCol (*Button_GetHex)(void);
 typedef void      (*Button_SetHex)(PackedCol value);
