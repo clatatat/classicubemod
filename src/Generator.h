@@ -44,7 +44,8 @@ extern Vec3 Gen_SpawnOverride;
 #define GEN_THEME_WOODS    3
 #define GEN_THEME_DESERT   4
 #define GEN_THEME_WINTER   5
-#define GEN_THEME_COUNT    6
+#define GEN_THEME_MOON     6
+#define GEN_THEME_COUNT    7
 extern int Gen_Theme;
 
 /* Centralized theme properties for world generation */

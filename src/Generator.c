@@ -34,7 +34,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		PackedCol_Make(0x80, 0x10, 0x10, 0xFF),            /* skyCol - dark red */
 		PackedCol_Make(0x18, 0x14, 0x14, 0xFF),            /* fogCol - very dark red */
 		PackedCol_Make(0x30, 0x28, 0x28, 0xFF),            /* cloudsCol - dark brown-red */
-		PackedCol_Make(0x42, 0x41, 0x41, 0xFF),            /* shadowCol - dark gray */
+		0,            /* shadowCol - dark gray */
 		1.0f, 1, 1,
 		true, false, false, false, false, true, true, true, false, false,
 		"Planting trees", "Flooding edge lava", "Flooding lava"
@@ -87,6 +87,20 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		0,
 		1.0f, 1, 1,
 		false, true, true, true, false, false, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
+	/* GEN_THEME_MOON (6) */
+	{
+		BLOCK_COBBLE, BLOCK_STONE,
+		BLOCK_STILL_LAVA, BLOCK_GLASS,
+		BLOCK_AIR, BLOCK_GLASS,
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
+		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* skyCol - black */
+		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* fogCol - black */
+		PackedCol_Make(0x38, 0x38, 0x38, 0xFF),            /* cloudsCol - light gray */
+		0,
+		0.5f, 0, 1,
+		false, false, true, false, false, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	}
 };
@@ -758,13 +772,16 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_GRASS;
 				}
-			} else {
+			} else if (Gen_Theme == GEN_THEME_WOODS || Gen_Theme == GEN_THEME_NORMAL) {
 				/* Normal / Woods */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
 					Gen_Blocks[index] = BLOCK_GRAVEL;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
+			} else {
+				/* Other / Custom */
+				Gen_Blocks[index] = Gen_Themes[Gen_Theme].surfaceBlock;
 			}
 		}
 	}
