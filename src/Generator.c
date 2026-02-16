@@ -92,8 +92,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	/* GEN_THEME_MOON (6) */
 	{
 		BLOCK_COBBLE, BLOCK_STONE,
-		BLOCK_STILL_LAVA, BLOCK_GLASS,
-		BLOCK_AIR, BLOCK_GLASS,
+		BLOCK_GRAVEL, BLOCK_GRAVEL,
+		BLOCK_AIR, BLOCK_COBBLE,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* skyCol - black */
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* fogCol - black */
@@ -113,7 +113,18 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		1.0f, 4, 4,                                        /* heightScale, 4x trees, 4x flowers */
 		false, false, true, true, false, true, false, false, false, false, true,
 		"Planting trees", "Flooding edge water", "Flooding water"
-	}
+	},
+		/* GEN_THEME_PLAINS (8) */
+	{
+		BLOCK_GRASS, BLOCK_DIRT,
+		BLOCK_GRASS, BLOCK_GRASS,
+		BLOCK_GRASS, BLOCK_GRASS,
+		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
+		0, 0, 0, 0,
+		0.5f, 0, 0,
+		false, false, true, false, false, false, false, false, false, false, false,
+		"Planting trees", "Flooding edge water", "Flooding water"
+	},
 };
 
 void GenTheme_ApplyEnvironment(void) {

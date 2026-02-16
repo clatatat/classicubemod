@@ -1044,8 +1044,8 @@ static const char* const GenLevel_TypeNames[] = { "Flat", "Normal", "Floating", 
 static const struct MapGenerator* GenLevel_TypeGens[] = { &FlatgrassGen, &NotchyGen, &FloatingGen, &CavesGen, &EmptyGen };
 #define GENLEVEL_TYPE_COUNT 5
 
-static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle" };
-#define GENLEVEL_THEME_COUNT 8
+static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle", "Plains" };
+#define GENLEVEL_THEME_COUNT 9
 
 static struct GenLevelScreen {
 	Screen_Body
