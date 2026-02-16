@@ -1116,8 +1116,14 @@ static void GenLevelScreen_TypeDone(int value, cc_bool valid) {
 }
 
 static void GenLevelScreen_ClickType(void* screen, void* b) {
-	MenuDropdownOverlay_Show("Type", GenLevel_TypeNames, GENLEVEL_TYPE_COUNT,
-		GenLevelScreen_GetType, GenLevelScreen_TypeDone);
+	if (Options_GetBool(OPT_USE_DROPDOWNS, true)) {
+		MenuDropdownOverlay_Show("Type", GenLevel_TypeNames, GENLEVEL_TYPE_COUNT,
+			GenLevelScreen_GetType, GenLevelScreen_TypeDone);
+	} else {
+		struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
+		s->worldType = (s->worldType + 1) % GENLEVEL_TYPE_COUNT;
+		GenLevelScreen_UpdateType(s);
+	}
 }
 
 static void GenLevelScreen_UpdateTheme(struct GenLevelScreen* s) {
@@ -1138,8 +1144,14 @@ static void GenLevelScreen_ThemeDone(int value, cc_bool valid) {
 }
 
 static void GenLevelScreen_ClickTheme(void* screen, void* b) {
-	MenuDropdownOverlay_Show("Theme", GenLevel_ThemeNames, GENLEVEL_THEME_COUNT,
-		GenLevelScreen_GetTheme, GenLevelScreen_ThemeDone);
+	if (Options_GetBool(OPT_USE_DROPDOWNS, true)) {
+		MenuDropdownOverlay_Show("Theme", GenLevel_ThemeNames, GENLEVEL_THEME_COUNT,
+			GenLevelScreen_GetTheme, GenLevelScreen_ThemeDone);
+	} else {
+		struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
+		s->worldTheme = (s->worldTheme + 1) % GENLEVEL_THEME_COUNT;
+		GenLevelScreen_UpdateTheme(s);
+	}
 }
 
 static void GenLevelScreen_Generate(void* a, void* b) {
@@ -1183,6 +1195,17 @@ static int GenLevelScreen_InputDown(void* screen, int key, struct InputDevice* d
 	struct TextInputWidget* selected;
 	int i, currentInputIndex = -1;
 	int newIndex;
+
+	/* Handle right-click backward cycling when dropdowns are disabled */
+	if (key == CCMOUSE_R && !Options_GetBool(OPT_USE_DROPDOWNS, true)) {
+		if (Widget_Contains(&s->typeBtn, Pointers[0].x, Pointers[0].y)) {
+			s->worldType = (s->worldType - 1 + GENLEVEL_TYPE_COUNT) % GENLEVEL_TYPE_COUNT;
+			GenLevelScreen_UpdateType(s);
+		} else if (Widget_Contains(&s->themeBtn, Pointers[0].x, Pointers[0].y)) {
+			s->worldTheme = (s->worldTheme - 1 + GENLEVEL_THEME_COUNT) % GENLEVEL_THEME_COUNT;
+			GenLevelScreen_UpdateTheme(s);
+		}
+	}
 
 	/* Handle Tab navigation through input fields */
 	if (key == CCKEY_TAB) {

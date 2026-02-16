@@ -316,7 +316,7 @@ static void MenuOptionsScreen_EnumClick(void* screen, void* widget) {
 	struct ButtonWidget* btn    = (struct ButtonWidget*)widget;
 	struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
 
-	if (meta->count > 2) {
+	if (meta->count > 2 && Options_GetBool(OPT_USE_DROPDOWNS, true)) {
 		MenuOptionsScreen_FreeExtHelp(s);
 		s->activeBtn = btn;
 		MenuDropdownOverlay_Show(btn->optName, meta->names, meta->count,
@@ -543,10 +543,32 @@ static void MenuOptionsScreen_ContextRecreated(void* screen) {
 	TextGroupWidget_RedrawAll(&s->extHelp); /* TODO: SetFont should redrawall implicitly */
 }
 
+static int MenuOptionsScreen_InputDown(void* screen, int key, struct InputDevice* device) {
+	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
+
+	if (key == CCMOUSE_R && !Options_GetBool(OPT_USE_DROPDOWNS, true)) {
+		int idx = s->selectedI;
+		if (idx >= 0 && idx < s->numButtons) {
+			struct Widget* w = s->widgets[idx];
+			if (w && !(w->flags & WIDGET_FLAG_DISABLED) &&
+				w->MenuClick == MenuOptionsScreen_EnumClick) {
+				struct ButtonWidget* btn = (struct ButtonWidget*)w;
+				struct MenuOptionMetaEnum* meta = (struct MenuOptionMetaEnum*)btn->meta.ptr;
+				int raw = meta->GetValue();
+				raw = (raw - 1 + meta->count) % meta->count;
+				meta->SetValue(raw);
+				MenuOptionsScreen_Update(s, btn);
+			}
+		}
+	}
+
+	return Menu_InputDown(screen, key, device);
+}
+
 static const struct ScreenVTABLE MenuOptionsScreen_VTABLE = {
-	MenuOptionsScreen_Init,   Screen_NullUpdate, MenuOptionsScreen_Free, 
+	MenuOptionsScreen_Init,   Screen_NullUpdate, MenuOptionsScreen_Free,
 	MenuOptionsScreen_Render, Screen_BuildMesh,
-	Menu_InputDown,           Screen_InputUp,    Screen_TKeyPress, Screen_TText,
+	MenuOptionsScreen_InputDown, Screen_InputUp, Screen_TKeyPress, Screen_TText,
 	Menu_PointerDown,         Screen_PointerUp,  MenuOptionsScreen_PointerMove, Screen_TMouseScroll,
 	MenuOptionsScreen_Layout, MenuOptionsScreen_ContextLost, MenuOptionsScreen_ContextRecreated
 };
@@ -1534,6 +1556,9 @@ static void MiO_SetSensitivity(int v) {
 	Options_SetInt(OPT_SENSITIVITY, v);
 }
 
+static cc_bool MiO_GetDropdowns(void) { return Options_GetBool(OPT_USE_DROPDOWNS, true); }
+static void    MiO_SetDropdowns(cc_bool v) { Options_SetBool(OPT_USE_DROPDOWNS, v); }
+
 static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1559,13 +1584,19 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			MiO_GetViewBob, MiO_SetViewBob, NULL);
 		MenuOptionsScreen_AddBool(s, "Invert mouse",
 			MiO_GetInvert,  MiO_SetInvert, NULL);
-		MenuOptionsScreen_AddInt(s,  "Mouse sensitivity", 
+		MenuOptionsScreen_AddInt(s,  "Mouse sensitivity",
 #ifdef CC_BUILD_WIN
 			   1, 200, 40,
 #else
 			   1, 200, 30,
 #endif
 			MiO_GetSensitivity, MiO_SetSensitivity, NULL);
+		MenuOptionsScreen_AddBool(s, "Dropdowns",
+			MiO_GetDropdowns, MiO_SetDropdowns,
+			"&eIf &fON&e, options with more than 2 choices\n"
+			"&eopen a dropdown menu on click.\n"
+			"&eIf &fOFF&e, left-click cycles forward and\n"
+			"&eright-click cycles backward instead.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchOptions);
 
