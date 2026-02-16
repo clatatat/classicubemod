@@ -72,6 +72,8 @@ int     Game_ZombieSpeed;
 int     Game_MobSpawnRate;
 cc_bool Game_LightRestrictSpawning;
 int     Game_MobLightSensitivity;
+int     Game_MobHealthMultiplier;
+int     Game_MobDamageMultiplier;
 cc_bool Game_Anaglyph3D;
 
 cc_bool Game_ViewBobbing, Game_HideGui;
@@ -393,6 +395,8 @@ static void LoadOptions(void) {
 	Game_MobSpawnRate        = Options_GetInt(OPT_MOB_SPAWN_RATE,     0, 4, 2);
 	Game_LightRestrictSpawning = Options_GetBool(OPT_LIGHT_RESTRICT_SPAWN, false);
 	Game_MobLightSensitivity   = Options_GetInt(OPT_MOB_LIGHT_SENSITIVITY, 0, 2, 0);
+	Game_MobHealthMultiplier   = Options_GetInt(OPT_MOB_HEALTH_MULTIPLIER, 0, 3, 1);
+	Game_MobDamageMultiplier   = Options_GetInt(OPT_MOB_DAMAGE_MULTIPLIER, 0, 3, 1);
 
 	Game_ViewDistance     = Options_GetInt(OPT_VIEW_DISTANCE, 8, 4096, DEFAULT_VIEWDIST);
 	Game_UserViewDistance = Game_ViewDistance;

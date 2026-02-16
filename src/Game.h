@@ -91,6 +91,10 @@ extern cc_bool Game_LightRestrictSpawning;
 #define MOB_LIGHT_SENSITIVITY_COUNT 3
 extern int     Game_MobLightSensitivity;
 
+#define MOB_MULTIPLIER_COUNT 4
+extern int     Game_MobHealthMultiplier;
+extern int     Game_MobDamageMultiplier;
+
 extern cc_bool Game_Anaglyph3D;
 extern cc_bool Game_ViewBobbing;
 extern cc_bool Game_BreakableLiquids;

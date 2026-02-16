@@ -1525,6 +1525,11 @@ static float    mobCreeperFuse[MAX_NET_PLAYERS]; /* creeper fuse timer (seconds 
 #define MOB_HP_HOSTILE 20
 #define MOB_HP_PASSIVE 10
 
+/* Apply health multiplier setting: 0=0.5x, 1=1.0x, 2=1.5x, 3=2.0x */
+static int Mob_GetHealthWithMultiplier(int baseHealth) {
+	return (baseHealth * (1 + Game_MobHealthMultiplier)) / 2;
+}
+
 static float    mobSkeletonShootTimer[MAX_NET_PLAYERS]; /* cooldown between shots */
 static float    mobTargetYaw[MAX_NET_PLAYERS];          /* desired facing yaw (smooth turning target) */
 static cc_bool  mobWalkBackwards[MAX_NET_PLAYERS];      /* true = play walk anim in reverse (skeleton backpedal) */
@@ -2926,7 +2931,7 @@ static void SpawnRandomMob(void) {
 
 	/* Set mob AI type and health */
 	mobType[id]        = mobIsHostile[idx] ? MOB_TYPE_HOSTILE : MOB_TYPE_PASSIVE;
-	mobHealth[id]      = mobIsHostile[idx] ? MOB_HP_HOSTILE : MOB_HP_PASSIVE;
+	mobHealth[id]      = Mob_GetHealthWithMultiplier(mobIsHostile[idx] ? MOB_HP_HOSTILE : MOB_HP_PASSIVE);
 	mobHasTarget[id]   = false;
 	mobWanderPause[id] = 0.5f + Random_Float(&mob_rng) * 2.0f;
 	mobDeathTimer[id]  = 0.0f;
@@ -3033,7 +3038,7 @@ static cc_bool SpawnMobAt(Vec3 spawnPos, int idx) {
 	Event_RaiseInt(&EntityEvents.Added, id);
 
 	mobType[id]        = mobIsHostile[idx] ? MOB_TYPE_HOSTILE : MOB_TYPE_PASSIVE;
-	mobHealth[id]      = mobIsHostile[idx] ? MOB_HP_HOSTILE : MOB_HP_PASSIVE;
+	mobHealth[id]      = Mob_GetHealthWithMultiplier(mobIsHostile[idx] ? MOB_HP_HOSTILE : MOB_HP_PASSIVE);
 	mobHasTarget[id]   = false;
 	mobWanderPause[id] = 0.5f + Random_Float(&mob_rng) * 2.0f;
 	mobDeathTimer[id]  = 0.0f;
@@ -3139,7 +3144,7 @@ static void BoomCommand_Execute(const cc_string* args, int argsCount) {
 	Event_RaiseInt(&EntityEvents.Added, id);
 
 	mobType[id]        = MOB_TYPE_HOSTILE;
-	mobHealth[id]      = MOB_HP_HOSTILE;
+	mobHealth[id]      = Mob_GetHealthWithMultiplier(MOB_HP_HOSTILE);
 	mobHasTarget[id]   = false;
 	mobWanderPause[id] = 0.5f + Random_Float(&mob_rng) * 2.0f;
 	mobDeathTimer[id]  = 0.0f;

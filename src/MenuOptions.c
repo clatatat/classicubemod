@@ -1717,6 +1717,21 @@ static void GP_SetMobLightSensitivity(int v) {
 	Options_SetInt(OPT_MOB_LIGHT_SENSITIVITY, v);
 }
 
+static const char* const MobMultiplier_Names[MOB_MULTIPLIER_COUNT] = {
+	"0.5", "1.0", "1.5", "2.0"
+};
+static int  GP_GetMobHealthMultiplier(void) { return Game_MobHealthMultiplier; }
+static void GP_SetMobHealthMultiplier(int v) {
+	Game_MobHealthMultiplier = v;
+	Options_SetInt(OPT_MOB_HEALTH_MULTIPLIER, v);
+}
+
+static int  GP_GetMobDamageMultiplier(void) { return Game_MobDamageMultiplier; }
+static void GP_SetMobDamageMultiplier(int v) {
+	Game_MobDamageMultiplier = v;
+	Options_SetInt(OPT_MOB_DAMAGE_MULTIPLIER, v);
+}
+
 static void GameplayScreen_SwitchBack(void* a, void* b) {
 	if (Gui.ClassicMenu) { Menu_SwitchPause(a, b); } else { Menu_SwitchOptions(a, b); }
 }
@@ -1738,6 +1753,12 @@ static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddEnum(s, "Mob light sensitivity",
 			MobLightSensitivity_Names, MOB_LIGHT_SENSITIVITY_COUNT,
 			GP_GetMobLightSensitivity, GP_SetMobLightSensitivity, NULL);
+		MenuOptionsScreen_AddEnum(s, "Mob health multiplier",
+			MobMultiplier_Names, MOB_MULTIPLIER_COUNT,
+			GP_GetMobHealthMultiplier, GP_SetMobHealthMultiplier, NULL);
+		MenuOptionsScreen_AddEnum(s, "Mob damage multiplier",
+			MobMultiplier_Names, MOB_MULTIPLIER_COUNT,
+			GP_GetMobDamageMultiplier, GP_SetMobDamageMultiplier, NULL);
 		MenuOptionsScreen_AddButton(s, "Mob behaviors...",
 			Menu_SwitchMobBehaviors, NULL, NULL, NULL);
 	}
