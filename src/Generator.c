@@ -1184,6 +1184,24 @@ const struct MapGenerator NotchyGen = {
 static cc_int16* floatCutoff; /* per-column bottom cutoff Y */
 static int floatNumLayers;
 
+/* Finds available vertical space above a position for jungle tree growth in floating world.
+   Returns the number of clear blocks above treeY (up to maxHeight).
+   Stops counting when hitting a solid block (island above). */
+static int FloatingGen_FindVerticalSpace(int x, int y, int z, int maxHeight) {
+	int availableSpace = 0;
+	int checkY, index;
+
+	for (checkY = y; checkY < y + maxHeight && checkY < World.Height; checkY++) {
+		index = World_Pack(x, checkY, z);
+		if (Gen_Blocks[index] != BLOCK_AIR) {
+			/* Hit a solid block - this is the ceiling */
+			return availableSpace;
+		}
+		availableSpace++;
+	}
+	return availableSpace;
+}
+
 /* Generate one layer of floating islands centered at the given Y level */
 static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 	int mapArea = World.Width * World.Length;
@@ -1197,8 +1215,14 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 	int numPatches, patchX, patchZ, treeX, treeY, treeZ;
 	int flowerX, flowerY, flowerZ;
 	int i, j, k, m;
-	IVec3 coords[TREE_MAX_COUNT];
-	BlockRaw blocks[TREE_MAX_COUNT];
+	int availableSpace;
+	cc_bool isJungle = Gen_Themes[Gen_Theme].hasJungleTrees;
+	IVec3 coords_small[TREE_MAX_COUNT];
+	BlockRaw blocks_small[TREE_MAX_COUNT];
+	IVec3 coords_jungle[JUNGLE_TREE_MAX_COUNT];
+	BlockRaw blocks_jungle[JUNGLE_TREE_MAX_COUNT];
+	IVec3* coords;
+	BlockRaw* blocks;
 
 #if CC_BUILD_MAXSTACK <= (16 * 1024)
 	struct NoiseBuffer { 
@@ -1395,12 +1419,50 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 						}
 					}
 				} else {
-					treeHeight = 5 + Random_Next(&rnd, 3);
-					if ((under == BLOCK_GRASS || (Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT)) && TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-						for (m = 0; m < count; m++) {
-							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-							Gen_Blocks[index] = blocks[m];
+					if (under != BLOCK_GRASS && !(Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT))
+						continue;
+
+					/* Jungle theme: 30% chance for large 2x2 jungle tree */
+					if (isJungle && Random_Float(&rnd) < 0.30f) {
+						/* Check available vertical space above the tree position */
+						availableSpace = FloatingGen_FindVerticalSpace(treeX, treeY, treeZ, 30);
+
+						/* Follow height protocol for floating islands:
+						   - 18+ blocks: spawn normally (18-28 blocks tall)
+						   - 12-17 blocks: shrink tree to fit available space
+						   - <12 blocks: don't spawn the tree */
+						if (availableSpace >= 18) {
+							/* Full height jungle tree */
+							treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
+							if (treeHeight > availableSpace) treeHeight = availableSpace;
+						} else if (availableSpace >= 12) {
+							/* Shrink to fit */
+							treeHeight = availableSpace;
+						} else {
+							/* Not enough space - skip this tree */
+							continue;
+						}
+
+						coords = coords_jungle;
+						blocks = blocks_jungle;
+						if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+							count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+							for (m = 0; m < count; m++) {
+								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+								Gen_Blocks[index] = blocks[m];
+							}
+						}
+					} else {
+						/* Normal tree: 5-7 blocks tall */
+						treeHeight = 5 + Random_Next(&rnd, 3);
+						coords = coords_small;
+						blocks = blocks_small;
+						if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+							count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+							for (m = 0; m < count; m++) {
+								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+								Gen_Blocks[index] = blocks[m];
+							}
 						}
 					}
 				}
@@ -2129,29 +2191,29 @@ static const cc_uint8* jungle_big_layers[3] = {
 #define JUNGLE_SMALL_W 6
 static const cc_uint8 jungle_small_layer0[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
 	/* Bottom layer (widest) */
+	0,0,1,1,0,0,
 	0,1,1,1,1,0,
 	1,1,1,1,1,1,
 	1,1,1,1,1,1,
-	1,1,1,1,1,1,
-	1,1,1,1,1,1,
 	0,1,1,1,1,0,
+	0,0,1,1,0,0,
 };
 static const cc_uint8 jungle_small_layer1[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
 	/* Middle layer */
 	0,0,0,0,0,0,
+	0,0,1,1,0,0,
 	0,1,1,1,1,0,
 	0,1,1,1,1,0,
-	0,1,1,1,1,0,
-	0,1,1,1,1,0,
+	0,0,1,1,0,0,
 	0,0,0,0,0,0,
 };
 static const cc_uint8 jungle_small_layer2[JUNGLE_SMALL_W * JUNGLE_SMALL_W] = {
-	/* Top layer */
+	/* Top layer, empty for now */
 	0,0,0,0,0,0,
-	0,0,1,1,0,0,
-	0,1,1,1,1,0,
-	0,1,1,1,1,0,
-	0,0,1,1,0,0,
+	0,0,0,0,0,0,
+	0,0,0,0,0,0,
+	0,0,0,0,0,0,
+	0,0,0,0,0,0,
 	0,0,0,0,0,0,
 };
 static const cc_uint8* jungle_small_layers[3] = {
