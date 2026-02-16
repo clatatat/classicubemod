@@ -76,7 +76,7 @@ void World_SetNewMap(BlockRaw* blocks, int width, int height, int length) {
 	}
 #endif
 
-	if (Env.EdgeHeight == -1)   { Env.EdgeHeight   = height / 2; }
+	if (Env.EdgeHeight == -1)   { Env.EdgeHeight   = height / 2 + Env.EdgeHeightOffset; }
 	if (Env.CloudsHeight == -1) { Env.CloudsHeight = height + 2; }
 
 	GenerateNewUuid();
@@ -162,9 +162,10 @@ struct _EnvData Env;
 const char* const Weather_Names[3] = { "Sunny", "Rainy", "Snowy" };
 
 void Env_Reset(void) {
-	Env.EdgeHeight   = -1;
-	Env.SidesOffset  = -2;
-	Env.CloudsHeight = -1;
+	Env.EdgeHeight       = -1;
+	Env.EdgeHeightOffset = 0;
+	Env.SidesOffset      = -2;
+	Env.CloudsHeight     = -1;
 
 	Env.EdgeBlock  = BLOCK_AIR;
 	Env.SidesBlock = BLOCK_AIR;
@@ -207,6 +208,9 @@ void Env_SetSidesBlock(BlockID block) {
 
 void Env_SetEdgeHeight(int height) {
 	Env_Set(height, Env.EdgeHeight, ENV_VAR_EDGE_HEIGHT);
+}
+void Env_SetEdgeHeightOffset(int offset) {
+	Env_Set(offset, Env.EdgeHeightOffset, ENV_VAR_EDGE_HEIGHT_OFFSET);
 }
 void Env_SetSidesOffset(int offset) {
 	Env_Set(offset, Env.SidesOffset, ENV_VAR_SIDES_OFFSET);

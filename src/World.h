@@ -121,7 +121,7 @@ static CC_INLINE cc_bool World_CheckVolume(int width, int height, int length) {
 }
 
 enum EnvVar {
-	ENV_VAR_EDGE_BLOCK, ENV_VAR_SIDES_BLOCK, ENV_VAR_EDGE_HEIGHT, ENV_VAR_SIDES_OFFSET,
+	ENV_VAR_EDGE_BLOCK, ENV_VAR_SIDES_BLOCK, ENV_VAR_EDGE_HEIGHT, ENV_VAR_EDGE_HEIGHT_OFFSET, ENV_VAR_SIDES_OFFSET,
 	ENV_VAR_CLOUDS_HEIGHT, ENV_VAR_CLOUDS_SPEED, ENV_VAR_WEATHER_SPEED, ENV_VAR_WEATHER_FADE,
 	ENV_VAR_WEATHER, ENV_VAR_EXP_FOG, ENV_VAR_SKYBOX_HOR_SPEED, ENV_VAR_SKYBOX_VER_SPEED,
 	ENV_VAR_SKY_COLOR, ENV_VAR_CLOUDS_COLOR, ENV_VAR_FOG_COLOR, 
@@ -131,7 +131,7 @@ enum EnvVar {
 
 CC_VAR extern struct _EnvData {
 	BlockID EdgeBlock, SidesBlock;
-	int EdgeHeight, SidesOffset;
+	int EdgeHeight, EdgeHeightOffset, SidesOffset;
 	int CloudsHeight;
 	float CloudsSpeed;
 
@@ -168,6 +168,8 @@ CC_API void Env_SetEdgeBlock(BlockID block);
 CC_API void Env_SetSidesBlock(BlockID block);
 /* Sets the edge/horizon height. (default height/2) */
 CC_API void Env_SetEdgeHeight(int height);
+/* Sets offset from default edge height. (default 0) */
+CC_API void Env_SetEdgeHeightOffset(int offset);
 /* Sets offset of sides/border from horizon. (default -2) */
 CC_API void Env_SetSidesOffset(int offset);
 /* Sets clouds height. (default height+2)*/

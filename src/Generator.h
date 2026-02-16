@@ -61,6 +61,7 @@ struct GenThemeData {
 	/* Edge/sides overrides (0 = let generator decide its own default) */
 	BlockRaw edgeBlock;       /* hell=lava, else 0 */
 	BlockRaw sidesBlock;      /* hell=obsidian, else 0 */
+	int edgeHeightOffset;     /* offset from default edge height (height/2 + offset) */
 
 	/* Cave-specific blocks */
 	BlockRaw caveFillBlock;   /* stone / dirt */
