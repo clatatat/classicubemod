@@ -104,6 +104,8 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_SIMPLE_FOG "gfx-simplefog"
 #define OPT_CLOUDS_ENABLED "gfx-clouds"
 #define OPT_USE_DROPDOWNS "use-dropdowns"
+#define OPT_GEN_TYPE "gen-type"
+#define OPT_GEN_THEME "gen-theme"
 
 #define Option_GetOffsetX(defValue) Options_GetInt("offset-x", 0, 1000, defValue);
 #define Option_GetOffsetY(defValue) Options_GetInt("offset-y", 0, 1000, defValue);

@@ -8,12 +8,14 @@
 #include "Game.h"
 #include "Screens.h"
 #include "Window.h"
+#include "Options.h"
+#include "String_.h"
 
 const struct MapGenerator* gen_active;
 BlockRaw* Gen_Blocks;
 int Gen_Theme;
 
-const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
+const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 	/* GEN_THEME_NORMAL (0) */
 	{
 		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
@@ -22,7 +24,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		0,                                                 /* edgeHeightOffset (offset from height/2) */
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
-		1.0f, 1, 1,                                        /* heightScale, treePatchMul, flowerPatchMul */
+		BLOCK_STONE, BLOCK_GRAVEL,                         /* stoneBlock, underwaterBlock */
+		1.0f, 1.0f, 1, 1, 1,                              /* heightScale, caveFreqScale, treePatchMul, flowerPatchMul, mushroomPatchMul */
 		false, false, true, true, false, true, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
@@ -31,13 +34,14 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_DIRT, BLOCK_DIRT,
 		BLOCK_STILL_LAVA, BLOCK_STILL_LAVA,
 		BLOCK_STILL_LAVA, BLOCK_OBSIDIAN,
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
-		BLOCK_DIRT, BLOCK_GRASS, BLOCK_DIRT,               /* gardenSurface/Fill unused: hasCaveGardens=false */
+		0,
+		BLOCK_DIRT, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0x80, 0x10, 0x10, 0xFF),            /* skyCol - dark red */
 		PackedCol_Make(0x18, 0x14, 0x14, 0xFF),            /* fogCol - very dark red */
 		PackedCol_Make(0x30, 0x28, 0x28, 0xFF),            /* cloudsCol - dark brown-red */
-		0,            /* shadowCol - dark gray */
-		1.0f, 1, 1,
+		0,
+		BLOCK_STONE, BLOCK_GRAVEL,
+		1.0f, 1.0f, 1, 1, 1,
 		true, false, false, false, false, true, true, true, false, false, false,
 		"Planting trees", "Flooding edge lava", "Flooding lava"
 	},
@@ -46,10 +50,11 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
 		BLOCK_STILL_WATER, BLOCK_BEDROCK,
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
-		0.5f, 1, 3,                                        /* flat terrain, 3x flowers */
+		BLOCK_STONE, BLOCK_GRAVEL,
+		0.5f, 1.0f, 1, 3, 1,                              /* flat terrain, 3x flowers */
 		false, false, true, true, false, true, false, false, true, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
@@ -58,10 +63,11 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
 		BLOCK_STILL_WATER, BLOCK_BEDROCK,
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
-		1.0f, 8, 1,                                        /* 8x trees */
+		BLOCK_STONE, BLOCK_GRAVEL,
+		1.0f, 1.0f, 8, 1, 1,                              /* 8x trees */
 		false, false, true, true, false, true, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
@@ -70,14 +76,15 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_SAND, BLOCK_SAND,
 		BLOCK_STILL_WATER, BLOCK_SAND,                    /* fluidBlock, edgeFluidBlock (sand border) */
 		0, BLOCK_SAND,                                    /* edgeBlock, sidesBlock (sand border) */
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_SAND, BLOCK_SAND,               /* caves: sand gardens */
 		PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF),            /* skyCol - golden tan */
 		PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF),            /* fogCol - sandstorm */
 		PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF),            /* cloudsCol - light golden */
 		0,
-		0.5f, 1, 1,                                        /* flat terrain */
-		false, false, true, true, true, false, false, false, false, true, false,
+		BLOCK_STONE, BLOCK_GRAVEL,
+		0.5f, 1.0f, 1, 1, 1,                              /* flat terrain */
+		false, false, true, true, 1, false, false, false, false, true, false,
 		"Planting cacti", "Filling edge sand", "Flooding water"
 	},
 	/* GEN_THEME_WINTER (5) */
@@ -85,13 +92,14 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_ICE, BLOCK_ICE,                              /* all water as ice in winter theme */
 		BLOCK_ICE, BLOCK_BEDROCK,
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF),            /* skyCol - light blue */
 		PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF),            /* fogCol - very light blue */
 		PackedCol_Make(0xF0, 0xF0, 0xF0, 0xFF),            /* cloudsCol - white */
 		0,
-		1.0f, 1, 1,
+		BLOCK_STONE, BLOCK_GRAVEL,
+		1.0f, 1.0f, 1, 1, 1,
 		false, true, true, true, false, false, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
@@ -100,13 +108,14 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_COBBLE, BLOCK_STONE,
 		BLOCK_GRAVEL, BLOCK_GRAVEL,
 		0, BLOCK_COBBLE,
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* skyCol - black */
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* fogCol - black */
 		PackedCol_Make(0x38, 0x38, 0x38, 0xFF),            /* cloudsCol - light gray */
 		0,
-		0.5f, 0, 1,
+		BLOCK_STONE, BLOCK_GRAVEL,
+		0.5f, 1.0f, 0, 1, 1,
 		false, false, true, false, false, false, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
@@ -115,14 +124,15 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* fluidBlock, edgeFluidBlock */
 		BLOCK_STILL_WATER, BLOCK_BEDROCK,                  /* edgeBlock, sidesBlock */
-		0,                                                 /* edgeHeightOffset (offset from height/2) */
+		0,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
-		1.0f, 4, 4,                                        /* heightScale, 4x trees, 4x flowers */
+		BLOCK_STONE, BLOCK_GRAVEL,
+		1.0f, 1.0f, 4, 4, 1,                              /* 4x trees, 4x flowers */
 		false, false, true, true, false, true, false, false, false, false, true,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
-		/* GEN_THEME_PLAINS (8) */
+	/* GEN_THEME_PLAINS (8) */
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_GRASS, BLOCK_GRASS,
@@ -130,14 +140,44 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 		2,                                                  /* edgeHeightOffset (offset from height/2) */
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
-		0.5f, 0, 0,
+		BLOCK_STONE, BLOCK_GRAVEL,
+		0.5f, 1.0f, 0, 0, 1,
 		false, false, true, false, false, false, false, false, false, false, false,
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 };
 
+struct GenThemeData Gen_CustomTheme;
+struct OreDefinition Gen_CustomOres[MAX_CUSTOM_ORES] = {
+	{ BLOCK_COAL_ORE,    0.9f, true },
+	{ BLOCK_IRON_ORE,    0.7f, true },
+	{ BLOCK_GOLD_ORE,    0.5f, true },
+	{ BLOCK_RED_ORE,     0.6f, true },
+	{ BLOCK_DIAMOND_ORE, 0.4f, true },
+	{ 0, 0.0f, false },
+	{ 0, 0.0f, false },
+	{ 0, 0.0f, false },
+	{ 0, 0.0f, false },
+	{ 0, 0.0f, false },
+};
+
+const struct GenThemeData* Gen_GetTheme(void) {
+	if (Gen_Theme == GEN_THEME_CUSTOM) return &Gen_CustomTheme;
+	return &Gen_Themes[Gen_Theme];
+}
+
+void CustomTheme_CopyFrom(int themeIndex) {
+	Gen_CustomTheme = Gen_Themes[themeIndex];
+	/* Replace 0 sentinel (meaning "use engine default") with actual default colors,
+	   so custom theme always has explicit color values for the UI to display */
+	if (!Gen_CustomTheme.skyCol)     Gen_CustomTheme.skyCol     = ENV_DEFAULT_SKY_COLOR;
+	if (!Gen_CustomTheme.fogCol)     Gen_CustomTheme.fogCol     = ENV_DEFAULT_FOG_COLOR;
+	if (!Gen_CustomTheme.cloudsCol)  Gen_CustomTheme.cloudsCol  = ENV_DEFAULT_CLOUDS_COLOR;
+	if (!Gen_CustomTheme.shadowCol)  Gen_CustomTheme.shadowCol  = ENV_DEFAULT_SHADOW_COLOR;
+}
+
 void GenTheme_ApplyEnvironment(void) {
-	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	const struct GenThemeData* t = Gen_GetTheme();
 	if (t->skyCol)     Env_SetSkyCol(t->skyCol);
 	if (t->fogCol)     Env_SetFogCol(t->fogCol);
 	if (t->cloudsCol)  Env_SetCloudsCol(t->cloudsCol);
@@ -272,7 +312,7 @@ static cc_bool FlatgrassGen_Prepare(int seed) {
 }
 
 static void FlatgrassGen_Generate(void) {
-	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	const struct GenThemeData* t = Gen_GetTheme();
 	BlockRaw surfaceBlock = t->surfaceBlock;
 	BlockRaw fillBlock    = t->fillBlock;
 
@@ -428,7 +468,7 @@ static void NotchyGen_FillOblateSpheroid(int x, int y, int z, float radius, Bloc
 
 				if ((dx * dx + 2 * dy * dy + dz * dz) < radiusSq) {
 					index = World_Pack(xx, yy, zz);
-					if (Gen_Blocks[index] == BLOCK_STONE || Gen_Blocks[index] == BLOCK_DIRT) {
+					if (Gen_Blocks[index] == Gen_GetTheme()->stoneBlock || Gen_Blocks[index] == BLOCK_DIRT) {
 						/* Ores cannot generate in dirt unless hell theme + caves generator */
 						if (Gen_Blocks[index] == BLOCK_DIRT && block != BLOCK_AIR) {
 							if (!(Gen_Theme == GEN_THEME_HELL && gen_active == &CavesGen))
@@ -525,7 +565,7 @@ static void NotchyGen_CreateHeightmap(void) {
 			height *= 0.5f;
 			if (height < 0) height *= 0.8f;
 
-			height *= Gen_Themes[Gen_Theme].heightScale;
+			height *= Gen_GetTheme()->heightScale;
 
 			adjHeight = (int)(height + waterLevel);
 			minHeight = min(adjHeight, minHeight);
@@ -548,7 +588,7 @@ static int NotchyGen_CreateStrataFast(void) {
 	stoneHeight = minHeight - 14;
 	/* We can quickly fill in bottom solid layers */
 	for (y = 1; y <= stoneHeight; y++) {
-		Mem_Set(Gen_Blocks + y * oneY, BLOCK_STONE, oneY);
+		Mem_Set(Gen_Blocks + y * oneY, Gen_GetTheme()->stoneBlock, oneY);
 		Gen_CurrentProgress = (float)y / World.Height;
 	}
 
@@ -588,13 +628,13 @@ static void NotchyGen_CreateStrata(void) {
 
 			index = World_Pack(x, minStoneY, z);
 			for (y = minStoneY; y <= stoneHeight; y++) {
-				Gen_Blocks[index] = BLOCK_STONE; index += World.OneY;
+				Gen_Blocks[index] = Gen_GetTheme()->stoneBlock; index += World.OneY;
 			}
 
 			stoneHeight = max(stoneHeight, 0);
 			index = World_Pack(x, (stoneHeight + 1), z);
 			for (y = stoneHeight + 1; y <= dirtHeight; y++) {
-				Gen_Blocks[index] = Gen_Themes[Gen_Theme].fillBlock; index += World.OneY;
+				Gen_Blocks[index] = Gen_GetTheme()->fillBlock; index += World.OneY;
 			}
 		}
 	}
@@ -608,7 +648,7 @@ static void NotchyGen_CarveCaves(void) {
 	int cenX, cenY, cenZ;
 	int i, j;
 
-	cavesCount       = World.Volume / 8192;
+	cavesCount       = (int)(World.Volume / 8192 * Gen_GetTheme()->caveFreqScale);
 	Gen_CurrentState = "Carving caves";
 	for (i = 0; i < cavesCount; i++) {
 		Gen_CurrentProgress = (float)i / cavesCount;
@@ -681,8 +721,25 @@ static void NotchyGen_CarveOreVeins(float abundance, const char* state, BlockRaw
 	}
 }
 
+static void NotchyGen_CarveAllOres(void) {
+	int i;
+	if (Gen_Theme == GEN_THEME_CUSTOM) {
+		for (i = 0; i < MAX_CUSTOM_ORES; i++) {
+			if (!Gen_CustomOres[i].enabled) continue;
+			NotchyGen_CarveOreVeins(Gen_CustomOres[i].abundance,
+				"Carving custom ore", Gen_CustomOres[i].block);
+		}
+	} else {
+		NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
+		NotchyGen_CarveOreVeins(0.7f, "Carving iron ore",    BLOCK_IRON_ORE);
+		NotchyGen_CarveOreVeins(0.5f, "Carving gold ore",    BLOCK_GOLD_ORE);
+		NotchyGen_CarveOreVeins(0.6f, "Carving red ore",     BLOCK_RED_ORE);
+		NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
+	}
+}
+
 static void NotchyGen_FloodFillWaterBorders(void) {
-	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	const struct GenThemeData* t = Gen_GetTheme();
 	int waterY = waterLevel - 1;
 	int index1, index2;
 	int x, z;
@@ -715,7 +772,7 @@ static void NotchyGen_FloodFillWaterBorders(void) {
 }
 
 static void NotchyGen_FloodFillWater(void) {
-	const struct GenThemeData* t = &Gen_Themes[Gen_Theme];
+	const struct GenThemeData* t = Gen_GetTheme();
 	int numSources;
 	int i, x, y, z;
 	BlockRaw fluidBlock = t->fluidBlock;
@@ -788,7 +845,7 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 			if (Gen_Theme == GEN_THEME_DESERT) {
 				/* Desert: all exposed surface is sand */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_SAND;
 					/* Replace dirt below with sand too */
@@ -799,41 +856,45 @@ static void NotchyGen_CreateSurfaceLayer(void) {
 			} else if (Gen_Theme == GEN_THEME_HELL) {
 				/* Hell: no grass, just dirt; gravel underwater */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_DIRT;
 				}
 			} else if (Gen_Theme == GEN_THEME_PARADISE) {
 				/* Paradise: more beaches (lower threshold = more sand near water) */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel + 2 && (OctaveNoise_Calc(n1, (float)x, (float)z) > 2)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
 			} else if (Gen_Theme == GEN_THEME_WINTER) {
 				/* Winter: grass on surface (will appear snowy when snow is on top), water/ice, gravel underwater */
 				if ((above == BLOCK_STILL_WATER || above == BLOCK_ICE) && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_GRASS;
 				}
 			} else if (Gen_Theme == GEN_THEME_WOODS || Gen_Theme == GEN_THEME_NORMAL) {
 				/* Normal / Woods */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
 			} else if (Gen_Theme == GEN_THEME_JUNGLE) {
 				/* Jungle: same as normal, gravel underwater, sand near beaches, grass elsewhere */
 				if (above == BLOCK_STILL_WATER && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
-					Gen_Blocks[index] = BLOCK_GRAVEL;
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
 				} else if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = (y <= waterLevel && (OctaveNoise_Calc(n1, (float)x, (float)z) > 8)) ? BLOCK_SAND : BLOCK_GRASS;
 				}
 			} else {
-				/* Other / Custom */
-				Gen_Blocks[index] = Gen_Themes[Gen_Theme].surfaceBlock;
+				/* Other / Custom: use theme blocks, normal-style beaches */
+				if ((above == Gen_GetTheme()->fluidBlock || above == Gen_GetTheme()->edgeFluidBlock) && (OctaveNoise_Calc(n2, (float)x, (float)z) > 12)) {
+					Gen_Blocks[index] = Gen_GetTheme()->underwaterBlock;
+				} else if (above == BLOCK_AIR) {
+					Gen_Blocks[index] = Gen_GetTheme()->surfaceBlock;
+				}
 			}
 		}
 	}
@@ -869,7 +930,7 @@ static void NotchyGen_PlaceSnowLayer(void) {
 	BlockRaw above, current;
 	int x, y, z;
 
-	if (!Gen_Themes[Gen_Theme].hasSnowLayer) return;
+	if (!Gen_GetTheme()->hasSnowLayer) return;
 
 	Gen_CurrentState = "Placing snow layer";
 	for (z = 0; z < World.Length; z++) {
@@ -923,10 +984,10 @@ static void NotchyGen_PlantFlowers(void) {
 	int i, j, k, index;
 
 	if (Game_Version.Version < VERSION_0023) return;
-	if (!Gen_Themes[Gen_Theme].generateFlowers) return;
+	if (!Gen_GetTheme()->generateFlowers) return;
 
 	numPatches       = World.Width * World.Length / 3000;
-	numPatches      *= Gen_Themes[Gen_Theme].flowerPatchMul;
+	numPatches      *= Gen_GetTheme()->flowerPatchMul;
 	Gen_CurrentState = "Planting flowers";
 
 	for (i = 0; i < numPatches; i++) {
@@ -947,7 +1008,7 @@ static void NotchyGen_PlantFlowers(void) {
 				if (flowerY <= 0 || flowerY >= World.Height) continue;
 
 				index = World_Pack(flowerX, flowerY, flowerZ);
-				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS)
+				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == Gen_GetTheme()->surfaceBlock)
 					Gen_Blocks[index] = block;
 			}
 		}
@@ -963,6 +1024,7 @@ static void NotchyGen_PlantMushrooms(void) {
 
 	if (Game_Version.Version < VERSION_0023) return;
 	numPatches       = World.Volume / 2000;
+	numPatches      *= Gen_GetTheme()->mushroomPatchMul;
 	Gen_CurrentState = "Planting mushrooms";
 
 	for (i = 0; i < numPatches; i++) {
@@ -984,7 +1046,7 @@ static void NotchyGen_PlantMushrooms(void) {
 				if (mushY >= (groundHeight - 1)) continue;
 
 				index = World_Pack(mushX, mushY, mushZ);
-				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_STONE)
+				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == Gen_GetTheme()->stoneBlock)
 					Gen_Blocks[index] = block;
 			}
 		}
@@ -992,14 +1054,14 @@ static void NotchyGen_PlantMushrooms(void) {
 }
 
 static void NotchyGen_PlantTrees(void) {
-	int numPatches;
+	int numPatches, numCactiPatches;
 	int patchX, patchZ;
 	int treeX, treeY, treeZ;
 	int treeHeight, index, count;
 	BlockRaw under;
 	int i, j, k, m;
 	int cactusH, cy;
-	cc_bool isJungle = Gen_Themes[Gen_Theme].hasJungleTrees;
+	cc_bool isJungle = Gen_GetTheme()->hasJungleTrees;
 
 	IVec3 coords_small[TREE_MAX_COUNT];
 	BlockRaw blocks_small[TREE_MAX_COUNT];
@@ -1011,10 +1073,11 @@ static void NotchyGen_PlantTrees(void) {
 	Tree_Blocks = Gen_Blocks;
 	Tree_Rnd    = &rnd;
 
+	/* ----- Tree patches ----- */
 	numPatches = World.Width * World.Length / 4000;
-	numPatches *= Gen_Themes[Gen_Theme].treePatchMul;
+	numPatches *= Gen_GetTheme()->treePatchMul;
 
-	Gen_CurrentState = Gen_Themes[Gen_Theme].treePlantMsg;
+	Gen_CurrentState = Gen_GetTheme()->treePlantMsg;
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
 
@@ -1034,8 +1097,63 @@ static void NotchyGen_PlantTrees(void) {
 				index = World_Pack(treeX, treeY, treeZ);
 				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
 
-				if (Gen_Themes[Gen_Theme].plantsCacti) {
-					if (under == BLOCK_SAND) {
+				if (under != Gen_GetTheme()->surfaceBlock && !(Gen_GetTheme()->treesOnDirt && under == Gen_GetTheme()->fillBlock))
+					continue;
+
+				/* Jungle theme: 30% chance for large 2x2 jungle tree */
+				if (isJungle && Random_Float(&rnd) < 0.30f) {
+					treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
+					coords = coords_jungle;
+					blocks = blocks_jungle;
+					if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				} else {
+					treeHeight = 5 + Random_Next(&rnd, 3);
+					coords = coords_small;
+					blocks = blocks_small;
+					if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* ----- Cacti patches (independent from trees) ----- */
+	numCactiPatches = World.Width * World.Length / 4000;
+	numCactiPatches *= Gen_GetTheme()->cactiPatchMul;
+
+	if (numCactiPatches > 0) {
+		Gen_CurrentState = "Planting cacti";
+		for (i = 0; i < numCactiPatches; i++) {
+			Gen_CurrentProgress = (float)i / numCactiPatches;
+
+			patchX = Random_Next(&rnd, World.Width);
+			patchZ = Random_Next(&rnd, World.Length);
+
+			for (j = 0; j < 20; j++) {
+				treeX = patchX; treeZ = patchZ;
+				for (k = 0; k < 20; k++) {
+					treeX += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+					treeZ += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+
+					if (!World_ContainsXZ(treeX, treeZ) || Random_Float(&rnd) >= 0.25f) continue;
+					treeY = heightmap[treeZ * World.Width + treeX] + 1;
+					if (treeY >= World.Height) continue;
+
+					index = World_Pack(treeX, treeY, treeZ);
+					under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
+
+					if (under == Gen_GetTheme()->surfaceBlock) {
 						cactusH = 1 + Random_Next(&rnd, 3);
 						for (cy = 0; cy < cactusH; cy++) {
 							if (treeY + cy >= World.Height) break;
@@ -1044,40 +1162,12 @@ static void NotchyGen_PlantTrees(void) {
 							Gen_Blocks[index] = BLOCK_CACTUS;
 						}
 					}
-				} else {
-					if (under != BLOCK_GRASS && !(Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT))
-						continue;
-
-					/* Jungle theme: 30% chance for large 2x2 jungle tree */
-					if (isJungle && Random_Float(&rnd) < 0.30f) {
-						treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
-						coords = coords_jungle;
-						blocks = blocks_jungle;
-						if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-							count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-							for (m = 0; m < count; m++) {
-								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-								Gen_Blocks[index] = blocks[m];
-							}
-						}
-					} else {
-						treeHeight = 5 + Random_Next(&rnd, 3);
-						coords = coords_small;
-						blocks = blocks_small;
-						if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-							count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-							for (m = 0; m < count; m++) {
-								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-								Gen_Blocks[index] = blocks[m];
-							}
-						}
-					}
 				}
 			}
 		}
 	}
 
-	if (Gen_Themes[Gen_Theme].hasOases) {
+	if (Gen_GetTheme()->hasOases) {
 		int numOases = World.Width * World.Length / 8000;
 		int ox, oz, oy, oRadius, dx, dz;
 		if (numOases < 3) numOases = 3;
@@ -1141,7 +1231,7 @@ static void NotchyGen_PlantTrees(void) {
 static cc_bool NotchyGen_Prepare(int seed) {
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
-	if (Gen_Themes[Gen_Theme].raiseWaterLevel)
+	if (Gen_GetTheme()->raiseWaterLevel)
 		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
@@ -1154,27 +1244,23 @@ static void NotchyGen_Generate(void) {
 		GEN_COOP_STEP( 0, NotchyGen_CreateHeightmap() );
 		GEN_COOP_STEP( 1, NotchyGen_CreateStrata() );
 		GEN_COOP_STEP( 2, NotchyGen_CarveCaves() );
-		GEN_COOP_STEP( 3, NotchyGen_CarveOreVeins(0.9f, "Carving coal ore", BLOCK_COAL_ORE) );
-		GEN_COOP_STEP( 4, NotchyGen_CarveOreVeins(0.7f, "Carving iron ore", BLOCK_IRON_ORE) );
-		GEN_COOP_STEP( 5, NotchyGen_CarveOreVeins(0.5f, "Carving gold ore", BLOCK_GOLD_ORE) );
-		GEN_COOP_STEP( 6, NotchyGen_CarveOreVeins(0.6f, "Carving red ore", BLOCK_RED_ORE) );
-		GEN_COOP_STEP( 7, NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE) );
+		GEN_COOP_STEP( 3, NotchyGen_CarveAllOres() );
 
-		GEN_COOP_STEP( 8, NotchyGen_FloodFillWaterBorders() );
-		GEN_COOP_STEP( 9, NotchyGen_FloodFillWater() );
-		GEN_COOP_STEP(10, NotchyGen_FloodFillLava() );
+		GEN_COOP_STEP( 4, NotchyGen_FloodFillWaterBorders() );
+		GEN_COOP_STEP( 5, NotchyGen_FloodFillWater() );
+		GEN_COOP_STEP( 6, NotchyGen_FloodFillLava() );
 
-		GEN_COOP_STEP(11, NotchyGen_CreateSurfaceLayer() );
-		GEN_COOP_STEP(12, NotchyGen_PlantFlowers() );
-		GEN_COOP_STEP(13, NotchyGen_PlantMushrooms() );
-		GEN_COOP_STEP(14, NotchyGen_PlantTrees() );
-		GEN_COOP_STEP(15, NotchyGen_PlaceSnowLayer() );
+		GEN_COOP_STEP( 7, NotchyGen_CreateSurfaceLayer() );
+		GEN_COOP_STEP( 8, NotchyGen_PlantFlowers() );
+		GEN_COOP_STEP( 9, NotchyGen_PlantMushrooms() );
+		GEN_COOP_STEP(10, NotchyGen_PlantTrees() );
+		GEN_COOP_STEP(11, NotchyGen_PlaceSnowLayer() );
 	GEN_COOP_END
 
 	Mem_Free(heightmap);
 	heightmap = NULL;
 
-	if (Gen_Themes[Gen_Theme].hasShadowCeiling) Gen_PlaceShadowCeiling();
+	if (Gen_GetTheme()->hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done  = true;
 }
@@ -1232,7 +1318,8 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 	int flowerX, flowerY, flowerZ;
 	int i, j, k, m;
 	int availableSpace;
-	cc_bool isJungle = Gen_Themes[Gen_Theme].hasJungleTrees;
+	int cactusH, cy;
+	cc_bool isJungle = Gen_GetTheme()->hasJungleTrees;
 	IVec3 coords_small[TREE_MAX_COUNT];
 	BlockRaw blocks_small[TREE_MAX_COUNT];
 	IVec3 coords_jungle[JUNGLE_TREE_MAX_COUNT];
@@ -1344,7 +1431,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				if (y < 0 || y > maxY) continue;
 				index = World_Pack(x, y, z);
 				if (Gen_Blocks[index] == BLOCK_AIR)
-					Gen_Blocks[index] = BLOCK_STONE;
+					Gen_Blocks[index] = Gen_GetTheme()->stoneBlock;
 			}
 
 			/* Fill dirt from stoneHeight+1 to dirtHeight */
@@ -1352,7 +1439,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				if (y < 0 || y > maxY) continue;
 				index = World_Pack(x, y, z);
 				if (Gen_Blocks[index] == BLOCK_AIR)
-					Gen_Blocks[index] = BLOCK_DIRT;
+					Gen_Blocks[index] = Gen_GetTheme()->fillBlock;
 			}
 		}
 	}
@@ -1366,17 +1453,17 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 			y = heightmap[hIndex++];
 			if (y < 0 || y >= World.Height) continue;
 			index = World_Pack(x, y, z);
-			if (Gen_Blocks[index] != BLOCK_DIRT && Gen_Blocks[index] != BLOCK_STONE) continue;
+			if (Gen_Blocks[index] != Gen_GetTheme()->fillBlock && Gen_Blocks[index] != Gen_GetTheme()->stoneBlock) continue;
 			above = y >= World.MaxY ? BLOCK_AIR : Gen_Blocks[index + World.OneY];
 			if (above == BLOCK_AIR) {
-				Gen_Blocks[index] = Gen_Themes[Gen_Theme].surfaceBlock;
+				Gen_Blocks[index] = Gen_GetTheme()->surfaceBlock;
 			}
 		}
 	}
 
 	numPatches       = World.Width * World.Length / 3000;
-	numPatches      *= Gen_Themes[Gen_Theme].flowerPatchMul;
-	if (Gen_Themes[Gen_Theme].generateFlowers) {
+	numPatches      *= Gen_GetTheme()->flowerPatchMul;
+	if (Gen_GetTheme()->generateFlowers) {
 	Gen_CurrentState = "Planting flowers";
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
@@ -1393,19 +1480,19 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				flowerY = heightmap[flowerZ * World.Width + flowerX] + 1;
 				if (flowerY <= 0 || flowerY >= World.Height) continue;
 				index = World_Pack(flowerX, flowerY, flowerZ);
-				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == BLOCK_GRASS)
+				if (Gen_Blocks[index] == BLOCK_AIR && Gen_Blocks[index - World.OneY] == Gen_GetTheme()->surfaceBlock)
 					Gen_Blocks[index] = block;
 			}
 		}
 	}
 	}
 
-	/* ----- Trees / Cacti ----- */
+	/* ----- Trees ----- */
 	Tree_Blocks = Gen_Blocks;
 	Tree_Rnd    = &rnd;
 	numPatches       = World.Width * World.Length / 4000;
-	numPatches      *= Gen_Themes[Gen_Theme].treePatchMul;
-	Gen_CurrentState = Gen_Themes[Gen_Theme].treePlantMsg;
+	numPatches      *= Gen_GetTheme()->treePatchMul;
+	Gen_CurrentState = Gen_GetTheme()->treePlantMsg;
 
 	for (i = 0; i < numPatches; i++) {
 		Gen_CurrentProgress = (float)i / numPatches;
@@ -1423,10 +1510,80 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				index = World_Pack(treeX, treeY, treeZ);
 				under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
 
-				if (Gen_Themes[Gen_Theme].plantsCacti) {
-					if (under == BLOCK_SAND) {
-						int cactusH = 1 + Random_Next(&rnd, 3);
-						int cy;
+				if (under != Gen_GetTheme()->surfaceBlock && !(Gen_GetTheme()->treesOnDirt && under == Gen_GetTheme()->fillBlock))
+					continue;
+
+				/* Jungle theme: 30% chance for large 2x2 jungle tree */
+				if (isJungle && Random_Float(&rnd) < 0.30f) {
+					/* Check available vertical space above the tree position */
+					availableSpace = FloatingGen_FindVerticalSpace(treeX, treeY, treeZ, 30);
+
+					/* Follow height protocol for floating islands:
+					   - 18+ blocks: spawn normally (18-28 blocks tall)
+					   - 12-17 blocks: shrink tree to fit available space
+					   - <12 blocks: don't spawn the tree */
+					if (availableSpace >= 18) {
+						/* Full height jungle tree */
+						treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
+						if (treeHeight > availableSpace) treeHeight = availableSpace;
+					} else if (availableSpace >= 12) {
+						/* Shrink to fit */
+						treeHeight = availableSpace;
+					} else {
+						/* Not enough space - skip this tree */
+						continue;
+					}
+
+					coords = coords_jungle;
+					blocks = blocks_jungle;
+					if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				} else {
+					/* Normal tree: 5-7 blocks tall */
+					treeHeight = 5 + Random_Next(&rnd, 3);
+					coords = coords_small;
+					blocks = blocks_small;
+					if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+						count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+						for (m = 0; m < count; m++) {
+							index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+							Gen_Blocks[index] = blocks[m];
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* ----- Cacti patches (independent from trees) ----- */
+	numPatches = World.Width * World.Length / 4000;
+	numPatches *= Gen_GetTheme()->cactiPatchMul;
+
+	if (numPatches > 0) {
+		Gen_CurrentState = "Planting cacti";
+		for (i = 0; i < numPatches; i++) {
+			Gen_CurrentProgress = (float)i / numPatches;
+			patchX = Random_Next(&rnd, World.Width);
+			patchZ = Random_Next(&rnd, World.Length);
+
+			for (j = 0; j < 20; j++) {
+				treeX = patchX; treeZ = patchZ;
+				for (k = 0; k < 20; k++) {
+					treeX += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+					treeZ += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+					if (!World_ContainsXZ(treeX, treeZ) || Random_Float(&rnd) >= 0.25f) continue;
+					treeY = heightmap[treeZ * World.Width + treeX] + 1;
+					if (treeY >= World.Height) continue;
+					index = World_Pack(treeX, treeY, treeZ);
+					under = treeY > 0 ? Gen_Blocks[index - World.OneY] : BLOCK_AIR;
+
+					if (under == Gen_GetTheme()->surfaceBlock) {
+						cactusH = 1 + Random_Next(&rnd, 3);
 						for (cy = 0; cy < cactusH; cy++) {
 							if (treeY + cy >= World.Height) break;
 							index = World_Pack(treeX, treeY + cy, treeZ);
@@ -1434,59 +1591,12 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 							Gen_Blocks[index] = BLOCK_CACTUS;
 						}
 					}
-				} else {
-					if (under != BLOCK_GRASS && !(Gen_Themes[Gen_Theme].treesOnDirt && under == BLOCK_DIRT))
-						continue;
-
-					/* Jungle theme: 30% chance for large 2x2 jungle tree */
-					if (isJungle && Random_Float(&rnd) < 0.30f) {
-						/* Check available vertical space above the tree position */
-						availableSpace = FloatingGen_FindVerticalSpace(treeX, treeY, treeZ, 30);
-
-						/* Follow height protocol for floating islands:
-						   - 18+ blocks: spawn normally (18-28 blocks tall)
-						   - 12-17 blocks: shrink tree to fit available space
-						   - <12 blocks: don't spawn the tree */
-						if (availableSpace >= 18) {
-							/* Full height jungle tree */
-							treeHeight = 18 + Random_Next(&rnd, 11); /* 18-28 blocks tall */
-							if (treeHeight > availableSpace) treeHeight = availableSpace;
-						} else if (availableSpace >= 12) {
-							/* Shrink to fit */
-							treeHeight = availableSpace;
-						} else {
-							/* Not enough space - skip this tree */
-							continue;
-						}
-
-						coords = coords_jungle;
-						blocks = blocks_jungle;
-						if (JungleTreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-							count = JungleTreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-							for (m = 0; m < count; m++) {
-								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-								Gen_Blocks[index] = blocks[m];
-							}
-						}
-					} else {
-						/* Normal tree: 5-7 blocks tall */
-						treeHeight = 5 + Random_Next(&rnd, 3);
-						coords = coords_small;
-						blocks = blocks_small;
-						if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
-							count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
-							for (m = 0; m < count; m++) {
-								index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
-								Gen_Blocks[index] = blocks[m];
-							}
-						}
-					}
 				}
 			}
 		}
 	}
 	
-	if (Gen_Themes[Gen_Theme].hasSnowLayer) {
+	if (Gen_GetTheme()->hasSnowLayer) {
 		Gen_CurrentState = "Placing snow layer";
 		hIndex = 0;
 		for (z = 0; z < World.Length; z++) {
@@ -1511,7 +1621,7 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 		}
 	}
 
-	if (Gen_Themes[Gen_Theme].hasSnowLayer) {
+	if (Gen_GetTheme()->hasSnowLayer) {
 		Gen_CurrentState = "Placing snow on trees";
 		for (z = 0; z < World.Length; z++) {
 			Gen_CurrentProgress = (float)z / World.Length;
@@ -1536,7 +1646,7 @@ static cc_bool FloatingGen_Prepare(int seed) {
 	int mapArea = World.Width * World.Length;
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
-	if (Gen_Themes[Gen_Theme].raiseWaterLevel)
+	if (Gen_GetTheme()->raiseWaterLevel)
 		waterLevel += World.Height / 8;
 	minHeight  = World.Height;
 
@@ -1603,18 +1713,14 @@ static void FloatingGen_Generate(void) {
 
 	/* Carve caves and ore veins through all layers */
 	NotchyGen_CarveCaves();
-	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore", BLOCK_COAL_ORE);
-	NotchyGen_CarveOreVeins(0.7f, "Carving iron ore", BLOCK_IRON_ORE);
-	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore", BLOCK_GOLD_ORE);
-	NotchyGen_CarveOreVeins(0.6f, "Carving red ore", BLOCK_RED_ORE);
-	NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
+	NotchyGen_CarveAllOres();
 
 	FloatingGen_FindSpawn();
 
 	Mem_Free(heightmap);   heightmap   = NULL;
 	Mem_Free(floatCutoff); floatCutoff = NULL;
 
-	if (Gen_Themes[Gen_Theme].hasShadowCeiling) Gen_PlaceShadowCeiling();
+	if (Gen_GetTheme()->hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done = true;
 }
@@ -1643,7 +1749,7 @@ const struct MapGenerator FloatingGen = {
 Vec3 Gen_SpawnOverride = { 0, -1.0f, 0 };
 
 static void CavesGen_FillStone(void) {
-	BlockRaw fillBlock = Gen_Themes[Gen_Theme].caveFillBlock;
+	BlockRaw fillBlock = Gen_GetTheme()->caveFillBlock;
 	Gen_CurrentState = "Filling world";
 	Mem_Set(Gen_Blocks, fillBlock, World.Volume);
 }
@@ -1748,11 +1854,11 @@ static void CavesGen_CarveCaverns(void) {
 
 		/* ~40% of caverns get garden floors with trees/cacti and flowers */
 		hasGrass = Random_Float(&rnd) < 0.4f;
-		if (!Gen_Themes[Gen_Theme].hasCaveGardens) hasGrass = 0;
+		if (!Gen_GetTheme()->hasCaveGardens) hasGrass = 0;
 
 		if (hasGrass) {
-			BlockRaw gardenSurface = Gen_Themes[Gen_Theme].gardenSurface;
-			BlockRaw gardenFill    = Gen_Themes[Gen_Theme].gardenFill;
+			BlockRaw gardenSurface = Gen_GetTheme()->gardenSurface;
+			BlockRaw gardenFill    = Gen_GetTheme()->gardenFill;
 
 			/* Place surface + fill on the cavern floor */
 			for (z = minZ; z <= maxZ; z++) {
@@ -1778,7 +1884,7 @@ static void CavesGen_CarveCaverns(void) {
 				}
 			}
 
-			if (Gen_Themes[Gen_Theme].plantsCacti) {
+			if (Gen_GetTheme()->cactiPatchMul > 0) {
 				for (m = 0; m < 12; m++) {
 					int cactusH, cy;
 					fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
@@ -1845,7 +1951,7 @@ static void CavesGen_CarveCaverns(void) {
 			}
 		} else {
 			/* Non-garden room: scatter brown and red mushrooms on the floor */
-			BlockRaw mushroomFloor = Gen_Themes[Gen_Theme].caveFillBlock;
+			BlockRaw mushroomFloor = Gen_GetTheme()->caveFillBlock;
 			for (m = 0; m < 8; m++) {
 				fx = cenX - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
 				fz = cenZ - (int)radiusH / 2 + Random_Next(&rnd, (int)radiusH);
@@ -1956,15 +2062,19 @@ static void CavesGen_Generate(void) {
 	CavesGen_FillStone();
 	CavesGen_CarveTunnels();
 	CavesGen_CarveCaverns();
-	NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
-	if (Gen_Themes[Gen_Theme].hasExtraCaveOres) {
-		NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
-		NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
+	if (Gen_Theme == GEN_THEME_CUSTOM) {
+		NotchyGen_CarveAllOres();
+	} else {
+		NotchyGen_CarveOreVeins(0.9f, "Carving coal ore",    BLOCK_COAL_ORE);
+		if (Gen_GetTheme()->hasExtraCaveOres) {
+			NotchyGen_CarveOreVeins(0.95f, "Carving cobblestone", BLOCK_COBBLE);
+			NotchyGen_CarveOreVeins(0.9f,  "Carving mossy cobblestone", BLOCK_MOSSY_ROCKS);
+		}
+		NotchyGen_CarveOreVeins(0.7f, "Carving iron ore",    BLOCK_IRON_ORE);
+		NotchyGen_CarveOreVeins(0.5f, "Carving gold ore",    BLOCK_GOLD_ORE);
+		NotchyGen_CarveOreVeins(0.6f, "Carving red ore",     BLOCK_RED_ORE);
+		NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
 	}
-	NotchyGen_CarveOreVeins(0.7f, "Carving iron ore",    BLOCK_IRON_ORE);
-	NotchyGen_CarveOreVeins(0.5f, "Carving gold ore",    BLOCK_GOLD_ORE);
-	NotchyGen_CarveOreVeins(0.6f, "Carving red ore",     BLOCK_RED_ORE);
-	NotchyGen_CarveOreVeins(0.4f, "Carving diamond ore", BLOCK_DIAMOND_ORE);
 	CavesGen_PlaceLavaPools();
 	CavesGen_PlaceBedrock();
 	CavesGen_FindSpawn();
@@ -2348,4 +2458,229 @@ int JungleTreeGen_Grow(int treeX, int treeY, int treeZ, int height, IVec3* coord
 	}
 
 	return count;
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------CustomTheme Persistence---------------------------------------------------*
+*#########################################################################################################################*/
+/* Constructs a null-terminated option key from prefix + suffix */
+static void CT_Key(char* buf, const char* prefix, const char* suffix) {
+	cc_string str;
+	str.buffer = buf; str.length = 0; str.capacity = STRING_SIZE;
+	String_AppendConst(&str, prefix);
+	String_AppendConst(&str, suffix);
+	buf[str.length] = '\0';
+}
+
+/* Constructs a null-terminated option key for an ore field: prefix + "ore-" + index + "-" + field */
+static void CT_OreKey(char* buf, const char* prefix, int i, const char* field) {
+	cc_string str;
+	str.buffer = buf; str.length = 0; str.capacity = STRING_SIZE;
+	String_AppendConst(&str, prefix);
+	String_AppendConst(&str, "ore-");
+	String_AppendInt(&str, i);
+	String_Append(&str, '-');
+	String_AppendConst(&str, field);
+	buf[str.length] = '\0';
+}
+
+static void CT_SaveColor(const char* key, PackedCol col) {
+	cc_string str; char strBuf[STRING_SIZE];
+	String_InitArray(str, strBuf);
+	PackedCol_ToHex(&str, col);
+	Options_Set(key, &str);
+}
+
+static PackedCol CT_LoadColor(const char* key, PackedCol def) {
+	cc_uint8 rgb[3];
+	if (Options_GetColor(key, rgb)) {
+		return PackedCol_Make(rgb[0], rgb[1], rgb[2], 0xFF);
+	}
+	return def;
+}
+
+static void CT_SaveFloat(const char* key, float val) {
+	cc_string str; char strBuf[STRING_SIZE];
+	String_InitArray(str, strBuf);
+	String_AppendFloat(&str, val, 4);
+	Options_Set(key, &str);
+}
+
+/* Saves all custom theme settings using the given key prefix */
+static void CT_SaveWithPrefix(const char* p) {
+	struct GenThemeData* t = &Gen_CustomTheme;
+	int i;
+	char k[STRING_SIZE];
+
+	/* Block settings */
+	CT_Key(k, p, "surface-block");    Options_SetInt(k, t->surfaceBlock);
+	CT_Key(k, p, "fill-block");       Options_SetInt(k, t->fillBlock);
+	CT_Key(k, p, "fluid-block");      Options_SetInt(k, t->fluidBlock);
+	CT_Key(k, p, "edge-fluid-block"); Options_SetInt(k, t->edgeFluidBlock);
+	CT_Key(k, p, "edge-block");       Options_SetInt(k, t->edgeBlock);
+	CT_Key(k, p, "sides-block");      Options_SetInt(k, t->sidesBlock);
+	CT_Key(k, p, "edge-offset");      Options_SetInt(k, t->edgeHeightOffset);
+	CT_Key(k, p, "cave-fill-block");  Options_SetInt(k, t->caveFillBlock);
+	CT_Key(k, p, "garden-surface");   Options_SetInt(k, t->gardenSurface);
+	CT_Key(k, p, "garden-fill");      Options_SetInt(k, t->gardenFill);
+	CT_Key(k, p, "stone-block");      Options_SetInt(k, t->stoneBlock);
+	CT_Key(k, p, "underwater-block"); Options_SetInt(k, t->underwaterBlock);
+
+	/* Colors */
+	CT_Key(k, p, "sky-col");    CT_SaveColor(k, t->skyCol);
+	CT_Key(k, p, "fog-col");    CT_SaveColor(k, t->fogCol);
+	CT_Key(k, p, "clouds-col"); CT_SaveColor(k, t->cloudsCol);
+	CT_Key(k, p, "shadow-col"); CT_SaveColor(k, t->shadowCol);
+
+	/* Generation multipliers */
+	CT_Key(k, p, "height-scale");       CT_SaveFloat(k, t->heightScale);
+	CT_Key(k, p, "cave-freq-scale");    CT_SaveFloat(k, t->caveFreqScale);
+	CT_Key(k, p, "tree-patch-mul");     Options_SetInt(k, t->treePatchMul);
+	CT_Key(k, p, "flower-patch-mul");   Options_SetInt(k, t->flowerPatchMul);
+	CT_Key(k, p, "mushroom-patch-mul"); Options_SetInt(k, t->mushroomPatchMul);
+
+	/* Feature flags */
+	CT_Key(k, p, "shadow-ceiling");    Options_SetBool(k, t->hasShadowCeiling);
+	CT_Key(k, p, "snow-layer");        Options_SetBool(k, t->hasSnowLayer);
+	CT_Key(k, p, "dirt-to-grass");     Options_SetBool(k, t->dirtToGrass);
+	CT_Key(k, p, "cave-gardens");      Options_SetBool(k, t->hasCaveGardens);
+	CT_Key(k, p, "cacti-patch-mul");   Options_SetInt(k, t->cactiPatchMul);
+	CT_Key(k, p, "generate-flowers");  Options_SetBool(k, t->generateFlowers);
+	CT_Key(k, p, "extra-cave-ores");   Options_SetBool(k, t->hasExtraCaveOres);
+	CT_Key(k, p, "trees-on-dirt");     Options_SetBool(k, t->treesOnDirt);
+	CT_Key(k, p, "raise-water-level"); Options_SetBool(k, t->raiseWaterLevel);
+	CT_Key(k, p, "has-oases");         Options_SetBool(k, t->hasOases);
+	CT_Key(k, p, "has-jungle-trees");  Options_SetBool(k, t->hasJungleTrees);
+
+	/* Ore definitions */
+	for (i = 0; i < MAX_CUSTOM_ORES; i++) {
+		CT_OreKey(k, p, i, "block");     Options_SetInt(k, Gen_CustomOres[i].block);
+		CT_OreKey(k, p, i, "enabled");   Options_SetBool(k, Gen_CustomOres[i].enabled);
+		CT_OreKey(k, p, i, "abundance"); CT_SaveFloat(k, Gen_CustomOres[i].abundance);
+	}
+}
+
+/* Loads all custom theme settings from the given key prefix */
+static void CT_LoadWithPrefix(const char* p) {
+	struct GenThemeData* t = &Gen_CustomTheme;
+	int i;
+	char k[STRING_SIZE];
+
+	/* Start from Normal theme defaults */
+	*t = Gen_Themes[GEN_THEME_NORMAL];
+
+	/* Block settings */
+	CT_Key(k, p, "surface-block");    t->surfaceBlock     = Options_GetInt(k, 0, 255, BLOCK_GRASS);
+	CT_Key(k, p, "fill-block");       t->fillBlock        = Options_GetInt(k, 0, 255, BLOCK_DIRT);
+	CT_Key(k, p, "fluid-block");      t->fluidBlock       = Options_GetInt(k, 0, 255, BLOCK_STILL_WATER);
+	CT_Key(k, p, "edge-fluid-block"); t->edgeFluidBlock   = Options_GetInt(k, 0, 255, BLOCK_STILL_WATER);
+	CT_Key(k, p, "edge-block");       t->edgeBlock        = Options_GetInt(k, 0, 255, BLOCK_STILL_WATER);
+	CT_Key(k, p, "sides-block");      t->sidesBlock       = Options_GetInt(k, 0, 255, BLOCK_BEDROCK);
+	CT_Key(k, p, "edge-offset");      t->edgeHeightOffset = Options_GetInt(k, -64, 64, 0);
+	CT_Key(k, p, "cave-fill-block");  t->caveFillBlock    = Options_GetInt(k, 0, 255, BLOCK_STONE);
+	CT_Key(k, p, "garden-surface");   t->gardenSurface    = Options_GetInt(k, 0, 255, BLOCK_GRASS);
+	CT_Key(k, p, "garden-fill");      t->gardenFill       = Options_GetInt(k, 0, 255, BLOCK_DIRT);
+	CT_Key(k, p, "stone-block");      t->stoneBlock       = Options_GetInt(k, 0, 255, BLOCK_STONE);
+	CT_Key(k, p, "underwater-block"); t->underwaterBlock   = Options_GetInt(k, 0, 255, BLOCK_GRAVEL);
+
+	/* Colors (use actual engine defaults instead of 0 sentinel) */
+	CT_Key(k, p, "sky-col");    t->skyCol    = CT_LoadColor(k, ENV_DEFAULT_SKY_COLOR);
+	CT_Key(k, p, "fog-col");    t->fogCol    = CT_LoadColor(k, ENV_DEFAULT_FOG_COLOR);
+	CT_Key(k, p, "clouds-col"); t->cloudsCol = CT_LoadColor(k, ENV_DEFAULT_CLOUDS_COLOR);
+	CT_Key(k, p, "shadow-col"); t->shadowCol = CT_LoadColor(k, ENV_DEFAULT_SHADOW_COLOR);
+
+	/* Generation multipliers */
+	CT_Key(k, p, "height-scale");       t->heightScale      = Options_GetFloat(k, 0.1f, 5.0f, 1.0f);
+	CT_Key(k, p, "cave-freq-scale");    t->caveFreqScale    = Options_GetFloat(k, 0.0f, 10.0f, 1.0f);
+	CT_Key(k, p, "tree-patch-mul");     t->treePatchMul     = Options_GetInt(k, 0, 20, 1);
+	CT_Key(k, p, "flower-patch-mul");   t->flowerPatchMul   = Options_GetInt(k, 0, 20, 1);
+	CT_Key(k, p, "mushroom-patch-mul"); t->mushroomPatchMul = Options_GetInt(k, 0, 20, 1);
+
+	/* Feature flags */
+	CT_Key(k, p, "shadow-ceiling");    t->hasShadowCeiling = Options_GetBool(k, false);
+	CT_Key(k, p, "snow-layer");        t->hasSnowLayer     = Options_GetBool(k, false);
+	CT_Key(k, p, "dirt-to-grass");     t->dirtToGrass      = Options_GetBool(k, true);
+	CT_Key(k, p, "cave-gardens");      t->hasCaveGardens   = Options_GetBool(k, true);
+	CT_Key(k, p, "cacti-patch-mul");   t->cactiPatchMul    = Options_GetInt(k, 0, 20, 0);
+	CT_Key(k, p, "generate-flowers");  t->generateFlowers  = Options_GetBool(k, true);
+	CT_Key(k, p, "extra-cave-ores");   t->hasExtraCaveOres = Options_GetBool(k, false);
+	CT_Key(k, p, "trees-on-dirt");     t->treesOnDirt      = Options_GetBool(k, false);
+	CT_Key(k, p, "raise-water-level"); t->raiseWaterLevel  = Options_GetBool(k, false);
+	CT_Key(k, p, "has-oases");         t->hasOases         = Options_GetBool(k, false);
+	CT_Key(k, p, "has-jungle-trees");  t->hasJungleTrees   = Options_GetBool(k, false);
+
+	/* Status messages (always use normal defaults) */
+	t->treePlantMsg     = "Planting trees";
+	t->edgeFloodMsg     = "Flooding edge water";
+	t->internalFloodMsg = "Flooding water";
+
+	/* Ore definitions */
+	for (i = 0; i < MAX_CUSTOM_ORES; i++) {
+		CT_OreKey(k, p, i, "block");
+		Gen_CustomOres[i].block = Options_GetInt(k, 0, 255,
+			i < 5 ? Gen_CustomOres[i].block : 0);
+
+		CT_OreKey(k, p, i, "enabled");
+		Gen_CustomOres[i].enabled = Options_GetBool(k, i < 5);
+
+		CT_OreKey(k, p, i, "abundance");
+		Gen_CustomOres[i].abundance = Options_GetFloat(k, 0.0f, 2.0f,
+			i < 5 ? Gen_CustomOres[i].abundance : 0.5f);
+	}
+}
+
+#define CT_PREFIX "ct-"
+
+void CustomTheme_Save(void) { CT_SaveWithPrefix(CT_PREFIX); }
+void CustomTheme_Load(void) { CT_LoadWithPrefix(CT_PREFIX); }
+
+/* Constructs the option key prefix for a preset slot (e.g. "ctp0-", "ctp1-") */
+static void CT_PresetPrefix(char* buf, int slot) {
+	cc_string str;
+	str.buffer = buf; str.length = 0; str.capacity = STRING_SIZE;
+	String_AppendConst(&str, "ctp");
+	String_AppendInt(&str, slot);
+	String_Append(&str, '-');
+	buf[str.length] = '\0';
+}
+
+void CustomTheme_SavePreset(int slot) {
+	char prefix[STRING_SIZE];
+	char k[STRING_SIZE];
+	CT_PresetPrefix(prefix, slot);
+	CT_SaveWithPrefix(prefix);
+	CT_Key(k, prefix, "exists");
+	Options_SetBool(k, true);
+}
+
+void CustomTheme_LoadPreset(int slot) {
+	char prefix[STRING_SIZE];
+	CT_PresetPrefix(prefix, slot);
+	CT_LoadWithPrefix(prefix);
+	CT_SaveWithPrefix(CT_PREFIX); /* Also save as active custom theme */
+}
+
+cc_bool CustomTheme_HasPreset(int slot) {
+	char prefix[STRING_SIZE];
+	char k[STRING_SIZE];
+	CT_PresetPrefix(prefix, slot);
+	CT_Key(k, prefix, "exists");
+	return Options_GetBool(k, false);
+}
+
+void CustomTheme_GetPresetName(int slot, cc_string* name) {
+	char prefix[STRING_SIZE];
+	char k[STRING_SIZE];
+	CT_PresetPrefix(prefix, slot);
+	CT_Key(k, prefix, "name");
+	Options_Get(k, name, "");
+}
+
+void CustomTheme_SetPresetName(int slot, const cc_string* name) {
+	char prefix[STRING_SIZE];
+	char k[STRING_SIZE];
+	CT_PresetPrefix(prefix, slot);
+	CT_Key(k, prefix, "name");
+	Options_Set(k, name);
 }

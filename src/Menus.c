@@ -1044,18 +1044,18 @@ static const char* const GenLevel_TypeNames[] = { "Flat", "Normal", "Floating", 
 static const struct MapGenerator* GenLevel_TypeGens[] = { &FlatgrassGen, &NotchyGen, &FloatingGen, &CavesGen, &EmptyGen };
 #define GENLEVEL_TYPE_COUNT 5
 
-static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle", "Plains" };
-#define GENLEVEL_THEME_COUNT 9
+static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle", "Plains", "Custom" };
+#define GENLEVEL_THEME_COUNT 10
 
 static struct GenLevelScreen {
 	Screen_Body
 	struct FontDesc textFont;
 	int worldType;  /* index into GenLevel_TypeNames */
 	int worldTheme; /* index into GenLevel_ThemeNames */
-	struct ButtonWidget typeBtn, themeBtn, generate, cancel;
+	struct ButtonWidget typeBtn, themeBtn, generate, cancel, customizeBtn;
 	struct TextInputWidget inputs[4];
 	struct TextWidget labels[4], title;
-	struct Widget* __widgets[2 * GENLEVEL_NUM_INPUTS + 5];
+	struct Widget* __widgets[2 * GENLEVEL_NUM_INPUTS + 6];
 } GenLevelScreen;
 
 CC_NOINLINE static int GenLevelScreen_GetInt(struct GenLevelScreen* s, int index) {
@@ -1112,7 +1112,7 @@ static int  GenLevelScreen_GetType(void)  { return GenLevelScreen.worldType; }
 
 static void GenLevelScreen_TypeDone(int value, cc_bool valid) {
 	struct GenLevelScreen* s = &GenLevelScreen;
-	if (valid) { s->worldType = value; GenLevelScreen_UpdateType(s); }
+	if (valid) { s->worldType = value; GenLevelScreen_UpdateType(s); Options_SetInt(OPT_GEN_TYPE, value); }
 }
 
 static void GenLevelScreen_ClickType(void* screen, void* b) {
@@ -1123,6 +1123,7 @@ static void GenLevelScreen_ClickType(void* screen, void* b) {
 		struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
 		s->worldType = (s->worldType + 1) % GENLEVEL_TYPE_COUNT;
 		GenLevelScreen_UpdateType(s);
+		Options_SetInt(OPT_GEN_TYPE, s->worldType);
 	}
 }
 
@@ -1134,13 +1135,16 @@ static void GenLevelScreen_UpdateTheme(struct GenLevelScreen* s) {
 	Gui_MakeTitleFont(&titleFont);
 	ButtonWidget_Set(&s->themeBtn, &str, &titleFont);
 	Font_Free(&titleFont);
+	/* Enable Customize button only when Custom theme is selected */
+	Widget_SetDisabled(&s->customizeBtn, s->worldTheme != GEN_THEME_CUSTOM);
+	s->dirty = true;
 }
 
 static int  GenLevelScreen_GetTheme(void) { return GenLevelScreen.worldTheme; }
 
 static void GenLevelScreen_ThemeDone(int value, cc_bool valid) {
 	struct GenLevelScreen* s = &GenLevelScreen;
-	if (valid) { s->worldTheme = value; GenLevelScreen_UpdateTheme(s); }
+	if (valid) { s->worldTheme = value; GenLevelScreen_UpdateTheme(s); Options_SetInt(OPT_GEN_THEME, value); }
 }
 
 static void GenLevelScreen_ClickTheme(void* screen, void* b) {
@@ -1151,12 +1155,17 @@ static void GenLevelScreen_ClickTheme(void* screen, void* b) {
 		struct GenLevelScreen* s = (struct GenLevelScreen*)screen;
 		s->worldTheme = (s->worldTheme + 1) % GENLEVEL_THEME_COUNT;
 		GenLevelScreen_UpdateTheme(s);
+		Options_SetInt(OPT_GEN_THEME, s->worldTheme);
 	}
 }
 
 static void GenLevelScreen_Generate(void* a, void* b) {
 	struct GenLevelScreen* s = (struct GenLevelScreen*)a;
 	GenLevelScreen_Gen(a, GenLevel_TypeGens[s->worldType]);
+}
+
+static void GenLevelScreen_ClickCustomize(void* a, void* b) {
+	CustomThemeGroupScreen_Show();
 }
 
 static void GenLevelScreen_Make(struct GenLevelScreen* s, int i, int def) {
@@ -1201,9 +1210,11 @@ static int GenLevelScreen_InputDown(void* screen, int key, struct InputDevice* d
 		if (Widget_Contains(&s->typeBtn, Pointers[0].x, Pointers[0].y)) {
 			s->worldType = (s->worldType - 1 + GENLEVEL_TYPE_COUNT) % GENLEVEL_TYPE_COUNT;
 			GenLevelScreen_UpdateType(s);
+			Options_SetInt(OPT_GEN_TYPE, s->worldType);
 		} else if (Widget_Contains(&s->themeBtn, Pointers[0].x, Pointers[0].y)) {
 			s->worldTheme = (s->worldTheme - 1 + GENLEVEL_THEME_COUNT) % GENLEVEL_THEME_COUNT;
 			GenLevelScreen_UpdateTheme(s);
+			Options_SetInt(OPT_GEN_THEME, s->worldTheme);
 		}
 	}
 
@@ -1296,6 +1307,7 @@ static void GenLevelScreen_ContextRecreated(void* screen) {
 	TextWidget_SetConst(&s->title,    "Generate new level", &s->textFont);
 	GenLevelScreen_UpdateType(s);
 	GenLevelScreen_UpdateTheme(s);
+	ButtonWidget_SetConst(&s->customizeBtn, "Customize...",     &titleFont);
 	ButtonWidget_SetConst(&s->generate, "Generate",          &titleFont);
 	ButtonWidget_SetConst(&s->cancel,   "Cancel",            &titleFont);
 	Font_Free(&titleFont);
@@ -1325,7 +1337,8 @@ static void GenLevelScreen_Layout(void* screen) {
 	Widget_SetLocation(&s->title,    ANCHOR_CENTRE, ANCHOR_CENTRE,  0, -130);
 	Widget_SetLocation(&s->typeBtn,  ANCHOR_CENTRE, ANCHOR_CENTRE, -110,  100);
 	Widget_SetLocation(&s->themeBtn, ANCHOR_CENTRE, ANCHOR_CENTRE,  110,  100);
-	Widget_SetLocation(&s->generate, ANCHOR_CENTRE, ANCHOR_CENTRE,  0,  150);
+	Widget_SetLocation(&s->generate,     ANCHOR_CENTRE, ANCHOR_CENTRE, -110, 140);
+	Widget_SetLocation(&s->customizeBtn, ANCHOR_CENTRE, ANCHOR_CENTRE,  110, 140);
 	Menu_LayoutBack(&s->cancel);
 }
 
@@ -1342,14 +1355,17 @@ static void GenLevelScreen_Init(void* screen) {
 	GenLevelScreen_Make(s, 3, 0);
 
 	TextWidget_Add(s,   &s->title);
-	s->worldType  = 1; /* default to Normal */
-	s->worldTheme = 0; /* default to Normal */
+	s->worldType  = Options_GetInt(OPT_GEN_TYPE,  0, GENLEVEL_TYPE_COUNT  - 1, 1);
+	s->worldTheme = Options_GetInt(OPT_GEN_THEME, 0, GENLEVEL_THEME_COUNT - 1, 0);
 	ButtonWidget_Add(s, &s->typeBtn,   200, GenLevelScreen_ClickType);
 	ButtonWidget_Add(s, &s->themeBtn,  200, GenLevelScreen_ClickTheme);
+	ButtonWidget_Add(s, &s->customizeBtn, 200, GenLevelScreen_ClickCustomize);
 	ButtonWidget_Add(s, &s->generate,  200, GenLevelScreen_Generate);
 	AddPrimaryButton(s, &s->cancel,         Menu_SwitchPause);
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
+	CustomTheme_Load();
+	GenLevelScreen_UpdateTheme(s); /* sets Customize button disabled state */
 }
 
 static const struct ScreenVTABLE GenLevelScreen_VTABLE = {

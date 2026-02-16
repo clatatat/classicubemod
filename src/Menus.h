@@ -58,6 +58,7 @@ void HacksSettingsScreen_Show(void);
 void EnvSettingsScreen_Show(void);
 void GameplayOptionsScreen_Show(void);
 void MobBehaviorsScreen_Show(void);
+void CustomThemeGroupScreen_Show(void);
 
 void UrlWarningOverlay_Show(const cc_string* url);
 void TexIdsOverlay_Show(void);

@@ -1797,3 +1797,507 @@ void MobBehaviorsScreen_Show(void) {
 	MenuOptionsScreen_Show(MobBehaviorsScreen_InitWidgets);
 }
 
+
+/*########################################################################################################################*
+*-------------------------------------------------CustomThemeScreens------------------------------------------------------*
+*#########################################################################################################################*/
+static void Menu_SwitchCustomTheme(void* a, void* b) { CustomThemeGroupScreen_Show(); }
+static void Menu_SwitchGenLevel(void* a, void* b)    { GenLevelScreen_Show(); }
+
+/* Block names and IDs for dropdown selection in custom theme screens */
+#define CT_BLOCK_COUNT 40
+static const char* const CT_BlockNames[CT_BLOCK_COUNT] = {
+	"Air", "Stone", "Grass", "Dirt", "Cobblestone", "Wood",
+	"Sapling", "Bedrock", "Water", "Still Water", "Lava", "Still Lava",
+	"Sand", "Gravel", "Gold Ore", "Iron Ore", "Coal Ore",
+	"Log", "Leaves", "Sponge", "Glass",
+	"Gold Block", "Iron Block", "Double Slab", "Slab",
+	"Brick", "Mossy Cobble", "Obsidian",
+	"Diamond Block", "Diamond Ore", "Red Ore",
+	"Cactus", "Snow", "Ice", "Snow Block",
+	"Brown Shroom", "Red Shroom",
+	"Cobweb", "Bookshelf", "TNT"
+};
+static const BlockRaw CT_BlockIDs[CT_BLOCK_COUNT] = {
+	BLOCK_AIR, BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT, BLOCK_COBBLE, BLOCK_WOOD,
+	BLOCK_SAPLING, BLOCK_BEDROCK, BLOCK_WATER, BLOCK_STILL_WATER, BLOCK_LAVA, BLOCK_STILL_LAVA,
+	BLOCK_SAND, BLOCK_GRAVEL, BLOCK_GOLD_ORE, BLOCK_IRON_ORE, BLOCK_COAL_ORE,
+	BLOCK_LOG, BLOCK_LEAVES, BLOCK_SPONGE, BLOCK_GLASS,
+	BLOCK_GOLD, BLOCK_IRON, BLOCK_DOUBLE_SLAB, BLOCK_SLAB,
+	BLOCK_BRICK, BLOCK_MOSSY_ROCKS, BLOCK_OBSIDIAN,
+	BLOCK_DIAMOND_BLOCK, BLOCK_DIAMOND_ORE, BLOCK_RED_ORE,
+	BLOCK_CACTUS, BLOCK_SNOW, BLOCK_ICE, BLOCK_SNOW_BLOCK,
+	BLOCK_BROWN_SHROOM, BLOCK_RED_SHROOM,
+	BLOCK_COBWEB, BLOCK_BOOKSHELF, BLOCK_TNT
+};
+
+/* Helper: find index in CT_BlockIDs for a given block ID, returns 0 (Air) if not found */
+static int CT_BlockToIndex(BlockRaw block) {
+	int i;
+	for (i = 0; i < CT_BLOCK_COUNT; i++) {
+		if (CT_BlockIDs[i] == block) return i;
+	}
+	return 0;
+}
+
+
+/*----- Blocks sub-screen -----*/
+static int  CT_GetSurface(void)  { return CT_BlockToIndex(Gen_CustomTheme.surfaceBlock); }
+static void CT_SetSurface(int v) { Gen_CustomTheme.surfaceBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetFill(void)     { return CT_BlockToIndex(Gen_CustomTheme.fillBlock); }
+static void CT_SetFill(int v)    { Gen_CustomTheme.fillBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetStone(void)    { return CT_BlockToIndex(Gen_CustomTheme.stoneBlock); }
+static void CT_SetStone(int v)   { Gen_CustomTheme.stoneBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetFluid(void)    { return CT_BlockToIndex(Gen_CustomTheme.fluidBlock); }
+static void CT_SetFluid(int v)   { Gen_CustomTheme.fluidBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetEdgeFluid(void)  { return CT_BlockToIndex(Gen_CustomTheme.edgeFluidBlock); }
+static void CT_SetEdgeFluid(int v) { Gen_CustomTheme.edgeFluidBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetUnderwater(void)  { return CT_BlockToIndex(Gen_CustomTheme.underwaterBlock); }
+static void CT_SetUnderwater(int v) { Gen_CustomTheme.underwaterBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetEdge(void)    { return CT_BlockToIndex(Gen_CustomTheme.edgeBlock); }
+static void CT_SetEdge(int v)   { Gen_CustomTheme.edgeBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetSides(void)   { return CT_BlockToIndex(Gen_CustomTheme.sidesBlock); }
+static void CT_SetSides(int v)  { Gen_CustomTheme.sidesBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+static int  CT_GetCaveFill(void)  { return CT_BlockToIndex(Gen_CustomTheme.caveFillBlock); }
+static void CT_SetCaveFill(int v) { Gen_CustomTheme.caveFillBlock = CT_BlockIDs[v]; CustomTheme_Save(); }
+
+static int  CT_GetEdgeOffset(void)  { return Gen_CustomTheme.edgeHeightOffset; }
+static void CT_SetEdgeOffset(int v) { Gen_CustomTheme.edgeHeightOffset = v; CustomTheme_Save(); }
+
+static void CTBlocks_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddEnum(s, "Surface block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetSurface, CT_SetSurface,
+			"Block used for the ground surface\n(e.g. Grass, Sand)");
+		MenuOptionsScreen_AddEnum(s, "Fill block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetFill, CT_SetFill,
+			"Block used to fill below surface\n(e.g. Dirt, Sand)");
+		MenuOptionsScreen_AddEnum(s, "Stone block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetStone, CT_SetStone,
+			"Block used instead of stone\nin terrain generation");
+		MenuOptionsScreen_AddEnum(s, "Water top block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetEdgeFluid, CT_SetEdgeFluid,
+			"Block used for water surface\n(e.g. Ice in winter)");
+		MenuOptionsScreen_AddEnum(s, "Water below block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetFluid, CT_SetFluid,
+			"Block used for water below surface\n(internal flood fill)");
+		MenuOptionsScreen_AddEnum(s, "Underwater floor",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetUnderwater, CT_SetUnderwater,
+			"Block placed on floor underwater\n(e.g. Gravel)");
+		MenuOptionsScreen_AddEnum(s, "Edge block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetEdge, CT_SetEdge,
+			"Block shown at world border horizon\n(0=Air means use water top block)");
+		MenuOptionsScreen_AddEnum(s, "Sides block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetSides, CT_SetSides,
+			"Block shown on sides below border\n(e.g. Bedrock, Obsidian)");
+		MenuOptionsScreen_AddEnum(s, "Cave fill block",
+			CT_BlockNames, CT_BLOCK_COUNT, CT_GetCaveFill, CT_SetCaveFill,
+			"Block that fills cave worlds\n(e.g. Stone, Dirt)");
+		MenuOptionsScreen_AddInt(s, "Edge height offset",
+			-64, 64, 0, CT_GetEdgeOffset, CT_SetEdgeOffset,
+			"Offset for edge water height\nfrom default (height/2)");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTBlocks_Show(void) {
+	MenuOptionsScreen_Show(CTBlocks_InitWidgets);
+}
+
+
+/*----- Colors sub-screen -----*/
+static PackedCol CT_GetSky(void)     { return Gen_CustomTheme.skyCol; }
+static void      CT_SetSky(PackedCol v) { Gen_CustomTheme.skyCol = v; CustomTheme_Save(); }
+static PackedCol CT_GetFog(void)     { return Gen_CustomTheme.fogCol; }
+static void      CT_SetFog(PackedCol v) { Gen_CustomTheme.fogCol = v; CustomTheme_Save(); }
+static PackedCol CT_GetClouds(void)  { return Gen_CustomTheme.cloudsCol; }
+static void      CT_SetClouds(PackedCol v) { Gen_CustomTheme.cloudsCol = v; CustomTheme_Save(); }
+static PackedCol CT_GetShadow(void)  { return Gen_CustomTheme.shadowCol; }
+static void      CT_SetShadow(PackedCol v) { Gen_CustomTheme.shadowCol = v; CustomTheme_Save(); }
+
+static void CTColors_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddHex(s, "Sky color", ENV_DEFAULT_SKY_COLOR,
+			CT_GetSky, CT_SetSky,
+			"Sky color (set to default to\nuse engine default)");
+		MenuOptionsScreen_AddHex(s, "Fog color", ENV_DEFAULT_FOG_COLOR,
+			CT_GetFog, CT_SetFog,
+			"Fog color (set to default to\nuse engine default)");
+		MenuOptionsScreen_AddHex(s, "Clouds color", ENV_DEFAULT_CLOUDS_COLOR,
+			CT_GetClouds, CT_SetClouds,
+			"Cloud color (set to default to\nuse engine default)");
+		MenuOptionsScreen_AddHex(s, "Shadow color", ENV_DEFAULT_SHADOW_COLOR,
+			CT_GetShadow, CT_SetShadow,
+			"Shadow color (set to default to\nuse engine default)");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTColors_Show(void) {
+	MenuOptionsScreen_Show(CTColors_InitWidgets);
+}
+
+
+/*----- Vegetation sub-screen -----*/
+static int  CT_GetTreeMul(void)    { return Gen_CustomTheme.treePatchMul; }
+static void CT_SetTreeMul(int v)   { Gen_CustomTheme.treePatchMul = v; CustomTheme_Save(); }
+static int  CT_GetFlowerMul(void)  { return Gen_CustomTheme.flowerPatchMul; }
+static void CT_SetFlowerMul(int v) { Gen_CustomTheme.flowerPatchMul = v; CustomTheme_Save(); }
+static int  CT_GetMushroomMul(void)  { return Gen_CustomTheme.mushroomPatchMul; }
+static void CT_SetMushroomMul(int v) { Gen_CustomTheme.mushroomPatchMul = v; CustomTheme_Save(); }
+
+static cc_bool CT_GetGenFlowers(void)    { return Gen_CustomTheme.generateFlowers; }
+static void    CT_SetGenFlowers(cc_bool v) { Gen_CustomTheme.generateFlowers = v; CustomTheme_Save(); }
+static int  CT_GetCactiMul(void)  { return Gen_CustomTheme.cactiPatchMul; }
+static void CT_SetCactiMul(int v) { Gen_CustomTheme.cactiPatchMul = v; CustomTheme_Save(); }
+static cc_bool CT_GetJungleTrees(void)    { return Gen_CustomTheme.hasJungleTrees; }
+static void    CT_SetJungleTrees(cc_bool v) { Gen_CustomTheme.hasJungleTrees = v; CustomTheme_Save(); }
+static cc_bool CT_GetOases(void)    { return Gen_CustomTheme.hasOases; }
+static void    CT_SetOases(cc_bool v) { Gen_CustomTheme.hasOases = v; CustomTheme_Save(); }
+
+static void CTVegetation_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddInt(s, "Tree density",
+			0, 20, 1, CT_GetTreeMul, CT_SetTreeMul,
+			"Multiplier for tree generation\n0=no trees, 8=woods density");
+		MenuOptionsScreen_AddInt(s, "Flower density",
+			0, 20, 1, CT_GetFlowerMul, CT_SetFlowerMul,
+			"Multiplier for flower generation\n0=no flowers, 3=paradise");
+		MenuOptionsScreen_AddInt(s, "Mushroom density",
+			0, 20, 1, CT_GetMushroomMul, CT_SetMushroomMul,
+			"Multiplier for mushroom generation\n0=no mushrooms");
+		MenuOptionsScreen_AddBool(s, "Generate flowers",
+			CT_GetGenFlowers, CT_SetGenFlowers,
+			"Whether flowers are generated");
+		MenuOptionsScreen_AddInt(s, "Cacti density",
+			0, 20, 0, CT_GetCactiMul, CT_SetCactiMul,
+			"Multiplier for cacti generation\n0=no cacti, 1=normal");
+		MenuOptionsScreen_AddBool(s, "Jungle trees",
+			CT_GetJungleTrees, CT_SetJungleTrees,
+			"Generate large 2x2 jungle trees");
+		MenuOptionsScreen_AddBool(s, "Oasis patches",
+			CT_GetOases, CT_SetOases,
+			"Generate desert-style oases\nwith grass and trees");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTVegetation_Show(void) {
+	MenuOptionsScreen_Show(CTVegetation_InitWidgets);
+}
+
+
+/*----- Features sub-screen -----*/
+static cc_bool CT_GetShadowCeil(void)    { return Gen_CustomTheme.hasShadowCeiling; }
+static void    CT_SetShadowCeil(cc_bool v) { Gen_CustomTheme.hasShadowCeiling = v; CustomTheme_Save(); }
+static cc_bool CT_GetSnowLayer(void)    { return Gen_CustomTheme.hasSnowLayer; }
+static void    CT_SetSnowLayer(cc_bool v) { Gen_CustomTheme.hasSnowLayer = v; CustomTheme_Save(); }
+static cc_bool CT_GetDirtToGrass(void)    { return Gen_CustomTheme.dirtToGrass; }
+static void    CT_SetDirtToGrass(cc_bool v) { Gen_CustomTheme.dirtToGrass = v; CustomTheme_Save(); }
+static cc_bool CT_GetCaveGardens(void)    { return Gen_CustomTheme.hasCaveGardens; }
+static void    CT_SetCaveGardens(cc_bool v) { Gen_CustomTheme.hasCaveGardens = v; CustomTheme_Save(); }
+static cc_bool CT_GetExtraCaveOres(void)    { return Gen_CustomTheme.hasExtraCaveOres; }
+static void    CT_SetExtraCaveOres(cc_bool v) { Gen_CustomTheme.hasExtraCaveOres = v; CustomTheme_Save(); }
+static cc_bool CT_GetTreesOnDirt(void)    { return Gen_CustomTheme.treesOnDirt; }
+static void    CT_SetTreesOnDirt(cc_bool v) { Gen_CustomTheme.treesOnDirt = v; CustomTheme_Save(); }
+static cc_bool CT_GetRaiseWater(void)    { return Gen_CustomTheme.raiseWaterLevel; }
+static void    CT_SetRaiseWater(cc_bool v) { Gen_CustomTheme.raiseWaterLevel = v; CustomTheme_Save(); }
+
+static void CTFeatures_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddBool(s, "Shadow ceiling",
+			CT_GetShadowCeil, CT_SetShadowCeil,
+			"Light-blocking ceiling at top\n(hell-style darkness)");
+		MenuOptionsScreen_AddBool(s, "Snow layer",
+			CT_GetSnowLayer, CT_SetSnowLayer,
+			"Place snow on surfaces\nand tree leaves");
+		MenuOptionsScreen_AddBool(s, "Dirt to grass",
+			CT_GetDirtToGrass, CT_SetDirtToGrass,
+			"Dirt converts to grass\nwhen exposed to light");
+		MenuOptionsScreen_AddBool(s, "Cave gardens",
+			CT_GetCaveGardens, CT_SetCaveGardens,
+			"Generate garden areas\ninside caves");
+		MenuOptionsScreen_AddBool(s, "Extra cave ores",
+			CT_GetExtraCaveOres, CT_SetExtraCaveOres,
+			"Generate cobble and mossy\ncobble in cave walls");
+		MenuOptionsScreen_AddBool(s, "Trees on dirt",
+			CT_GetTreesOnDirt, CT_SetTreesOnDirt,
+			"Allow trees to grow on\ndirt blocks (not just grass)");
+		MenuOptionsScreen_AddBool(s, "Raise water level",
+			CT_GetRaiseWater, CT_SetRaiseWater,
+			"Raise water level by height/8\n(paradise-style)");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTFeatures_Show(void) {
+	MenuOptionsScreen_Show(CTFeatures_InitWidgets);
+}
+
+
+/*----- Terrain sub-screen -----*/
+static void CT_GetHeightScale(cc_string* v) { String_AppendFloat(v, Gen_CustomTheme.heightScale, 2); }
+static void CT_SetHeightScale(const cc_string* v) { Gen_CustomTheme.heightScale = Menu_Float(v); CustomTheme_Save(); }
+static void CT_GetCaveFreq(cc_string* v) { String_AppendFloat(v, Gen_CustomTheme.caveFreqScale, 2); }
+static void CT_SetCaveFreq(const cc_string* v) { Gen_CustomTheme.caveFreqScale = Menu_Float(v); CustomTheme_Save(); }
+
+static void CTTerrain_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddNum(s, "Height scale",
+			0.1f, 5.0f, 1.0f, CT_GetHeightScale, CT_SetHeightScale,
+			"Terrain height multiplier\n0.5=flat, 1.0=normal, 2.0+=extreme");
+		MenuOptionsScreen_AddNum(s, "Cave frequency",
+			0.0f, 10.0f, 1.0f, CT_GetCaveFreq, CT_SetCaveFreq,
+			"Cave generation multiplier\n0=no caves, 1=normal, 5=very cavernous");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTTerrain_Show(void) {
+	MenuOptionsScreen_Show(CTTerrain_InitWidgets);
+}
+
+
+/*----- Ores sub-screen (edit individual ore) -----*/
+static int ct_editingOre = 0;
+
+static int  CTOreEdit_GetBlock(void)  { return CT_BlockToIndex(Gen_CustomOres[ct_editingOre].block); }
+static void CTOreEdit_SetBlock(int v) { Gen_CustomOres[ct_editingOre].block = CT_BlockIDs[v]; CustomTheme_Save(); }
+static void CTOreEdit_GetAbundance(cc_string* v) { String_AppendFloat(v, Gen_CustomOres[ct_editingOre].abundance, 2); }
+static void CTOreEdit_SetAbundance(const cc_string* v) { Gen_CustomOres[ct_editingOre].abundance = Menu_Float(v); CustomTheme_Save(); }
+static cc_bool CTOreEdit_GetEnabled(void) { return Gen_CustomOres[ct_editingOre].enabled; }
+static void    CTOreEdit_SetEnabled(cc_bool v) { Gen_CustomOres[ct_editingOre].enabled = v; CustomTheme_Save(); }
+
+static void CTOres_Show(void); /* forward declaration */
+static void CTOreEdit_SwitchBack(void* a, void* b) { CTOres_Show(); }
+
+static void CTOreEdit_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddBool(s, "Enabled",
+			CTOreEdit_GetEnabled, CTOreEdit_SetEnabled, NULL);
+		MenuOptionsScreen_AddEnum(s, "Ore block",
+			CT_BlockNames, CT_BLOCK_COUNT, CTOreEdit_GetBlock, CTOreEdit_SetBlock,
+			"Which block to generate as ore");
+		MenuOptionsScreen_AddNum(s, "Abundance",
+			0.0f, 2.0f, 0.5f, CTOreEdit_GetAbundance, CTOreEdit_SetAbundance,
+			"How common this ore is\n0.4=rare, 0.7=medium, 0.9=common");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, CTOreEdit_SwitchBack);
+}
+
+static void CTOreEdit_Show(void) {
+	MenuOptionsScreen_Show(CTOreEdit_InitWidgets);
+}
+
+/*----- Ores list sub-screen -----*/
+static void CTOres_GetOreLabel(struct ButtonWidget* btn, cc_string* v) {
+	int i = (int)((union MenuOptionMeta*)btn->meta.ptr - menuOpts_meta);
+	struct OreDefinition* ore = &Gen_CustomOres[i];
+	if (ore->enabled) {
+		String_AppendConst(v, CT_BlockNames[CT_BlockToIndex(ore->block)]);
+	} else {
+		String_AppendConst(v, "Disabled");
+	}
+}
+
+static void CTOres_ClickOre(void* screen, void* widget) {
+	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
+	ct_editingOre = (int)((struct ButtonWidget*)widget - s->buttons);
+	CTOreEdit_Show();
+}
+
+static void CTOres_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddButton(s, "Ore 1",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 2",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 3",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 4",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 5",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 6",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 7",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 8",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 9",  CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+		MenuOptionsScreen_AddButton(s, "Ore 10", CTOres_ClickOre, CTOres_GetOreLabel, NULL, NULL);
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTOres_Show(void) {
+	MenuOptionsScreen_Show(CTOres_InitWidgets);
+}
+
+
+/*----- Save Preset sub-screen -----*/
+static void CTPresetSave_Show(void);
+static int ct_pendingSaveSlot;
+
+static void CTPresetSave_GetLabel(struct ButtonWidget* btn, cc_string* v) {
+	int i = (int)((union MenuOptionMeta*)btn->meta.ptr - menuOpts_meta);
+	if (CustomTheme_HasPreset(i)) {
+		CustomTheme_GetPresetName(i, v);
+		if (!v->length) String_AppendConst(v, "Unnamed");
+	} else {
+		String_AppendConst(v, "Empty");
+	}
+}
+
+static void CTPresetSave_NameDone(const cc_string* value, cc_bool valid) {
+	if (!valid) return;
+	CustomTheme_SavePreset(ct_pendingSaveSlot);
+	CustomTheme_SetPresetName(ct_pendingSaveSlot, value);
+	/* Re-show the save screen to update labels */
+	CTPresetSave_Show();
+}
+
+static void CTPresetSave_Click(void* screen, void* widget) {
+	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
+	static struct MenuInputDesc desc;
+	cc_string name; char nameBuf[STRING_SIZE];
+
+	ct_pendingSaveSlot = (int)((struct ButtonWidget*)widget - s->buttons);
+
+	/* Show text input to prompt for a name */
+	String_InitArray(name, nameBuf);
+	if (CustomTheme_HasPreset(ct_pendingSaveSlot)) {
+		CustomTheme_GetPresetName(ct_pendingSaveSlot, &name);
+	}
+	MenuInput_String(desc);
+	MenuInputOverlay_Show(&desc, &name, CTPresetSave_NameDone, false);
+}
+
+static void CTPresetSave_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddButton(s, "Slot 1", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 1");
+		MenuOptionsScreen_AddButton(s, "Slot 2", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 2");
+		MenuOptionsScreen_AddButton(s, "Slot 3", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 3");
+		MenuOptionsScreen_AddButton(s, "Slot 4", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 4");
+		MenuOptionsScreen_AddButton(s, "Slot 5", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 5");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+}
+
+static void CTPresetSave_Show(void) {
+	MenuOptionsScreen_Show(CTPresetSave_InitWidgets);
+}
+
+/*----- Load Preset sub-screen -----*/
+static void CTPresetLoad_GetLabel(struct ButtonWidget* btn, cc_string* v) {
+	int i = (int)((union MenuOptionMeta*)btn->meta.ptr - menuOpts_meta);
+	if (CustomTheme_HasPreset(i)) {
+		CustomTheme_GetPresetName(i, v);
+		if (!v->length) String_AppendConst(v, "Unnamed");
+	} else {
+		String_AppendConst(v, "Empty");
+	}
+}
+
+static void CTPresetLoad_Click(void* screen, void* widget) {
+	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
+	int slot = (int)((struct ButtonWidget*)widget - s->buttons);
+	if (!CustomTheme_HasPreset(slot)) return;
+	CustomTheme_LoadPreset(slot);
+	CustomThemeGroupScreen_Show();
+}
+
+static void CTPresetLoad_InitWidgets(struct MenuOptionsScreen* s) {
+	int i;
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddButton(s, "Slot 1", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 1");
+		MenuOptionsScreen_AddButton(s, "Slot 2", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 2");
+		MenuOptionsScreen_AddButton(s, "Slot 3", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 3");
+		MenuOptionsScreen_AddButton(s, "Slot 4", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 4");
+		MenuOptionsScreen_AddButton(s, "Slot 5", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 5");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
+
+	/* Disable buttons for empty preset slots */
+	for (i = 0; i < MAX_THEME_PRESETS; i++) {
+		Widget_SetDisabled(&s->buttons[i], !CustomTheme_HasPreset(i));
+	}
+}
+
+static void CTPresetLoad_Show(void) {
+	MenuOptionsScreen_Show(CTPresetLoad_InitWidgets);
+}
+
+
+/*----- Custom Theme Group Screen (category hub) -----*/
+static const char* const CT_BaseThemeNames[] = {
+	"Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle", "Plains"
+};
+#define CT_BASE_THEME_COUNT 9
+
+static int  ct_baseTheme = 0;
+static int  CT_GetBaseTheme(void) { return ct_baseTheme; }
+static void CT_SetBaseTheme(int v) {
+	ct_baseTheme = v;
+	CustomTheme_CopyFrom(v);
+	CustomTheme_Save();
+}
+
+static void Menu_SwitchCTBlocks(void* a, void* b)     { CTBlocks_Show(); }
+static void Menu_SwitchCTColors(void* a, void* b)     { CTColors_Show(); }
+static void Menu_SwitchCTVegetation(void* a, void* b) { CTVegetation_Show(); }
+static void Menu_SwitchCTFeatures(void* a, void* b)   { CTFeatures_Show(); }
+static void Menu_SwitchCTOres(void* a, void* b)       { CTOres_Show(); }
+static void Menu_SwitchCTTerrain(void* a, void* b)    { CTTerrain_Show(); }
+static void Menu_SwitchCTPresetSave(void* a, void* b) { CTPresetSave_Show(); }
+static void Menu_SwitchCTPresetLoad(void* a, void* b) { CTPresetLoad_Show(); }
+
+static void CTGroup_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddEnum(s, "Base theme",
+			CT_BaseThemeNames, CT_BASE_THEME_COUNT, CT_GetBaseTheme, CT_SetBaseTheme,
+			"Copy settings from a built-in theme\nas a starting point");
+		MenuOptionsScreen_AddButton(s, "Blocks...",
+			Menu_SwitchCTBlocks, NULL, NULL,
+			"Configure terrain blocks\n(surface, stone, water, borders)");
+		MenuOptionsScreen_AddButton(s, "Colors...",
+			Menu_SwitchCTColors, NULL, NULL,
+			"Configure sky, fog, cloud,\nand shadow colors");
+		MenuOptionsScreen_AddButton(s, "Vegetation...",
+			Menu_SwitchCTVegetation, NULL, NULL,
+			"Configure tree, flower, mushroom\ndensity and plant types");
+		MenuOptionsScreen_AddButton(s, "Features...",
+			Menu_SwitchCTFeatures, NULL, NULL,
+			"Toggle shadow ceiling, snow,\ncave gardens, and more");
+		MenuOptionsScreen_AddButton(s, "Ores...",
+			Menu_SwitchCTOres, NULL, NULL,
+			"Configure ore types and\ngeneration frequency");
+		MenuOptionsScreen_AddButton(s, "Terrain...",
+			Menu_SwitchCTTerrain, NULL, NULL,
+			"Height scale and cave frequency\nfor terrain shape");
+		MenuOptionsScreen_AddButton(s, "Save preset...",
+			Menu_SwitchCTPresetSave, NULL, NULL,
+			"Save current custom theme\nto a preset slot");
+		MenuOptionsScreen_AddButton(s, "Load preset...",
+			Menu_SwitchCTPresetLoad, NULL, NULL,
+			"Load a custom theme\nfrom a preset slot");
+	}
+	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchGenLevel);
+}
+
+void CustomThemeGroupScreen_Show(void) {
+	MenuOptionsScreen_Show(CTGroup_InitWidgets);
+}
+

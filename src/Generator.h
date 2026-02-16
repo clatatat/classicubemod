@@ -47,7 +47,8 @@ extern Vec3 Gen_SpawnOverride;
 #define GEN_THEME_MOON     6
 #define GEN_THEME_JUNGLE   7
 #define GEN_THEME_PLAINS   8
-#define GEN_THEME_COUNT    9
+#define GEN_THEME_CUSTOM   9
+#define GEN_THEME_COUNT    10
 extern int Gen_Theme;
 
 /* Centralized theme properties for world generation */
@@ -74,17 +75,23 @@ struct GenThemeData {
 	PackedCol cloudsCol;
 	PackedCol shadowCol;
 
+	/* Additional terrain blocks */
+	BlockRaw stoneBlock;      /* replacement for stone in terrain (default: BLOCK_STONE) */
+	BlockRaw underwaterBlock; /* block placed on underwater floor (default: BLOCK_GRAVEL) */
+
 	/* Generation multipliers */
 	float heightScale;        /* 1.0 normal, 0.5 paradise/desert */
+	float caveFreqScale;      /* cave frequency multiplier (default: 1.0) */
 	int   treePatchMul;       /* 1 normal, 8 woods */
 	int   flowerPatchMul;     /* 1 normal, 3 paradise */
+	int   mushroomPatchMul;   /* mushroom density multiplier (default: 1) */
 
 	/* Feature flags */
 	cc_bool hasShadowCeiling;
 	cc_bool hasSnowLayer;
 	cc_bool dirtToGrass;       /* dirt physics converts to grass when lit */
 	cc_bool hasCaveGardens;
-	cc_bool plantsCacti;       /* plant cacti instead of trees */
+	int     cactiPatchMul;     /* cacti density multiplier (0=none, 1=normal) */
 	cc_bool generateFlowers;
 	cc_bool hasExtraCaveOres;  /* cobble + mossy in hell caves */
 	cc_bool treesOnDirt;       /* trees can grow on dirt (hell) */
@@ -98,9 +105,36 @@ struct GenThemeData {
 	const char* internalFloodMsg;
 };
 
-extern const struct GenThemeData Gen_Themes[GEN_THEME_COUNT];
+extern const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1];
 /* Applies theme-specific environment colors and edge/sides blocks */
 void GenTheme_ApplyEnvironment(void);
+
+/* Custom theme ore definition */
+#define MAX_CUSTOM_ORES 10
+struct OreDefinition {
+	BlockRaw block;
+	float abundance;
+	cc_bool enabled;
+};
+
+/* Mutable custom theme data and ore config */
+extern struct GenThemeData Gen_CustomTheme;
+extern struct OreDefinition Gen_CustomOres[MAX_CUSTOM_ORES];
+/* Returns theme data for current Gen_Theme (custom or built-in) */
+const struct GenThemeData* Gen_GetTheme(void);
+/* Saves/loads custom theme settings to/from options */
+void CustomTheme_Save(void);
+void CustomTheme_Load(void);
+/* Copies a built-in theme's settings into the custom theme */
+void CustomTheme_CopyFrom(int themeIndex);
+
+/* Custom theme preset management (5 save slots) */
+#define MAX_THEME_PRESETS 5
+void CustomTheme_SavePreset(int slot);
+void CustomTheme_LoadPreset(int slot);
+cc_bool CustomTheme_HasPreset(int slot);
+void CustomTheme_GetPresetName(int slot, cc_string* name);
+void CustomTheme_SetPresetName(int slot, const cc_string* name);
 
 /* Checks whether the map generator has completed yet */
 cc_bool Gen_IsDone(void);
