@@ -18,7 +18,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* fluidBlock, edgeFluidBlock */
-		0, 0,                                              /* edgeBlock, sidesBlock (generator default) */
+		BLOCK_STILL_WATER, BLOCK_BEDROCK,                                              /* edgeBlock, sidesBlock (generator default) */
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
 		1.0f, 1, 1,                                        /* heightScale, treePatchMul, flowerPatchMul */
@@ -43,7 +43,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
-		0, 0,
+		BLOCK_STILL_WATER, BLOCK_BEDROCK,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
 		0.5f, 1, 3,                                        /* flat terrain, 3x flowers */
@@ -54,7 +54,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,
-		0, 0,
+		BLOCK_STILL_WATER, BLOCK_BEDROCK,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
 		1.0f, 8, 1,                                        /* 8x trees */
@@ -65,7 +65,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_SAND, BLOCK_SAND,
 		BLOCK_STILL_WATER, BLOCK_SAND,                    /* fluidBlock, edgeFluidBlock (sand border) */
-		BLOCK_SAND, BLOCK_SAND,                            /* edgeBlock, sidesBlock (sand border) */
+		0, BLOCK_SAND,                            /* edgeBlock, sidesBlock (sand border) */
 		BLOCK_STONE, BLOCK_SAND, BLOCK_SAND,               /* caves: sand gardens */
 		PackedCol_Make(0xD4, 0xB8, 0x70, 0xFF),            /* skyCol - golden tan */
 		PackedCol_Make(0xD4, 0xA5, 0x50, 0xFF),            /* fogCol - sandstorm */
@@ -79,7 +79,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_ICE, BLOCK_ICE,                              /* all water as ice in winter theme */
-		BLOCK_ICE, 0,
+		BLOCK_ICE, BLOCK_BEDROCK,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0xC0, 0xD8, 0xF0, 0xFF),            /* skyCol - light blue */
 		PackedCol_Make(0xE0, 0xE8, 0xF0, 0xFF),            /* fogCol - very light blue */
@@ -93,7 +93,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_COBBLE, BLOCK_STONE,
 		BLOCK_GRAVEL, BLOCK_GRAVEL,
-		BLOCK_COBBLE, BLOCK_COBBLE,
+		0, BLOCK_COBBLE,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* skyCol - black */
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* fogCol - black */
@@ -107,7 +107,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,                           /* surfaceBlock, fillBlock */
 		BLOCK_STILL_WATER, BLOCK_STILL_WATER,              /* fluidBlock, edgeFluidBlock */
-		0, 0,                                              /* edgeBlock, sidesBlock (generator default) */
+		BLOCK_STILL_WATER, BLOCK_BEDROCK,                                              /* edgeBlock, sidesBlock (generator default) */
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,              /* caveFillBlock, gardenSurface, gardenFill */
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
 		1.0f, 4, 4,                                        /* heightScale, 4x trees, 4x flowers */
@@ -118,7 +118,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_GRASS, BLOCK_DIRT,
 		BLOCK_GRASS, BLOCK_GRASS,
-		BLOCK_GRASS, BLOCK_GRASS,
+		0, BLOCK_GRASS,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		0, 0, 0, 0,
 		0.5f, 0, 0,

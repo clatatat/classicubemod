@@ -166,8 +166,8 @@ void Env_Reset(void) {
 	Env.SidesOffset  = -2;
 	Env.CloudsHeight = -1;
 
-	Env.EdgeBlock  = BLOCK_STILL_WATER;
-	Env.SidesBlock = BLOCK_BEDROCK;
+	Env.EdgeBlock  = BLOCK_AIR;
+	Env.SidesBlock = BLOCK_AIR;
 
 	Env.CloudsSpeed    = 1.0f;
 	Env.WeatherSpeed   = 1.0f;

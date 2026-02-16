@@ -751,7 +751,13 @@ static CC_NOINLINE void BuildMapSides(void) {
 										VERTEX_FORMAT_TEXTURED, sides_vertices);
 
 	sides_fullBright = Blocks.Brightness[block];
-	color = sides_fullBright ? PACKEDCOL_WHITE : Env.ShadowCol;
+	if (sides_fullBright) {
+		color = PACKEDCOL_WHITE;
+	} else if (Blocks.Draw[Env.EdgeBlock] == DRAW_GAS) {
+		color = Env.SunCol;  /* No shadow if edge block is air */
+	} else {
+		color = Env.ShadowCol;
+	}
 	Block_Tint(color, block)
 
 	for (i = 0; i < 4; i++) {
