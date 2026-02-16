@@ -299,6 +299,12 @@ int File_Exists(const cc_filepath* path) {
 	return attribs != INVALID_FILE_ATTRIBUTES && !(attribs & FILE_ATTRIBUTE_DIRECTORY);
 }
 
+cc_result File_Delete(const cc_filepath* path) {
+	if (DeleteFileW(path->uni))  return 0;
+	if (DeleteFileA(path->ansi)) return 0;
+	return GetLastError();
+}
+
 static cc_result Directory_EnumCore(const cc_string* dirPath, const cc_string* file, DWORD attribs,
 									void* obj, Directory_EnumCallback callback) {
 	cc_string path; char pathBuffer[MAX_PATH + 10];

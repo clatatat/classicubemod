@@ -278,6 +278,8 @@ typedef void (*Directory_EnumCallback)(const cc_string* filename, void* obj, int
 CC_API cc_result Directory_Enum(const cc_string* path, void* obj, Directory_EnumCallback callback);
 /* Returns non-zero if the given file exists. */
 int File_Exists(const cc_filepath* path);
+/* Attempts to delete the given file. */
+cc_result File_Delete(const cc_filepath* path);
 void Directory_GetCachePath(cc_string* path);
 
 /* Attempts to create a new (or overwrite) file for writing. */

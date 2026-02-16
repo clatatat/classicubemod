@@ -313,6 +313,10 @@ int File_Exists(const cc_filepath* path) {
 	return stat(path->buffer, &sb) == 0 && S_ISREG(sb.st_mode);
 }
 
+cc_result File_Delete(const cc_filepath* path) {
+	return unlink(path->buffer) == -1 ? errno : 0;
+}
+
 cc_result Directory_Enum(const cc_string* dirPath, void* obj, Directory_EnumCallback callback) {
 	cc_string path; char pathBuffer[FILENAME_SIZE];
 	cc_filepath str;

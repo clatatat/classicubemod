@@ -254,7 +254,7 @@ static struct ListScreen {
 	const char* titleText;
 	struct TextWidget title;
 	struct StringsBuffer entries;
-	struct Widget* __widgets[LIST_SCREEN_ITEMS + 4 + 1];
+	struct Widget* __widgets[LIST_SCREEN_ITEMS + 4 + 1 + 1];
 } ListScreen;
 
 #define LISTSCREEN_EMPTY "-"
@@ -1949,12 +1949,37 @@ void HotkeyListScreen_Show(void) {
 /*########################################################################################################################*
 *----------------------------------------------------LoadLevelScreen------------------------------------------------------*
 *#########################################################################################################################*/
+static struct ButtonWidget LoadLevel_deleteBtn;
+static cc_bool LoadLevel_deleteMode;
+static cc_string LoadLevel_deletePath;
+static char LoadLevel_deletePathBuffer[FILENAME_SIZE];
+
+static void DeleteLevelOverlay_Show(const cc_string* relPath);
+
+static void LoadLevel_UpdateDeleteBtn(struct FontDesc* font) {
+	if (LoadLevel_deleteMode) {
+		ButtonWidget_SetConst(&LoadLevel_deleteBtn, "&cClick level...", font);
+	} else {
+		ButtonWidget_SetConst(&LoadLevel_deleteBtn, "Delete level", font);
+	}
+}
+
 static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 	cc_string path; char pathBuffer[FILENAME_SIZE];
 	struct ListScreen* s = (struct ListScreen*)screen;
 	cc_result res;
 
 	cc_string relPath = ListScreen_UNSAFE_GetCur(s, widget);
+	if (String_CaselessEqualsConst(&relPath, LISTSCREEN_EMPTY)) return;
+
+	if (LoadLevel_deleteMode) {
+		LoadLevel_deleteMode = false;
+		LoadLevel_UpdateDeleteBtn(&s->font);
+		s->dirty = true;
+		DeleteLevelOverlay_Show(&relPath);
+		return;
+	}
+
 	String_InitArray(path, pathBuffer);
 	String_Format1(&path, "maps/%s", &relPath);
 	res = Map_LoadFrom(&path);
@@ -1963,6 +1988,13 @@ static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 	if (res != ReturnCode_FileNotFound) return;
 	Chat_AddRaw("&eReloading level list as it may be out of date");
 	ListScreen_Reload(s);
+}
+
+static void LoadLevelScreen_DeleteClick(void* screen, void* widget) {
+	struct ListScreen* s = (struct ListScreen*)screen;
+	LoadLevel_deleteMode = !LoadLevel_deleteMode;
+	LoadLevel_UpdateDeleteBtn(&s->font);
+	s->dirty = true;
 }
 
 static void LoadLevelScreen_FilterFiles(const cc_string* path, void* obj, int isDirectory) {
@@ -1985,8 +2017,8 @@ static void LoadLevelScreen_LoadEntries(struct ListScreen* s) {
 
 static void LoadLevelScreen_UploadCallback(const cc_string* path) { Map_LoadFrom(path); }
 static void LoadLevelScreen_ActionFunc(void* s, void* w) {
-	static const char* const filters[] = { 
-		".cw", ".dat", ".lvl", ".mine", ".fcm", ".mclevel", NULL 
+	static const char* const filters[] = {
+		".cw", ".dat", ".lvl", ".mine", ".fcm", ".mclevel", NULL
 	}; /* TODO not hardcode list */
 	static struct OpenFileDialogArgs args = {
 		"Classic map files", filters,
@@ -1998,6 +2030,46 @@ static void LoadLevelScreen_ActionFunc(void* s, void* w) {
 	if (res) Logger_SimpleWarn(res, "showing open file dialog");
 }
 
+static void LoadLevelScreen_Init(void* screen) {
+	struct ListScreen* s = (struct ListScreen*)screen;
+	LoadLevel_deleteMode = false;
+	ListScreen_Init(screen);
+	s->action.minWidth = 200;
+	ButtonWidget_Add(s, &LoadLevel_deleteBtn, 200, LoadLevelScreen_DeleteClick);
+	s->maxVertices = Screen_CalcDefaultMaxVertices(screen);
+}
+
+static void LoadLevelScreen_Layout(void* screen) {
+	struct ListScreen* s = (struct ListScreen*)screen;
+	ListScreen_Layout(screen);
+
+	if (Input_TouchMode) {
+		Widget_SetLocation(&s->action,       ANCHOR_CENTRE_MIN, ANCHOR_MAX, -150, 25);
+		Widget_SetLocation(&LoadLevel_deleteBtn, ANCHOR_CENTRE_MAX, ANCHOR_MAX, -150, 25);
+	} else {
+		Widget_SetLocation(&s->action,       ANCHOR_CENTRE, ANCHOR_MAX, -110, 70);
+		Widget_SetLocation(&LoadLevel_deleteBtn, ANCHOR_CENTRE, ANCHOR_MAX,  110, 70);
+	}
+}
+
+static void LoadLevelScreen_ContextRecreated(void* screen) {
+	ListScreen_ContextRecreated(screen);
+	LoadLevel_UpdateDeleteBtn(&ListScreen.font);
+}
+
+static void LoadLevelScreen_Free(void* screen) {
+	LoadLevel_deleteMode = false;
+	ListScreen_Free(screen);
+}
+
+static const struct ScreenVTABLE LoadLevelScreen_VTABLE = {
+	LoadLevelScreen_Init,    Screen_NullUpdate, LoadLevelScreen_Free,
+	ListScreen_Render,       Screen_BuildMesh,
+	ListScreen_KeyDown,      Screen_InputUp,    Screen_TKeyPress, Screen_TText,
+	Menu_PointerDown,        Screen_PointerUp,  Menu_PointerMove, Screen_TMouseScroll,
+	LoadLevelScreen_Layout,  ListScreen_ContextLost, LoadLevelScreen_ContextRecreated
+};
+
 void LoadLevelScreen_Show(void) {
 	struct ListScreen* s = &ListScreen;
 	s->titleText   = "Load level";
@@ -2006,13 +2078,116 @@ void LoadLevelScreen_Show(void) {
 #else
 	s->actionText = "Load file...";
 #endif
-	
+
 	s->ActionClick = LoadLevelScreen_ActionFunc;
 	s->LoadEntries = LoadLevelScreen_LoadEntries;
 	s->EntryClick  = LoadLevelScreen_EntryClick;
 	s->DoneClick   = Menu_SwitchPause;
 	s->UpdateEntry = ListScreen_UpdateEntry;
-	ListScreen_Show();
+
+	s->grabsInput = true;
+	s->closable   = true;
+	s->VTABLE     = &LoadLevelScreen_VTABLE;
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
+}
+
+
+/*########################################################################################################################*
+*---------------------------------------------------DeleteLevelOverlay----------------------------------------------------*
+*#########################################################################################################################*/
+static void Overlay_AddLabels(void* screen, struct TextWidget* labels);
+static void Overlay_LayoutLabels(struct TextWidget* labels);
+static void Overlay_LayoutMainButtons(struct ButtonWidget* btns);
+
+static struct DeleteLevelOverlay {
+	Screen_Body
+	struct ButtonWidget btns[2];
+	struct TextWidget   lbls[4];
+	struct Widget* __widgets[4 + 2];
+} DeleteLevelOverlay_Instance;
+
+static void DeleteLevelOverlay_Yes(void* screen, void* b) {
+	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
+	cc_string path; char pathBuffer[FILENAME_SIZE];
+	cc_filepath nativePath;
+	cc_result res;
+
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s", &LoadLevel_deletePath);
+	Platform_EncodePath(&nativePath, &path);
+
+	res = File_Delete(&nativePath);
+	if (res) {
+		Logger_SimpleWarn(res, "deleting level");
+	} else {
+		Chat_AddRaw("&eLevel deleted successfully");
+	}
+
+	Gui_Remove((struct Screen*)s);
+	ListScreen_Reload(&ListScreen);
+}
+
+static void DeleteLevelOverlay_No(void* screen, void* b) {
+	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
+	Gui_Remove((struct Screen*)s);
+}
+
+static void DeleteLevelOverlay_ContextRecreated(void* screen) {
+	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
+	struct FontDesc titleFont, textFont;
+	Screen_UpdateVb(screen);
+
+	Gui_MakeTitleFont(&titleFont);
+	Gui_MakeBodyFont(&textFont);
+
+	TextWidget_SetConst(&s->lbls[0], "&eAre you sure?", &titleFont);
+	TextWidget_Set(&s->lbls[1],      &LoadLevel_deletePath, &textFont);
+	TextWidget_SetConst(&s->lbls[2], "will be permanently deleted.", &textFont);
+	TextWidget_SetConst(&s->lbls[3], "", &textFont);
+
+	ButtonWidget_SetConst(&s->btns[0], "Yes", &titleFont);
+	ButtonWidget_SetConst(&s->btns[1], "No",  &titleFont);
+	Font_Free(&titleFont);
+	Font_Free(&textFont);
+}
+
+static void DeleteLevelOverlay_Layout(void* screen) {
+	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
+	Overlay_LayoutLabels(s->lbls);
+	Overlay_LayoutMainButtons(s->btns);
+}
+
+static void DeleteLevelOverlay_Init(void* screen) {
+	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
+	s->widgets     = s->__widgets;
+	s->numWidgets  = 0;
+	s->maxWidgets  = Array_Elems(s->__widgets);
+
+	Overlay_AddLabels(s, s->lbls);
+	ButtonWidget_Add(s, &s->btns[0], 160, DeleteLevelOverlay_Yes);
+	ButtonWidget_Add(s, &s->btns[1], 160, DeleteLevelOverlay_No);
+
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
+}
+
+static const struct ScreenVTABLE DeleteLevelOverlay_VTABLE = {
+	DeleteLevelOverlay_Init,   Screen_NullUpdate,  Screen_NullFunc,
+	MenuScreen_Render2,        Screen_BuildMesh,
+	Menu_InputDown,            Screen_InputUp,     Screen_TKeyPress, Screen_TText,
+	Menu_PointerDown,          Screen_PointerUp,   Menu_PointerMove, Screen_TMouseScroll,
+	DeleteLevelOverlay_Layout, Screen_ContextLost, DeleteLevelOverlay_ContextRecreated,
+	Menu_PadAxis
+};
+
+static void DeleteLevelOverlay_Show(const cc_string* relPath) {
+	struct DeleteLevelOverlay* s = &DeleteLevelOverlay_Instance;
+	s->grabsInput = true;
+	s->closable   = true;
+	s->VTABLE     = &DeleteLevelOverlay_VTABLE;
+
+	String_InitArray(LoadLevel_deletePath, LoadLevel_deletePathBuffer);
+	String_Copy(&LoadLevel_deletePath, relPath);
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENUINPUT);
 }
 
 
