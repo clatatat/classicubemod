@@ -93,7 +93,7 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT] = {
 	{
 		BLOCK_COBBLE, BLOCK_STONE,
 		BLOCK_GRAVEL, BLOCK_GRAVEL,
-		BLOCK_AIR, BLOCK_COBBLE,
+		BLOCK_COBBLE, BLOCK_COBBLE,
 		BLOCK_STONE, BLOCK_GRASS, BLOCK_DIRT,
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* skyCol - black */
 		PackedCol_Make(0x00, 0x00, 0x00, 0xFF),            /* fogCol - black */
