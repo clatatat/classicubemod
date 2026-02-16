@@ -67,6 +67,7 @@ static const struct SimpleBlockDef pressure_plate_pressed_def = {"Pressure Plate
 static const struct SimpleBlockDef iron_door_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
 static const struct SimpleBlockDef double_chest_def = {"Double Chest", 26, 27, 26, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef shadow_ceiling_def = {"Shadow Ceiling", 0, 0, 0, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_GAS, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef snowy_grass_def = {"Snowy Grass", 116, 118, 2, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS, SOUND_SNOW};
 
 /* Properties for all built-in blocks (Classic and CPE blocks) */
 static const struct SimpleBlockDef core_blockDefs[] = {
@@ -147,7 +148,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Pressure Plate",    4,  4,  4, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },
 { "Iron Door",        55, 55, 55, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL },
 { "Snow",            116,116,116,  2, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_SNOW,  SOUND_SNOW   },
-{ "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GLASS, SOUND_GLASS  },
+{ "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_ICE, SOUND_GLASS, SOUND_STONE  },
 { "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
 
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
@@ -662,7 +663,6 @@ static void DirectionalCache_Rebuild(void) {
 TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face face) {
 	cc_uint8 facing;
 	TextureLoc frontTex, sideTex, topTex, bottomTex;
-	BlockID above;
 	
 	/* Red ore dust uses connection-based textures */
 	if (block == BLOCK_RED_ORE_DUST) {
@@ -672,17 +672,6 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 	/* Lit red ore dust uses lit connection-based textures */
 	if (block == BLOCK_LIT_RED_ORE_DUST) {
 		return RedOreDust_GetTexture(x, y, z, face, true);
-	}
-	
-	/* Grass block with snow/snow block on top uses snowy textures */
-	if (block == BLOCK_GRASS && y < World.MaxY) {
-		above = World_GetBlock(x, y + 1, z);
-		if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) {
-			/* Use snowy grass textures: 116 top, 118 sides, 2 bottom */
-			if (face == FACE_YMAX) return 116;
-			if (face == FACE_YMIN) return 2;
-			return 118; /* All side faces */
-		}
 	}
 	
 	if (!directionalFacing_Enabled || !IsDirectionalBlock(block)) {
@@ -1267,6 +1256,8 @@ void Block_ResetProps(BlockID block) {
 		def = &double_chest_def;
 	} else if (block == BLOCK_SHADOW_CEILING) {
 		def = &shadow_ceiling_def;
+	} else if (block == BLOCK_SNOWY_GRASS) {
+		def = &snowy_grass_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1832,6 +1823,9 @@ static void OnReset(void) {
 
 	/* Remove shadow ceiling from inventory (auto-placed during hell theme generation) */
 	Inventory_Remove(BLOCK_SHADOW_CEILING);
+
+	/* Remove snowy grass from inventory (auto-placed when snow is on top of grass) */
+	Inventory_Remove(BLOCK_SNOWY_GRASS);
 
 	DirectionalCache_Clear();
 }

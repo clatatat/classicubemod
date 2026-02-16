@@ -131,6 +131,7 @@ enum BLOCKID {
 	BLOCK_DCHEST_W_R = 232, /* Front -X, right half (-Z block) */
 
 	BLOCK_SHADOW_CEILING = 233, /* Invisible light-blocking ceiling for hell theme */
+	BLOCK_SNOWY_GRASS = 234, /* Grass with snow on top - auto-placed, not in inventory */
 
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,

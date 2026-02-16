@@ -2348,9 +2348,11 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		int my = (int)Math_Floor(e->Position.y);
 		int mz = (int)Math_Floor(e->Position.z);
 		if (World_Contains(mx, my, mz) && Mob_BlockIsSolid(mx, my, mz)) {
-			e->Position.y = (float)(my + 1);
-			e->next.pos.y = (float)(my + 1);
-			e->prev.pos.y = (float)(my + 1);
+			BlockID pushBlock = World_GetBlock(mx, my, mz);
+			float pushTop = (float)my + Blocks.MaxBB[pushBlock].y;
+			e->Position.y = pushTop;
+			e->next.pos.y = pushTop;
+			e->prev.pos.y = pushTop;
 		}
 	}
 

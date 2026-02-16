@@ -286,6 +286,9 @@ static void FlatgrassGen_Generate(void) {
 	FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, surfaceBlock);
 
 	if (t->hasSnowLayer) {
+		if (surfaceBlock == BLOCK_GRASS) {
+			FlatgrassGen_MapSet(World.Height / 2 - 1, World.Height / 2 - 1, BLOCK_SNOWY_GRASS);
+		}
 		FlatgrassGen_MapSet(World.Height / 2, World.Height / 2, BLOCK_SNOW);
 	}
 
@@ -882,20 +885,23 @@ static void NotchyGen_PlaceSnowLayer(void) {
 			
 			if (above == BLOCK_AIR) {
 				Gen_Blocks[index] = BLOCK_SNOW;
+				/* Convert grass below to snowy grass */
+				{ int belowIdx = World_Pack(x, y, z);
+				  if (Gen_Blocks[belowIdx] == BLOCK_GRASS) Gen_Blocks[belowIdx] = BLOCK_SNOWY_GRASS; }
 			}
 		}
 	}
-	
+
 	/* Second pass: place snow on top of all leaf blocks */
 	Gen_CurrentState = "Placing snow on trees";
 	for (z = 0; z < World.Length; z++) {
 		Gen_CurrentProgress = (float)z / World.Length;
-		
+
 		for (x = 0; x < World.Width; x++) {
 			for (y = 0; y < World.Height - 1; y++) {
 				index = World_Pack(x, y, z);
 				current = Gen_Blocks[index];
-				
+
 				/* If we found leaves, place snow on top if there's air above */
 				if (current == BLOCK_LEAVES) {
 					index = World_Pack(x, y + 1, z);
@@ -1497,11 +1503,14 @@ static void FloatingGen_GenLayer(int layer, int layerBaseY) {
 				above = (y + 1 >= World.Height) ? BLOCK_AIR : Gen_Blocks[index];
 				if (above == BLOCK_AIR) {
 					Gen_Blocks[index] = BLOCK_SNOW;
+					/* Convert grass below to snowy grass */
+					{ int belowIdx = World_Pack(x, y, z);
+					  if (Gen_Blocks[belowIdx] == BLOCK_GRASS) Gen_Blocks[belowIdx] = BLOCK_SNOWY_GRASS; }
 				}
 			}
 		}
 	}
-	
+
 	if (Gen_Themes[Gen_Theme].hasSnowLayer) {
 		Gen_CurrentState = "Placing snow on trees";
 		for (z = 0; z < World.Length; z++) {
@@ -1611,10 +1620,11 @@ static void FloatingGen_Generate(void) {
 }
 
 static void FloatingGen_Setup(void) {
+	GenTheme_ApplyEnvironment();
+	/* Floating world always uses invisible borders regardless of theme */
 	Env_SetEdgeBlock(BLOCK_AIR);
 	Env_SetSidesBlock(BLOCK_AIR);
 	Env_SetCloudsHeight(-16);
-	GenTheme_ApplyEnvironment();
 }
 
 const struct MapGenerator FloatingGen = {

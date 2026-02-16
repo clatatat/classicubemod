@@ -2307,24 +2307,60 @@ static void Physics_HandleGrass(int index, BlockID block) {
 	/* Convert grass to dirt only when a solid block is directly above */
 	if (y + 1 < World.Height) {
 		above = World_GetBlock(x, y + 1, z);
-		
+
 		/* Don't decay under snow, snow blocks, or doors (they're transparent/decorative) */
 		if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) return;
-		
+
 		/* Don't decay under regular doors */
 		if (above == BLOCK_DOOR_NS_BOTTOM || above == BLOCK_DOOR_NS_TOP ||
 		    above == BLOCK_DOOR_EW_BOTTOM || above == BLOCK_DOOR_EW_TOP) return;
-		
+
 		/* Don't decay under iron doors */
 		if (above == BLOCK_IRON_DOOR || above == BLOCK_IRON_DOOR_NS_TOP ||
 		    above == BLOCK_IRON_DOOR_EW_BOTTOM || above == BLOCK_IRON_DOOR_EW_TOP ||
 		    above == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_NS_OPEN_TOP ||
 		    above == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_EW_OPEN_TOP) return;
-		
+
 		if (Blocks.Collide[above] == COLLIDE_SOLID) {
 			Game_UpdateBlock(x, y, z, BLOCK_DIRT);
 		}
 	}
+}
+
+static void Physics_HandleGrassActivate(int index, BlockID block) {
+	int x, y, z;
+	BlockID above;
+	World_Unpack(index, x, y, z);
+	if (y >= World.MaxY) return;
+	above = World_GetBlock(x, y + 1, z);
+	if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) {
+		Game_UpdateBlock(x, y, z, BLOCK_SNOWY_GRASS);
+	}
+}
+
+static void Physics_HandleSnowyGrassActivate(int index, BlockID block) {
+	int x, y, z;
+	BlockID above;
+	World_Unpack(index, x, y, z);
+	if (y >= World.MaxY) {
+		Game_UpdateBlock(x, y, z, BLOCK_GRASS);
+		return;
+	}
+	above = World_GetBlock(x, y + 1, z);
+	if (above != BLOCK_SNOW && above != BLOCK_SNOW_BLOCK) {
+		Game_UpdateBlock(x, y, z, BLOCK_GRASS);
+	}
+}
+
+static void Physics_HandleSnowyGrass(int index, BlockID block) {
+	int x, y, z;
+	BlockID above;
+	World_Unpack(index, x, y, z);
+	if (y + 1 >= World.Height) return;
+	above = World_GetBlock(x, y + 1, z);
+	if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) return;
+	/* Snow was removed but activation hasn't fired yet - convert back */
+	Game_UpdateBlock(x, y, z, BLOCK_GRASS);
 }
 
 static void Physics_HandleFlower(int index, BlockID block) {
@@ -2872,6 +2908,9 @@ void Physics_Init(void) {
 	Physics.OnRandomTick[BLOCK_SAPLING] = Physics_HandleSapling;
 	Physics.OnRandomTick[BLOCK_DIRT]    = Physics_HandleDirt;
 	Physics.OnRandomTick[BLOCK_GRASS]   = Physics_HandleGrass;
+	Physics.OnActivate[BLOCK_GRASS]     = Physics_HandleGrassActivate;
+	Physics.OnActivate[BLOCK_SNOWY_GRASS]     = Physics_HandleSnowyGrassActivate;
+	Physics.OnRandomTick[BLOCK_SNOWY_GRASS]   = Physics_HandleSnowyGrass;
 
 	Physics.OnRandomTick[BLOCK_DANDELION]    = Physics_HandleFlower;
 	Physics.OnRandomTick[BLOCK_ROSE]         = Physics_HandleFlower;
