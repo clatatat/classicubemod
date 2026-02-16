@@ -128,8 +128,8 @@ void CustomTheme_Load(void);
 /* Copies a built-in theme's settings into the custom theme */
 void CustomTheme_CopyFrom(int themeIndex);
 
-/* Custom theme preset management (5 save slots) */
-#define MAX_THEME_PRESETS 5
+/* Custom theme preset management (10 save slots) */
+#define MAX_THEME_PRESETS 10
 void CustomTheme_SavePreset(int slot);
 void CustomTheme_LoadPreset(int slot);
 cc_bool CustomTheme_HasPreset(int slot);

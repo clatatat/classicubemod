@@ -2175,16 +2175,26 @@ static void CTPresetSave_Click(void* screen, void* widget) {
 static void CTPresetSave_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
-		MenuOptionsScreen_AddButton(s, "Slot 1", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 1",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
 			"Save current theme to slot 1");
-		MenuOptionsScreen_AddButton(s, "Slot 2", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 2",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
 			"Save current theme to slot 2");
-		MenuOptionsScreen_AddButton(s, "Slot 3", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 3",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
 			"Save current theme to slot 3");
-		MenuOptionsScreen_AddButton(s, "Slot 4", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 4",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
 			"Save current theme to slot 4");
-		MenuOptionsScreen_AddButton(s, "Slot 5", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 5",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
 			"Save current theme to slot 5");
+		MenuOptionsScreen_AddButton(s, "Slot 6",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 6");
+		MenuOptionsScreen_AddButton(s, "Slot 7",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 7");
+		MenuOptionsScreen_AddButton(s, "Slot 8",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 8");
+		MenuOptionsScreen_AddButton(s, "Slot 9",  CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 9");
+		MenuOptionsScreen_AddButton(s, "Slot 10", CTPresetSave_Click, CTPresetSave_GetLabel, NULL,
+			"Save current theme to slot 10");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
 }
@@ -2216,16 +2226,26 @@ static void CTPresetLoad_InitWidgets(struct MenuOptionsScreen* s) {
 	int i;
 	MenuOptionsScreen_BeginButtons(s);
 	{
-		MenuOptionsScreen_AddButton(s, "Slot 1", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 1",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
 			"Load theme from slot 1");
-		MenuOptionsScreen_AddButton(s, "Slot 2", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 2",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
 			"Load theme from slot 2");
-		MenuOptionsScreen_AddButton(s, "Slot 3", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 3",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
 			"Load theme from slot 3");
-		MenuOptionsScreen_AddButton(s, "Slot 4", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 4",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
 			"Load theme from slot 4");
-		MenuOptionsScreen_AddButton(s, "Slot 5", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+		MenuOptionsScreen_AddButton(s, "Slot 5",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
 			"Load theme from slot 5");
+		MenuOptionsScreen_AddButton(s, "Slot 6",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 6");
+		MenuOptionsScreen_AddButton(s, "Slot 7",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 7");
+		MenuOptionsScreen_AddButton(s, "Slot 8",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 8");
+		MenuOptionsScreen_AddButton(s, "Slot 9",  CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 9");
+		MenuOptionsScreen_AddButton(s, "Slot 10", CTPresetLoad_Click, CTPresetLoad_GetLabel, NULL,
+			"Load theme from slot 10");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
 
