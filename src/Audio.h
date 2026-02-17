@@ -49,6 +49,7 @@ extern const cc_string Sounds_ZipPathCC;
 void Audio_SetMusic(int volume);
 void Audio_SetSounds(int volume);
 void Audio_PlayDigSound(cc_uint8 type);
+void Audio_PlayDigSoundRate(cc_uint8 type, int rate);
 void Audio_PlayStepSound(cc_uint8 type);
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume);
 #define AUDIO_MAX_BUFFERS 4
@@ -130,6 +131,7 @@ enum SoundType {
 	SOUND_PIG_HURT,      SOUND_PIG_DEATH,
 	SOUND_SHEEP,
 	SOUND_EXPLODE_BIG,
+	SOUND_PICKUP,
 	SOUND_COUNT
 };
 extern const char* const Sound_Names[SOUND_COUNT];

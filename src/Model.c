@@ -2439,6 +2439,94 @@ static void HoldModel_Register(void) {
 
 
 /*########################################################################################################################*
+*---------------------------------------------------------ItemModel-------------------------------------------------------*
+*#########################################################################################################################*/
+static struct ModelPart item_part;
+/* Single vertical quad (no backface culling, visible from both sides) */
+#define ITEM_MAX_VERTICES (MODEL_QUAD_VERTICES)
+
+static void ItemModel_MakeParts(void) {
+	struct Model* m = Models.Active;
+	int start = m->index;
+
+	/* Base UV for tile (0,0) - will be offset per-draw by item ID */
+	int u0 = 0, u16 = 16 | UV_MAX;
+	int v0 = 0, v16 = 16 | UV_MAX;
+
+	/* Single vertical quad, 0.5 blocks wide x 0.5 blocks tall */
+	#define P(x) ((x) / 16.0f)
+	ModelVertex_Init(&m->vertices[m->index], P(-4), 0,    0, u0,  v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P( 4), 0,    0, u16, v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P( 4), P(8), 0, u16, v0);   m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P(-4), P(8), 0, u0,  v0);   m->index++;
+	#undef P
+
+	ModelPart_Init(&item_part, start, m->index - start, 0, 0, 0);
+}
+
+static void ItemModel_GetTransform(struct Entity* e, Vec3 pos, struct Matrix* m) {
+	float dx = Camera.CurrentPos.x - pos.x;
+	float dz = Camera.CurrentPos.z - pos.z;
+	e->RotY = Math_Atan2f(dz, -dx) * MATH_RAD2DEG;
+	e->RotX = 0.0f;
+	e->RotZ = 0.0f;
+	Entity_GetTransform(e, pos, e->ModelScale, m);
+}
+
+static void ItemModel_Draw(struct Entity* e) {
+	struct Model* m = Models.Active;
+	int itemId = e->ModelBlock;
+	int tileX = itemId % 16;
+	int tileY = itemId / 16;
+	int uOff = tileX * 16;
+	int vOff = tileY * 16;
+	int i;
+
+	/* Offset UVs to the correct tile in items.png */
+	for (i = 0; i < ITEM_MAX_VERTICES; i++) {
+		m->vertices[item_part.offset + i].u += uOff;
+		m->vertices[item_part.offset + i].v += vOff;
+	}
+
+	Model_ApplyTexture(e);
+	Model_LockVB(e, ITEM_MAX_VERTICES);
+	Model_DrawPart(&item_part);
+	Model_UnlockVB();
+	Gfx_DrawVb_IndexedTris(ITEM_MAX_VERTICES);
+
+	/* Restore base UVs for next draw call */
+	for (i = 0; i < ITEM_MAX_VERTICES; i++) {
+		m->vertices[item_part.offset + i].u -= uOff;
+		m->vertices[item_part.offset + i].v -= vOff;
+	}
+}
+
+static float ItemModel_GetNameY(struct Entity* e) { return 0.5f; }
+static float ItemModel_GetEyeY(struct Entity* e)  { return 0.25f; }
+static void  ItemModel_GetSize(struct Entity* e)   { Model_RetSize(8,8,1); }
+static void  ItemModel_GetBounds(struct Entity* e) { Model_RetAABB(-4,0,-1, 4,8,1); }
+
+static struct ModelVertex item_vertices[ITEM_MAX_VERTICES];
+struct ModelTex items_tex = { "items.png" };
+static struct Model item_model = {
+	"item", item_vertices, &items_tex,
+	ItemModel_MakeParts, ItemModel_Draw,
+	ItemModel_GetNameY,  ItemModel_GetEyeY,
+	ItemModel_GetSize,   ItemModel_GetBounds
+};
+
+static void ItemModel_Register(void) {
+	Model_Init(&item_model);
+	item_model.maxVertices  = ITEM_MAX_VERTICES;
+	item_model.bobbing      = false;
+	item_model.pushes       = false;
+	item_model.usesSkin     = false;
+	item_model.GetTransform = ItemModel_GetTransform;
+	Model_Register(&item_model);
+}
+
+
+/*########################################################################################################################*
 *---------------------------------------------------------ArrowModel------------------------------------------------------*
 *#########################################################################################################################*/
 static struct ModelPart arrow_part;
@@ -2524,6 +2612,99 @@ static void ArrowModel_Register(void) {
 
 
 /*########################################################################################################################*
+*---------------------------------------------------------ToolModel-------------------------------------------------------*
+*#########################################################################################################################*/
+static struct ModelPart tool_front, tool_back;
+/* Front face + back face = 2 quads */
+#define TOOL_MAX_VERTICES (2 * MODEL_QUAD_VERTICES)
+
+static void ToolModel_MakeParts(void) {
+	struct Model* m = Models.Active;
+	int start;
+
+	/* Base UV for tile (0,0) - will be offset per-draw by item ID */
+	int u0 = 0, u16 = 16 | UV_MAX;
+	int v0 = 0, v16 = 16 | UV_MAX;
+
+	/* Full 1x1 block-sized quad for first-person tool rendering */
+	#define P(x) ((x) / 16.0f)
+
+	/* Front face (x=0), normal facing +X */
+	start = m->index;
+	ModelVertex_Init(&m->vertices[m->index], 0, 0,     P(-8), u0,  v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, 0,     P( 8), u16, v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, P(16), P( 8), u16, v0);   m->index++;
+	ModelVertex_Init(&m->vertices[m->index], 0, P(16), P(-8), u0,  v0);   m->index++;
+	ModelPart_Init(&tool_front, start, m->index - start, 0, 0, 0);
+
+	/* Back face (x=-1/16), normal facing -X (reversed winding) */
+	start = m->index;
+	ModelVertex_Init(&m->vertices[m->index], P(-1), 0,     P( 8), u0,  v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P(-1), 0,     P(-8), u16, v16);  m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P(-1), P(16), P(-8), u16, v0);   m->index++;
+	ModelVertex_Init(&m->vertices[m->index], P(-1), P(16), P( 8), u0,  v0);   m->index++;
+	ModelPart_Init(&tool_back, start, m->index - start, 0, 0, 0);
+
+	#undef P
+}
+
+static void ToolModel_Draw(struct Entity* e) {
+	struct Model* m = Models.Active;
+	int itemId = e->ModelBlock;
+	int tileX = itemId % 16;
+	int tileY = itemId / 16;
+	int uOff = tileX * 16;
+	int vOff = tileY * 16;
+	int i;
+
+	/* Offset UVs to the correct tile in items.png */
+	for (i = 0; i < MODEL_QUAD_VERTICES; i++) {
+		m->vertices[tool_front.offset + i].u += uOff;
+		m->vertices[tool_front.offset + i].v += vOff;
+		m->vertices[tool_back.offset + i].u  += uOff;
+		m->vertices[tool_back.offset + i].v  += vOff;
+	}
+
+	Model_ApplyTexture(e);
+	Model_LockVB(e, TOOL_MAX_VERTICES);
+	Model_DrawPart(&tool_front);
+	Model_DrawPart(&tool_back);
+	Model_UnlockVB();
+	Gfx_DrawVb_IndexedTris(TOOL_MAX_VERTICES);
+
+	/* Restore base UVs for next draw call */
+	for (i = 0; i < MODEL_QUAD_VERTICES; i++) {
+		m->vertices[tool_front.offset + i].u -= uOff;
+		m->vertices[tool_front.offset + i].v -= vOff;
+		m->vertices[tool_back.offset + i].u  -= uOff;
+		m->vertices[tool_back.offset + i].v  -= vOff;
+	}
+}
+
+static float ToolModel_GetNameY(struct Entity* e) { return 1.0f; }
+static float ToolModel_GetEyeY(struct Entity* e)  { return 0.5f; }
+static void  ToolModel_GetSize(struct Entity* e)   { Model_RetSize(16,16,1); }
+static void  ToolModel_GetBounds(struct Entity* e) { Model_RetAABB(-8,0,-1, 8,16,1); }
+
+static struct ModelVertex tool_vertices[TOOL_MAX_VERTICES];
+static struct Model tool_model = {
+	"tool", tool_vertices, &items_tex,
+	ToolModel_MakeParts, ToolModel_Draw,
+	ToolModel_GetNameY,  ToolModel_GetEyeY,
+	ToolModel_GetSize,   ToolModel_GetBounds
+};
+
+static void ToolModel_Register(void) {
+	Model_Init(&tool_model);
+	tool_model.maxVertices  = TOOL_MAX_VERTICES;
+	tool_model.bobbing      = false;
+	tool_model.pushes       = false;
+	tool_model.usesSkin     = false;
+	Model_Register(&tool_model);
+}
+
+
+/*########################################################################################################################*
 *-------------------------------------------------------Models component--------------------------------------------------*
 *#########################################################################################################################*/
 static void RegisterDefaultModels(void) {
@@ -2543,6 +2724,7 @@ static void RegisterDefaultModels(void) {
 	Model_RegisterTexture(&zombie_tex);
 	Model_RegisterTexture(&skinnedCube_tex);
 	Model_RegisterTexture(&arrow_tex);
+	Model_RegisterTexture(&items_tex);
 #endif
 
 	HumanoidModel_Register();
@@ -2571,6 +2753,8 @@ static void RegisterDefaultModels(void) {
 	SkinnedCubeModel_Register();
 	HoldModel_Register();
 	ArrowModel_Register();
+	ItemModel_Register();
+	ToolModel_Register();
 #endif
 }
 

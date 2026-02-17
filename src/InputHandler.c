@@ -31,6 +31,20 @@
 #include "Commands.h"
 #include "Particle.h"
 
+/* Forward declarations for dropped item functions */
+static int DropItem_FindFreeSlot(void);
+static int DropItem_FindFreeEntity(void);
+static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, int itemId);
+static void DropItem_TryPickup(int slot);
+static void DroppedItem_TickAll(struct ScheduledTask* task);
+static cc_bool Mob_BlockIsSolid(int x, int y, int z);
+
+/* Forward declarations for dropped item arrays (defined later, used by BindTriggered_DropBlock) */
+#define MAX_DROPPED_ITEMS 32
+static float droppedItemVelocityX[MAX_DROPPED_ITEMS];
+static float droppedItemVelocityY[MAX_DROPPED_ITEMS];
+static float droppedItemVelocityZ[MAX_DROPPED_ITEMS];
+
 static cc_bool input_buttonsDown[3];
 static int input_pickingId = -1;
 static float input_deltaAcc;
@@ -1309,14 +1323,77 @@ static cc_bool BindTriggered_ThirdPerson(int key, struct InputDevice* device) {
 }
 
 static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
+	Vec3 pos;
+	BlockID block;
+	int slot;
+	float yawRad, tossSpeed;
+
 	if (Gui.InputGrab) return false;
-	
-	if (Inventory_CheckChangeSelected() && Inventory_SelectedBlock != BLOCK_AIR) {
-		/* Don't assign SelectedIndex directly, because we don't want held block
-		switching positions if they already have air in their inventory hotbar. */
-		Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
-		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
-	}
+	if (!Inventory_CheckChangeSelected()) return false;
+
+	block = Inventory_SelectedBlock;
+	if (block == BLOCK_AIR) return true;
+
+	/* Find free dropped item slot */
+	slot = DropItem_FindFreeSlot();
+	if (slot == -1) return true;
+
+	/* Spawn at player eye position */
+	pos = Entities.CurPlayer->Base.Position;
+	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
+
+	DropItem_Spawn(slot, pos, block, false, 0);
+
+	/* Give initial forward toss velocity based on player's look direction */
+	yawRad   = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
+	tossSpeed = 0.25f;
+	droppedItemVelocityX[slot] = Math_SinF(yawRad) * tossSpeed;
+	droppedItemVelocityZ[slot] = -Math_CosF(yawRad) * tossSpeed;
+	droppedItemVelocityY[slot] = 0.12f; /* slight upward arc */
+
+	/* Remove from inventory */
+	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+
+	return true;
+}
+
+static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
+	if (Gui.InputGrab) return false;
+	if (!Inventory_CheckChangeSelected()) return false;
+
+	if (Inventory_SelectedBlock == BLOCK_AIR) return true;
+
+	/* Just delete the item, no entity spawn */
+	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+	return true;
+}
+
+static cc_bool BindTriggered_DropItemSprite(int key, struct InputDevice* device) {
+	Vec3 pos;
+	int slot;
+	float yawRad, tossSpeed;
+
+	if (Gui.InputGrab) return false;
+
+	/* Find free dropped item slot */
+	slot = DropItem_FindFreeSlot();
+	if (slot == -1) return true;
+
+	/* Spawn at player eye position */
+	pos = Entities.CurPlayer->Base.Position;
+	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
+
+	DropItem_Spawn(slot, pos, BLOCK_AIR, true, 67); /* item 67 = diamond sword */
+
+	/* Give initial forward toss velocity based on player's look direction */
+	yawRad    = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
+	tossSpeed = 0.25f;
+	droppedItemVelocityX[slot] = Math_SinF(yawRad) * tossSpeed;
+	droppedItemVelocityZ[slot] = -Math_CosF(yawRad) * tossSpeed;
+	droppedItemVelocityY[slot] = 0.12f;
+
 	return true;
 }
 
@@ -1381,6 +1458,8 @@ static void HookInputBinds(void) {
 	Bind_OnTriggered[BIND_IDOVERLAY]     = BindTriggered_IDOverlay;
 	Bind_OnTriggered[BIND_BREAK_LIQUIDS] = BindTriggered_BreakLiquids;
 	Bind_OnTriggered[BIND_SPAWN_MOB]     = BindTriggered_SpawnMob;
+	Bind_OnTriggered[BIND_DELETE_ITEM]   = BindTriggered_DeleteItem;
+	Bind_OnTriggered[BIND_DROP_ITEM]    = BindTriggered_DropItemSprite;
 }
 
 
@@ -1557,6 +1636,311 @@ static Vec3     arrowVelocity[MAX_ARROWS];    /* per-tick velocity */
 static float    arrowLifetime[MAX_ARROWS];    /* seconds remaining */
 static IVec3    arrowStuckBlock[MAX_ARROWS];  /* block coords arrow is stuck in */
 static cc_bool  arrowIsPlayerArrow[MAX_ARROWS]; /* true if shot by the player (hits mobs, not player) */
+
+/* Dropped item state (MAX_DROPPED_ITEMS and velocity arrays declared at top of file) */
+static cc_bool  droppedItemActive[MAX_DROPPED_ITEMS];
+static int      droppedItemEntityId[MAX_DROPPED_ITEMS];  /* entity ID in Entities.List */
+static BlockID  droppedItemBlock[MAX_DROPPED_ITEMS];     /* which block this item is */
+static float    droppedItemLifetime[MAX_DROPPED_ITEMS];  /* seconds until despawn (180s = 3min) */
+static float    droppedItemHoverTime[MAX_DROPPED_ITEMS]; /* animation phase for hover */
+static cc_bool  droppedItemOnGround[MAX_DROPPED_ITEMS];  /* whether item has landed */
+static float    droppedItemPickupDelay[MAX_DROPPED_ITEMS]; /* seconds before item can be picked up */
+static cc_bool  droppedItemIsItem[MAX_DROPPED_ITEMS]; /* true = 2D item sprite, false = 3D block */
+static int      droppedItemItemId[MAX_DROPPED_ITEMS]; /* items.png tile index for 2D item sprites */
+
+static int DropItem_FindFreeSlot(void) {
+	int i;
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		if (!droppedItemActive[i]) return i;
+	}
+	return -1;  /* No free slots */
+}
+
+static int DropItem_FindFreeEntity(void) {
+	int i;
+	for (i = 0; i < MAX_NET_PLAYERS; i++) {
+		if (!Entities.List[i]) return i;
+	}
+	return -1;  /* No free entity slots */
+}
+
+/* Returns items.png tile index for blocks that should render as 2D item sprites, -1 otherwise */
+static int DropItem_GetItemTex(BlockID block) {
+	if (block == BLOCK_RED_ORE_DUST)    return 56;
+	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
+	if (block == BLOCK_IRON_DOOR)       return 44;
+	return -1;
+}
+
+static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, int itemId) {
+	struct NetPlayer* np;
+	struct LocationUpdate update;
+	cc_string modelName;
+	int eid, blockItemTex;
+
+	eid = DropItem_FindFreeEntity();
+	if (eid == -1) return;
+
+	/* Initialize NetPlayer entity */
+	np = &NetPlayers_List[eid];
+	NetPlayer_Init(np);
+	Entities.List[eid] = &np->Base;
+	Event_RaiseInt(&EntityEvents.Added, eid);
+
+	if (isItem) {
+		/* Set up 2D item sprite model */
+		modelName = String_FromReadonly("item");
+		Entity_SetModel(&np->Base, &modelName);
+		np->Base.ModelBlock = itemId;
+		np->Base.ModelScale = Vec3_Create3(1.0f, 1.0f, 1.0f);
+		np->Base.uScale = 0.25f;
+		np->Base.vScale = 0.25f;
+	} else if ((blockItemTex = DropItem_GetItemTex(block)) >= 0) {
+		/* Block that renders as 2D item sprite (e.g. redstone, doors) */
+		modelName = String_FromReadonly("item");
+		Entity_SetModel(&np->Base, &modelName);
+		np->Base.ModelBlock = blockItemTex;
+		np->Base.ModelScale = Vec3_Create3(1.0f, 1.0f, 1.0f);
+		np->Base.uScale = 0.25f;
+		np->Base.vScale = 0.25f;
+	} else {
+		/* Set up 3D block model */
+		modelName = String_FromReadonly("block");
+		Entity_SetModel(&np->Base, &modelName);
+		np->Base.ModelBlock = block;
+		np->Base.ModelScale = Vec3_Create3(0.25f, 0.25f, 0.25f);
+	}
+
+	/* Set position */
+	update.flags = LU_HAS_POS;
+	update.pos = pos;
+	np->Base.VTABLE->SetLocation(&np->Base, &update);
+	np->Base.Position = pos;
+
+	/* Initialize dropped item state */
+	droppedItemActive[slot]     = true;
+	droppedItemEntityId[slot]   = eid;
+	droppedItemBlock[slot]      = block;
+	droppedItemLifetime[slot]   = 180.0f;
+	droppedItemHoverTime[slot]  = 0.0f;
+	droppedItemVelocityX[slot]  = 0.0f;
+	droppedItemVelocityY[slot]  = 0.0f;
+	droppedItemVelocityZ[slot]  = 0.0f;
+	droppedItemOnGround[slot]   = false;
+	droppedItemPickupDelay[slot] = 1.0f;  /* 1 second before pickup allowed */
+	droppedItemIsItem[slot]     = isItem;
+	droppedItemItemId[slot]     = isItem ? itemId : 0;
+}
+
+static void DropItem_TryPickup(int slot) {
+	struct Entity* item;
+	struct Entity* player;
+	float dx, dy, dz, distSq;
+	BlockID block;
+	int i;
+
+	if (!mob_rng_inited) {
+		Random_SeedFromCurrentTime(&mob_rng);
+		mob_rng_inited = true;
+	}
+
+	item = Entities.List[droppedItemEntityId[slot]];
+	player = &Entities.CurPlayer->Base;
+
+	/* Check distance (1.5 blocks pickup range) */
+	dx = item->Position.x - player->Position.x;
+	dy = item->Position.y - player->Position.y;
+	dz = item->Position.z - player->Position.z;
+	distSq = dx * dx + dy * dy + dz * dz;
+
+	if (distSq > (1.5f * 1.5f)) return;
+
+	/* Item pickups (non-block items) - equip as tool and remove */
+	if (droppedItemIsItem[slot]) {
+		Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
+		Entities_Remove(droppedItemEntityId[slot]);
+		droppedItemActive[slot] = false;
+		HeldBlockRenderer_SetTool(true, droppedItemItemId[slot]);
+		return;
+	}
+
+	block = droppedItemBlock[slot];
+
+	/* Check if block is already in hotbar */
+	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		if (Inventory_Get(i) == block) {
+			/* Already have this block, just pick it up */
+			Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
+			Entities_Remove(droppedItemEntityId[slot]);
+			droppedItemActive[slot] = false;
+			return;
+		}
+	}
+
+	/* Try to find an empty slot in the hotbar */
+	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		if (Inventory_Get(i) != BLOCK_AIR) continue;
+
+		Inventory_Set(i, block);
+		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+		Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
+		Entities_Remove(droppedItemEntityId[slot]);
+		droppedItemActive[slot] = false;
+		return;
+	}
+	/* No room in hotbar - item stays on ground */
+}
+
+static void DroppedItem_TickAll(struct ScheduledTask* task) {
+	int i, bx, by, bz;
+	struct Entity* e;
+	float delta = task->interval;
+	float newY, blockTop, hoverOffset, rotY;
+	BlockID below;
+
+	/* Pause during menus */
+	if (Gui_GetInputGrab()) return;
+
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		if (!droppedItemActive[i]) continue;
+
+		e = Entities.List[droppedItemEntityId[i]];
+		if (!e) { droppedItemActive[i] = false; continue; }
+
+		/* Update lifetime */
+		droppedItemLifetime[i] -= delta;
+		if (droppedItemLifetime[i] <= 0.0f) {
+			Entities_Remove(droppedItemEntityId[i]);
+			droppedItemActive[i] = false;
+			continue;
+		}
+
+		/* Destroy if in lava */
+		{
+			int lx = (int)Math_Floor(e->Position.x);
+			int ly = (int)Math_Floor(e->Position.y);
+			int lz = (int)Math_Floor(e->Position.z);
+			if (World_Contains(lx, ly, lz)) {
+				BlockID atBlock = World_GetBlock(lx, ly, lz);
+				if (atBlock == BLOCK_LAVA || atBlock == BLOCK_STILL_LAVA) {
+					Entities_Remove(droppedItemEntityId[i]);
+					droppedItemActive[i] = false;
+					continue;
+				}
+			}
+		}
+
+		/* Apply horizontal toss velocity with wall collision and friction */
+		if (droppedItemVelocityX[i] != 0.0f || droppedItemVelocityZ[i] != 0.0f) {
+			float newX = e->Position.x + droppedItemVelocityX[i];
+			float newZ = e->Position.z + droppedItemVelocityZ[i];
+			int feetY = (int)Math_Floor(e->Position.y);
+
+			/* Check X-axis wall collision */
+			bx = (int)Math_Floor(newX);
+			bz = (int)Math_Floor(e->Position.z);
+			if (World_Contains(bx, feetY, bz) && Mob_BlockIsSolid(bx, feetY, bz)) {
+				droppedItemVelocityX[i] = 0.0f;
+			} else {
+				e->Position.x = newX;
+				e->next.pos.x = newX;
+				e->prev.pos.x = newX;
+			}
+
+			/* Check Z-axis wall collision */
+			bx = (int)Math_Floor(e->Position.x);
+			bz = (int)Math_Floor(newZ);
+			if (World_Contains(bx, feetY, bz) && Mob_BlockIsSolid(bx, feetY, bz)) {
+				droppedItemVelocityZ[i] = 0.0f;
+			} else {
+				e->Position.z = newZ;
+				e->next.pos.z = newZ;
+				e->prev.pos.z = newZ;
+			}
+
+			/* Apply friction */
+			droppedItemVelocityX[i] *= 0.92f;
+			droppedItemVelocityZ[i] *= 0.92f;
+			if (Math_AbsF(droppedItemVelocityX[i]) < 0.001f) droppedItemVelocityX[i] = 0.0f;
+			if (Math_AbsF(droppedItemVelocityZ[i]) < 0.001f) droppedItemVelocityZ[i] = 0.0f;
+		}
+
+		/* Apply gravity (same pattern as Mob_ApplyGravity) */
+		if (!droppedItemOnGround[i]) {
+			bx = (int)Math_Floor(e->Position.x);
+			by = (int)Math_Floor(e->Position.y - 0.05f);
+			bz = (int)Math_Floor(e->Position.z);
+
+			if (World_Contains(bx, by, bz)) {
+				below = World_GetBlock(bx, by, bz);
+				if (Blocks.Collide[below] == COLLIDE_SOLID) {
+					blockTop = (float)by + Blocks.MaxBB[below].y;
+					if (droppedItemVelocityY[i] <= 0.0f && e->Position.y <= blockTop + 0.05f) {
+						/* Land on block */
+						droppedItemVelocityY[i] = 0.0f;
+						droppedItemOnGround[i]  = true;
+						e->Position.y  = blockTop;
+						e->next.pos.y  = blockTop;
+						e->prev.pos.y  = blockTop;
+					} else {
+						/* Falling above solid block */
+						newY = e->Position.y + droppedItemVelocityY[i];
+						if (newY <= blockTop) {
+							droppedItemVelocityY[i] = 0.0f;
+							droppedItemOnGround[i]  = true;
+							e->Position.y  = blockTop;
+							e->next.pos.y  = blockTop;
+							e->prev.pos.y  = blockTop;
+						} else {
+							e->Position.y  = newY;
+							droppedItemVelocityY[i] -= MOB_GRAVITY;
+							e->next.pos.y  = e->Position.y;
+							e->prev.pos.y  = e->Position.y;
+						}
+					}
+				} else {
+					/* Air below: keep falling */
+					e->Position.y += droppedItemVelocityY[i];
+					droppedItemVelocityY[i] -= MOB_GRAVITY;
+					e->next.pos.y = e->Position.y;
+					e->prev.pos.y = e->Position.y;
+				}
+			} else if (by < 0) {
+				/* Below world: stop */
+				droppedItemVelocityY[i] = 0.0f;
+				droppedItemOnGround[i]  = true;
+			} else {
+				/* Outside world: keep falling */
+				e->Position.y += droppedItemVelocityY[i];
+				droppedItemVelocityY[i] -= MOB_GRAVITY;
+				e->next.pos.y = e->Position.y;
+				e->prev.pos.y = e->Position.y;
+			}
+		} else {
+			/* On ground: apply hover animation */
+			droppedItemHoverTime[i] += delta;
+			hoverOffset = Math_SinF(droppedItemHoverTime[i] * MATH_PI * 2.0f) * 0.05f;
+			e->Position.y = e->next.pos.y + hoverOffset;
+			e->prev.pos.y = e->Position.y;
+			e->next.pos.y = e->Position.y;
+		}
+
+		/* Update rotation (90 degrees per second spin) - skip for 2D item sprites (they billboard) */
+		if (!droppedItemIsItem[i]) {
+			rotY = e->next.rotY + 90.0f * delta;
+			if (rotY >= 360.0f) rotY -= 360.0f;
+			e->prev.rotY = e->next.rotY;
+			e->next.rotY = rotY;
+		}
+
+		/* Update pickup delay and check for pickup */
+		if (droppedItemPickupDelay[i] > 0.0f) {
+			droppedItemPickupDelay[i] -= delta;
+		} else {
+			DropItem_TryPickup(i);
+		}
+	}
+}
 
 static cc_bool Mob_BlockIsSolid(int x, int y, int z) {
 	BlockID b;
@@ -3542,8 +3926,9 @@ static void OnInit(void) {
 	LocalPlayerInput_Add(&normalInput);
 	LocalPlayerInput_Add(&gamepadInput);
 	HookInputBinds();
-	
+
 	ScheduledTask_Add(1.0 / 20, Arrow_ScheduledTick);
+	ScheduledTask_Add(1.0 / 20.0, DroppedItem_TickAll);
 	ScheduledTask_Add(1.0, Mob_NaturalSpawnTick);
 
 	Commands_Register(&BoomCommand);

@@ -7,6 +7,10 @@
 #include "TexturePack.h"
 #include "Block.h"
 #include "Game.h"
+#include "Model.h"
+
+extern struct ModelTex items_tex;
+#define ISO_STATE_ITEMS_TEX (-1)
 
 static struct VertexTextured* iso_vertices;
 static struct VertexTextured* iso_vertices_base;
@@ -64,6 +68,42 @@ static void IsometricDrawer_Flat(BlockID block, float size) {
 	v->x = maxX; v->y = minY; v->z = 0; v->Col = color; v->U = rec.u2; v->V = rec.v1; v++;
 	v->x = maxX; v->y = maxY; v->z = 0; v->Col = color; v->U = rec.u2; v->V = rec.v2; v++;
 	v->x = minX; v->y = maxY; v->z = 0; v->Col = color; v->U = rec.u1; v->V = rec.v2; v++;
+	iso_vertices = v;
+}
+
+/* Returns items.png tile index for blocks that should render as flat item sprites, -1 otherwise */
+static int GetItemTexForBlock(BlockID block) {
+	if (block == BLOCK_RED_ORE_DUST)    return 56;
+	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
+	if (block == BLOCK_IRON_DOOR)       return 44;
+	return -1;
+}
+
+/* Renders a flat quad using a tile from items.png instead of terrain.png */
+static void IsometricDrawer_FlatItem(int itemTile, float size) {
+	struct VertexTextured* v;
+	float minX, maxX, minY, maxY;
+	float u1, v1, u2, v2;
+	float scale;
+
+	*iso_state++ = ISO_STATE_ITEMS_TEX;
+
+	/* Compute UV coords into items.png (16x16 grid of tiles) */
+	u1 = (float)(itemTile % 16) / 16.0f;
+	v1 = (float)(itemTile / 16) / 16.0f;
+	u2 = u1 + 1.0f / 16.0f;
+	v2 = v1 + 1.0f / 16.0f;
+
+	scale = Game_ClassicMode ? 0.70f : 0.88f;
+	size  = Math_Ceil(size * scale);
+	minX  = iso_posX - size; maxX = iso_posX + size;
+	minY  = iso_posY - size; maxY = iso_posY + size;
+
+	v = iso_vertices;
+	v->x = minX; v->y = minY; v->z = 0; v->Col = PACKEDCOL_WHITE; v->U = u1; v->V = v1; v++;
+	v->x = maxX; v->y = minY; v->z = 0; v->Col = PACKEDCOL_WHITE; v->U = u2; v->V = v1; v++;
+	v->x = maxX; v->y = maxY; v->z = 0; v->Col = PACKEDCOL_WHITE; v->U = u2; v->V = v2; v++;
+	v->x = minX; v->y = maxY; v->z = 0; v->Col = PACKEDCOL_WHITE; v->U = u1; v->V = v2; v++;
 	iso_vertices = v;
 }
 
@@ -126,6 +166,7 @@ void IsometricDrawer_BeginBatch(struct VertexTextured* vertices, int* state) {
 }
 
 void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
+	int itemTile;
 	if (Blocks.Draw[block] == DRAW_GAS) return;
 
 	iso_posX = x; iso_posY = y;
@@ -133,7 +174,11 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 #if CC_BUILD_FPU_MODE <= CC_FPU_MODE_MINIMAL
 	IsometricDrawer_Flat(block, size);
 #else
-	if (Blocks.Draw[block] == DRAW_SPRITE) {
+	/* Certain blocks render as flat item sprites from items.png */
+	itemTile = GetItemTexForBlock(block);
+	if (itemTile >= 0) {
+		IsometricDrawer_FlatItem(itemTile, size);
+	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER) {
 		IsometricDrawer_Flat(block, size);
 	} else {
 		IsometricDrawer_Angled(block, size);
@@ -150,6 +195,14 @@ int IsometricDrawer_EndBatch(void) {
 #else
 	#define ISO_DRAW_HINT DRAW_HINT_NONE
 #endif
+static void IsometricDrawer_BindTex(int idx) {
+	if (idx == ISO_STATE_ITEMS_TEX) {
+		Gfx_BindTexture(items_tex.texID);
+	} else {
+		Atlas1D_Bind(idx);
+	}
+}
+
 void IsometricDrawer_Render(int count, int offset, int* state) {
 	int i, curIdx, batchBeg, batchLen;
 
@@ -157,12 +210,12 @@ void IsometricDrawer_Render(int count, int offset, int* state) {
 	batchLen = 0;
 	batchBeg = offset;
 
-	for (i = 0; i < count / 4; i++, batchLen += 4) 
+	for (i = 0; i < count / 4; i++, batchLen += 4)
 	{
 		if (state[i] == curIdx) continue;
 
 		/* Flush previous batch */
-		Atlas1D_Bind(curIdx);
+		IsometricDrawer_BindTex(curIdx);
 		Gfx_DrawVb_IndexedTris_Range(batchLen, batchBeg, ISO_DRAW_HINT);
 
 		/* Reset for next batch */
@@ -171,6 +224,6 @@ void IsometricDrawer_Render(int count, int offset, int* state) {
 		batchLen = 0;
 	}
 
-	Atlas1D_Bind(curIdx);
+	IsometricDrawer_BindTex(curIdx);
 	Gfx_DrawVb_IndexedTris_Range(batchLen, batchBeg, ISO_DRAW_HINT);
 }

@@ -31,6 +31,7 @@ const char* const Sound_Names[SOUND_COUNT] = {
 	"pighurt",      "pigdeath",
 	"sheep",
 	"explodebig",
+	"pickup",
 };
 
 #ifdef CC_BIG_ENDIAN
@@ -59,6 +60,7 @@ static void Sounds_Start(void) {
 }
 
 void Audio_PlayDigSound(cc_uint8 type)  { }
+void Audio_PlayDigSoundRate(cc_uint8 type, int rate) { }
 void Audio_PlayStepSound(cc_uint8 type) { }
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) { }
 
@@ -410,6 +412,35 @@ static void ProcessShootSound(const cc_string* file, struct Stream* stream) {
 	} else { group->count++; }
 }
 
+static void ProcessPickupSound(const cc_string* file, struct Stream* stream) {
+	static const cc_string pickup_name = String_FromConst("pickup");
+	struct SoundGroup* group;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+
+	/* pickup.wav -> pickup */
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+
+	if (!String_CaselessEquals(&name, &pickup_name)) return;
+
+	group = &digBoard.groups[SOUND_PICKUP];
+	if (group->count == Array_Elems(group->sounds)) return;
+
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
 static void ProcessMobSounds(const cc_string* file, struct Stream* stream) {
 	static const cc_string skeletonhurt_pfx  = String_FromConst("skeletonhurt");
 	static const cc_string skeletondeath_name = String_FromConst("skeletondeath");
@@ -491,6 +522,8 @@ static cc_result ProcessZipEntry(const cc_string* path, struct Stream* stream, s
 	ProcessShootSound(path, stream);
 	/* Load mob sounds (skeletonhurt1-4, creeper1-4, etc.) */
 	ProcessMobSounds(path, stream);
+	/* Load pickup sound (pickup.wav) */
+	ProcessPickupSound(path, stream);
 	return 0;
 }
 
@@ -542,6 +575,26 @@ static void Sounds_Init(void) {
 static void Sounds_Free(void) { Sounds_Stop(); }
 
 void Audio_PlayDigSound(cc_uint8 type)  { Sounds_Play(type, &digBoard); }
+
+void Audio_PlayDigSoundRate(cc_uint8 type, int rate) {
+	const struct Sound* snd;
+	struct AudioData data;
+	cc_result res;
+
+	if (type == SOUND_NONE || !Audio_SoundsVolume) return;
+	snd = Soundboard_PickRandom(&digBoard, type);
+	if (!snd) return;
+
+	data.chunk      = snd->chunk;
+	data.channels   = snd->channels;
+	data.sampleRate = snd->sampleRate;
+	data.rate       = rate;
+	data.volume     = Audio_SoundsVolume;
+
+	res = AudioPool_Play(&data);
+	if (res) Sounds_Fail(res);
+}
+
 void Audio_PlayStepSound(cc_uint8 type) { Sounds_Play(type, &stepBoard); }
 
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) {

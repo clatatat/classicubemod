@@ -14,6 +14,7 @@ extern cc_bool HeldBlockRenderer_Show;
 
 void HeldBlockRenderer_ClickAnim(cc_bool digging);
 void HeldBlockRenderer_Render(float delta);
+void HeldBlockRenderer_SetTool(cc_bool hasTool, int toolItemId);
 
 CC_END_HEADER
 #endif

@@ -412,7 +412,9 @@ const BindMapping PadBind_Defaults[BIND_COUNT] = {
 	{ 0, 0 }, { 0, 0 }, { 0, 0 },           /* BIND_HOTBAR_4, BIND_HOTBAR_5, BIND_HOTBAR_6 */
 	{ 0, 0 }, { 0, 0 }, { 0, 0 },           /* BIND_HOTBAR_7, BIND_HOTBAR_8, BIND_HOTBAR_9 */
 	{ CCPAD_ZL, 0 }, { CCPAD_ZR, 0 },       /* BIND_HOTBAR_LEFT, BIND_HOTBAR_RIGHT */
-	{ 0, 0 }                                /* BIND_SPAWN_MOB */
+	{ 0, 0 },                               /* BIND_SPAWN_MOB */
+	{ 0, 0 },                               /* BIND_DELETE_ITEM */
+	{ 0, 0 }                                /* BIND_DROP_ITEM */
 };
 
 const BindMapping KeyBind_Defaults[BIND_COUNT] = {
@@ -430,14 +432,16 @@ const BindMapping KeyBind_Defaults[BIND_COUNT] = {
 	{ CCMOUSE_L, 0},{ CCMOUSE_M, 0},{ CCMOUSE_R, 0},/* BIND_DELETE_BLOCK, BIND_PICK_BLOCK, BIND_PLACE_BLOCK */
 	{ CCKEY_F6, 0 },     { CCKEY_LALT, 0 },         /* BIND_AUTOROTATE, BIND_HOTBAR_SWITCH */
 
-	{ CCKEY_F8, 0 },     { 'G', 0 },                /* BIND_SMOOTH_CAMERA, BIND_DROP_BLOCK */
+	{ CCKEY_F8, 0 },     { 'Q', 0 },                /* BIND_SMOOTH_CAMERA, BIND_DROP_BLOCK */
 	{ CCKEY_F10, 0 },    { 0, 0 },                  /* BIND_IDOVERLAY, BIND_BREAK_LIQUIDS */
 	{ 0, 0 }, { 0, 0 }, { 0, 0 }, { 0, 0 },         /* BIND_LOOK_UP, BIND_LOOK_DOWN, BIND_LOOK_RIGHT, BIND_LOOK_LEFT */
 	{ '1', 0 }, { '2', 0 }, { '3', 0 },             /* BIND_HOTBAR_1, BIND_HOTBAR_2, BIND_HOTBAR_3 */
 	{ '4', 0 }, { '5', 0 }, { '6', 0 },             /* BIND_HOTBAR_4, BIND_HOTBAR_5, BIND_HOTBAR_6 */
 	{ '7', 0 }, { '8', 0 }, { '9', 0 },             /* BIND_HOTBAR_7, BIND_HOTBAR_8, BIND_HOTBAR_9 */
 	{ 0, 0 }, { 0, 0 },                              /* BIND_HOTBAR_LEFT, BIND_HOTBAR_RIGHT */
-	{ 'P', 0 }                                       /* BIND_SPAWN_MOB */
+	{ 'P', 0 },                                      /* BIND_SPAWN_MOB */
+	{ CCKEY_LCTRL, 'G' },                            /* BIND_DELETE_ITEM */
+	{ 'O', 0 }                                       /* BIND_DROP_ITEM */
 };
 
 static const char* const bindNames[BIND_COUNT] = {
@@ -455,7 +459,9 @@ static const char* const bindNames[BIND_COUNT] = {
 	"Hotbar4", "Hotbar5", "Horbar6",
 	"Hotbar7", "Hotbar8", "Hotbar9",
 	"HotbarLeft", "HotbarRight",
-	"SpawnMob"
+	"SpawnMob",
+	"DeleteItem",
+	"DropItem"
 };
 
 

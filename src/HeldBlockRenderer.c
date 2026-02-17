@@ -21,6 +21,12 @@ static float held_swingY;
 static float held_time, held_period = 0.25f;
 static BlockID held_lastBlock;
 
+/* Tool in hand state */
+static cc_bool held_hasTool;
+static int held_toolItemId;
+
+extern struct ModelTex items_tex;
+
 /* Since not using Entity_SetModel, which normally automatically does this */
 static void SetHeldModel(struct Model* model) {
 #ifdef CC_BUILD_CONSOLE
@@ -40,7 +46,19 @@ static void HeldBlockRenderer_RenderModel(void) {
 	/* Gfx_SetDepthWrite(false); */
 	/* TODO: Need to properly reallocate per model VB here */
 
-	if (Blocks.Draw[held_block] == DRAW_GAS) {
+	if (held_hasTool) {
+		cc_string toolName = String_FromReadonly("tool");
+		model = Model_Get(&toolName);
+		SetHeldModel(model);
+		held_entity.ModelBlock = held_toolItemId;
+		Vec3_Set(held_entity.ModelScale, 0.75f, 0.75f, 0.75f);
+		held_entity.uScale = 0.25f;
+		held_entity.vScale = 0.25f;
+
+		Gfx_SetAlphaTest(true);
+		Model_Render(model, &held_entity);
+		Gfx_SetAlphaTest(false);
+	} else if (Blocks.Draw[held_block] == DRAW_GAS) {
 		model = Entities.CurPlayer->Base.Model;
 		SetHeldModel(model);
 		Vec3_Set(held_entity.ModelScale, 1.0f, 1.0f, 1.0f);
@@ -57,7 +75,7 @@ static void HeldBlockRenderer_RenderModel(void) {
 		Model_Render(model, &held_entity);
 		Gfx_RestoreAlphaState(Blocks.Draw[held_block]);
 	}
-	
+
 	Gfx_SetDepthTest(true);
 	/* Gfx_SetDepthWrite(true); */
 	Gfx_SetFaceCulling(false);
@@ -84,6 +102,11 @@ static void ResetHeldState(void) {
 
 	held_entity.Yaw   = -45.0f; held_entity.RotY = -45.0f;
 	held_entity.Pitch = 0.0f;   held_entity.RotX = 0.0f;
+
+	if (held_hasTool) {
+		held_entity.Yaw  = -30.0f; held_entity.RotY = -30.0f;
+		held_entity.RotX = 18.0f;
+	}
 	held_entity.ModelBlock   = held_block;
 
 	held_entity.SkinType     = p->SkinType;
@@ -97,10 +120,17 @@ static void SetBaseOffset(void) {
 	cc_bool sprite = Blocks.Draw[held_block] == DRAW_SPRITE;
 	Vec3 normalOffset = { 0.56f, -0.72f, -0.72f };
 	Vec3 spriteOffset = { 0.46f, -0.52f, -0.72f };
-	Vec3 offset = sprite ? spriteOffset : normalOffset;
+	Vec3 toolOffset   = { 0.56f, -0.72f, -0.72f };
+	Vec3 offset;
+
+	if (held_hasTool) {
+		offset = toolOffset;
+	} else {
+		offset = sprite ? spriteOffset : normalOffset;
+	}
 
 	Vec3_AddBy(&held_entity.Position, &offset);
-	if (!sprite && Blocks.Draw[held_block] != DRAW_GAS) {
+	if (!held_hasTool && !sprite && Blocks.Draw[held_block] != DRAW_GAS) {
 		float height = Blocks.MaxBB[held_block].y - Blocks.MinBB[held_block].y;
 		held_entity.Position.y += 0.2f * (1.0f - height);
 	}
@@ -193,6 +223,26 @@ static void OnBlockChanged(void* obj, IVec3 coords, BlockID old, BlockID now) {
 	HeldBlockRenderer_ClickAnim(false);
 }
 
+static void HeldBlockRenderer_ToolSwingAnimation(void) {
+	float t, sqrtT, sqrtLerpPI, sinHalfCircle, sinHalfCircleWeird;
+
+	t = held_time / held_period;
+	sqrtT         = Math_SqrtF(t);
+	sqrtLerpPI    = sqrtT * MATH_PI;
+	sinHalfCircle = Math_SinF(t * MATH_PI);
+
+	/* Translation (Indev-style) */
+	held_entity.Position.x -= Math_SinF(sqrtLerpPI)     * 0.4f;
+	held_entity.Position.y += Math_SinF(sqrtLerpPI * 2) * 0.2f;
+	held_entity.Position.z -= sinHalfCircle              * 0.2f;
+
+	/* Rotation - small yaw, large pitch for forward swing */
+	sinHalfCircleWeird = Math_SinF(t * t * MATH_PI);
+	held_entity.RotY  -= sinHalfCircleWeird          * 20.0f;
+	held_entity.Yaw   -= sinHalfCircleWeird          * 20.0f;
+	held_entity.RotX  += Math_SinF(sqrtLerpPI)       * 80.0f;
+}
+
 static void DoAnimation(float delta, float lastSwingY) {
 	float t;
 	if (!held_animating) return;
@@ -210,7 +260,10 @@ static void DoAnimation(float delta, float lastSwingY) {
 			held_entity.ModelBlock = held_block;
 		}
 	} else {
-		HeldBlockRenderer_DigAnimation();
+		if (held_hasTool)
+			HeldBlockRenderer_ToolSwingAnimation();
+		else
+			HeldBlockRenderer_DigAnimation();
 	}
 	
 	held_time += delta;
@@ -263,9 +316,15 @@ static void OnInit(void) {
 	Event_Register_(&UserEvents.BlockChanged,     NULL, OnBlockChanged);
 	Event_Register_(&GfxEvents.ContextLost,       NULL, OnContextLost);
 }
+void HeldBlockRenderer_SetTool(cc_bool hasTool, int toolItemId) {
+	held_hasTool   = hasTool;
+	held_toolItemId = toolItemId;
+}
+
 #else
 void HeldBlockRenderer_ClickAnim(cc_bool digging) { }
 void HeldBlockRenderer_Render(float delta) { }
+void HeldBlockRenderer_SetTool(cc_bool hasTool, int toolItemId) { }
 
 static void OnInit(void) { }
 #endif
