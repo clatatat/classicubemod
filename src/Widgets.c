@@ -420,7 +420,7 @@ static void HotbarWidget_BuildOutlineMesh(struct HotbarWidget* w, struct VertexT
 }
 
 static void HotbarWidget_BuildEntriesMesh(struct HotbarWidget* w, struct VertexTextured** vertices) {
-	int i, x, y;
+	int i, x, y, itemId;
 	float scale;
 
 	IsometricDrawer_BeginBatch(*vertices, w->state);
@@ -432,7 +432,12 @@ static void HotbarWidget_BuildEntriesMesh(struct HotbarWidget* w, struct VertexT
 
 		if (i == HOTBAR_MAX_INDEX && Gui_TouchUI) continue;
 
-		IsometricDrawer_AddBatch(Inventory_Get(i), scale, x, y);
+		itemId = Hotbar_GetItem(i);
+		if (itemId != ITEM_NONE && itemId > 0 && itemId < ITEM_COUNT) {
+			IsometricDrawer_AddItemBatch(ItemTextures[itemId], scale, (float)x, (float)y);
+		} else {
+			IsometricDrawer_AddBatch(Inventory_Get(i), scale, (float)x, (float)y);
+		}
 	}
 	w->verticesCount = IsometricDrawer_EndBatch();
 }

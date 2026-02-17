@@ -5,8 +5,50 @@
 #include "Event.h"
 #include "Chat.h"
 #include "Protocol.h"
+#include "Platform.h"
 
 struct _InventoryData Inventory;
+
+/*########################################################################################################################*
+*------------------------------------------------------Item data----------------------------------------------------------*
+*#########################################################################################################################*/
+int HotbarItems[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
+
+const char* const ItemNames[ITEM_COUNT] = {
+	"Air",
+	"Leather Helmet", "Leather Chestplate", "Leather Pants", "Leather Boots",
+	"Wood Sword", "Wood Shovel", "Wood Pickaxe", "Wood Axe",
+	"Chainmail Helmet", "Chainmail Chestplate", "Chainmail Pants", "Chainmail Boots",
+	"Stone Sword", "Stone Shovel", "Stone Pickaxe", "Stone Axe",
+	"Iron Helmet", "Iron Chestplate", "Iron Pants", "Iron Boots",
+	"Iron Sword", "Iron Shovel", "Iron Pickaxe", "Iron Axe",
+	"Diamond Helmet", "Diamond Chestplate", "Diamond Pants", "Diamond Boots",
+	"Diamond Sword", "Diamond Shovel", "Diamond Pickaxe", "Diamond Axe",
+	"Gold Helmet", "Gold Chestplate", "Gold Pants", "Gold Boots",
+	"Gold Sword", "Gold Shovel", "Gold Pickaxe", "Gold Axe",
+	"Bow", "Arrow", "Stick", "Flint & Steel", "Flint",
+	"Coal", "Iron Ingot", "Gold Ingot", "Diamond",
+	"Bowl", "Mushroom Stew", "Raw Pork", "Cooked Pork",
+	"Gunpowder", "Feather", "String"
+};
+
+const int ItemTextures[ITEM_COUNT] = {
+	-1,                       /* 0:  Air */
+	0, 16, 32, 48,            /* 1-4:   Leather armor */
+	64, 80, 96, 112,          /* 5-8:   Wood tools */
+	1, 17, 33, 49,            /* 9-12:  Chainmail armor */
+	65, 81, 97, 113,          /* 13-16: Stone tools */
+	2, 18, 34, 50,            /* 17-20: Iron armor */
+	66, 82, 98, 114,          /* 21-24: Iron tools */
+	3, 19, 35, 51,            /* 25-28: Diamond armor */
+	67, 83, 99, 115,          /* 29-32: Diamond tools */
+	4, 20, 36, 52,            /* 33-36: Gold armor */
+	68, 84, 100, 116,         /* 37-40: Gold tools */
+	21, 37, 53, 5, 6,         /* 41-45: Bow, Arrow, Stick, Flint&Steel, Flint */
+	7, 23, 39, 55,            /* 46-49: Coal, Iron Ingot, Gold Ingot, Diamond */
+	71, 72, 87, 88,           /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
+	40, 24, 8                 /* 54-56: Gunpowder, Feather, String */
+};
 
 cc_bool Inventory_CheckChangeSelected(void) {
 	if (!Inventory.CanChangeSelected) {
@@ -34,15 +76,10 @@ void Inventory_SwitchHotbar(void) {
 }
 
 void Inventory_SetSelectedBlock(BlockID block) {
-	int i;
 	if (!Inventory_CheckChangeSelected()) return;
 
-	/* Swap with currently selected block if given block is already in the hotbar */
-	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
-		if (Inventory_Get(i) != block) continue;
-		Inventory_Set(i, Inventory_SelectedBlock);
-		break;
-	}
+	/* Clear any item in the selected slot when placing a block */
+	Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
 
 	Inventory_Set(Inventory.SelectedIndex, block);
 	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
@@ -140,6 +177,7 @@ void Inventory_Remove(BlockID block) {
 static void OnReset(void) {
 	Inventory_ResetMapping();
 	Inventory.CanChangeSelected = true;
+	Mem_Set(HotbarItems, 0, sizeof(HotbarItems));
 }
 
 static void OnInit(void) {

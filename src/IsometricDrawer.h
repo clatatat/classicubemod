@@ -15,6 +15,8 @@ struct VertexTextured;
 void IsometricDrawer_BeginBatch(struct VertexTextured* vertices, int* state);
 /* Buffers the vertices needed to draw the given block at the given position */
 void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y);
+/* Buffers the vertices needed to draw the given item tile from items.png at the given position */
+void IsometricDrawer_AddItemBatch(int itemTile, float size, float x, float y);
 /* Returns the number of buffered vertices */
 int  IsometricDrawer_EndBatch(void);
 /* Draws the buffered vertices */

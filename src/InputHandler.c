@@ -1325,14 +1325,17 @@ static cc_bool BindTriggered_ThirdPerson(int key, struct InputDevice* device) {
 static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 	Vec3 pos;
 	BlockID block;
-	int slot;
+	int slot, itemId;
 	float yawRad, tossSpeed;
 
 	if (Gui.InputGrab) return false;
 	if (!Inventory_CheckChangeSelected()) return false;
 
-	block = Inventory_SelectedBlock;
-	if (block == BLOCK_AIR) return true;
+	itemId = Hotbar_SelectedItem;
+	block  = Inventory_SelectedBlock;
+
+	/* Nothing to drop */
+	if (itemId == ITEM_NONE && block == BLOCK_AIR) return true;
 
 	/* Find free dropped item slot */
 	slot = DropItem_FindFreeSlot();
@@ -1342,7 +1345,15 @@ static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 	pos = Entities.CurPlayer->Base.Position;
 	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
 
-	DropItem_Spawn(slot, pos, block, false, 0);
+	if (itemId != ITEM_NONE) {
+		/* Drop item from hotbar */
+		DropItem_Spawn(slot, pos, BLOCK_AIR, true, itemId);
+		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+	} else {
+		/* Drop block from inventory */
+		DropItem_Spawn(slot, pos, block, false, 0);
+		Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+	}
 
 	/* Give initial forward toss velocity based on player's look direction */
 	yawRad   = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
@@ -1351,10 +1362,7 @@ static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 	droppedItemVelocityZ[slot] = -Math_CosF(yawRad) * tossSpeed;
 	droppedItemVelocityY[slot] = 0.12f; /* slight upward arc */
 
-	/* Remove from inventory */
-	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
 	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
-
 	return true;
 }
 
@@ -1362,9 +1370,16 @@ static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
 	if (Gui.InputGrab) return false;
 	if (!Inventory_CheckChangeSelected()) return false;
 
+	/* Delete item from hotbar if present */
+	if (Hotbar_SelectedItem != ITEM_NONE) {
+		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+		return true;
+	}
+
 	if (Inventory_SelectedBlock == BLOCK_AIR) return true;
 
-	/* Just delete the item, no entity spawn */
+	/* Just delete the block, no entity spawn */
 	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
 	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 	return true;
@@ -1385,7 +1400,7 @@ static cc_bool BindTriggered_DropItemSprite(int key, struct InputDevice* device)
 	pos = Entities.CurPlayer->Base.Position;
 	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
 
-	DropItem_Spawn(slot, pos, BLOCK_AIR, true, 67); /* item 67 = diamond sword */
+	DropItem_Spawn(slot, pos, BLOCK_AIR, true, 29); /* item 29 = diamond sword */
 
 	/* Give initial forward toss velocity based on player's look direction */
 	yawRad    = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
@@ -1676,7 +1691,7 @@ static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, in
 	struct NetPlayer* np;
 	struct LocationUpdate update;
 	cc_string modelName;
-	int eid, blockItemTex;
+	int eid, blockItemTex, itemTile;
 
 	eid = DropItem_FindFreeEntity();
 	if (eid == -1) return;
@@ -1688,10 +1703,12 @@ static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, in
 	Event_RaiseInt(&EntityEvents.Added, eid);
 
 	if (isItem) {
-		/* Set up 2D item sprite model */
+		/* Set up 2D item sprite model - itemId is the item ID (1-56),
+		   look up the tile index in items.png for rendering */
+		itemTile = (itemId > 0 && itemId < ITEM_COUNT) ? ItemTextures[itemId] : 0;
 		modelName = String_FromReadonly("item");
 		Entity_SetModel(&np->Base, &modelName);
-		np->Base.ModelBlock = itemId;
+		np->Base.ModelBlock = itemTile;
 		np->Base.ModelScale = Vec3_Create3(1.0f, 1.0f, 1.0f);
 		np->Base.uScale = 0.25f;
 		np->Base.vScale = 0.25f;
@@ -1755,31 +1772,32 @@ static void DropItem_TryPickup(int slot) {
 
 	if (distSq > (1.5f * 1.5f)) return;
 
-	/* Item pickups (non-block items) - equip as tool and remove */
+	/* Item pickups (non-block items) - place in hotbar */
 	if (droppedItemIsItem[slot]) {
-		Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
-		Entities_Remove(droppedItemEntityId[slot]);
-		droppedItemActive[slot] = false;
-		HeldBlockRenderer_SetTool(true, droppedItemItemId[slot]);
-		return;
-	}
+		int itemId = droppedItemItemId[slot];
 
-	block = droppedItemBlock[slot];
+		/* Try to find an empty slot (no block and no item) */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+			if (Inventory_Get(i) != BLOCK_AIR) continue;
+			if (Hotbar_GetItem(i) != ITEM_NONE) continue;
 
-	/* Check if block is already in hotbar */
-	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
-		if (Inventory_Get(i) == block) {
-			/* Already have this block, just pick it up */
+			Hotbar_SetItem(i, itemId);
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 			Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
 			Entities_Remove(droppedItemEntityId[slot]);
 			droppedItemActive[slot] = false;
 			return;
 		}
+		/* No room in hotbar - item stays on ground */
+		return;
 	}
 
-	/* Try to find an empty slot in the hotbar */
+	block = droppedItemBlock[slot];
+
+	/* Try to find an empty slot in the hotbar (no block and no item) */
 	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
 		if (Inventory_Get(i) != BLOCK_AIR) continue;
+		if (Hotbar_GetItem(i) != ITEM_NONE) continue;
 
 		Inventory_Set(i, block);
 		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
@@ -2107,22 +2125,6 @@ static cc_bool Mob_MoveTowards(struct Entity* e, int id, Vec3 target, float spee
 			e->Velocity.y = MOB_JUMP_VEL;
 			e->OnGround   = false;
 			canJump = true;
-		}
-	}
-
-	/* While mid-air (jumping), recheck collisions at jump height to allow movement over obstacles */
-	if (!e->OnGround && e->Velocity.y > 0.0f) {
-		if (blockedX) {
-			bx = (int)Math_Floor(newX);
-			bz = (int)Math_Floor(e->Position.z);
-			if (Mob_BlockIsPassable(bx, feetY + 1, bz) && Mob_BlockIsPassable(bx, feetY + 2, bz))
-				blockedX = false;
-		}
-		if (blockedZ) {
-			bx = (int)Math_Floor(e->Position.x);
-			bz = (int)Math_Floor(newZ);
-			if (Mob_BlockIsPassable(bx, feetY + 1, bz) && Mob_BlockIsPassable(bx, feetY + 2, bz))
-				blockedZ = false;
 		}
 	}
 

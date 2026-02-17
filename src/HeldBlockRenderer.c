@@ -275,7 +275,17 @@ static void DoAnimation(float delta, float lastSwingY) {
 void HeldBlockRenderer_Render(float delta) {
 	float lastSwingY;
 	struct Matrix view;
+	int selectedItem;
 	if (!HeldBlockRenderer_Show) return;
+
+	/* Auto-sync tool display from hotbar item system */
+	selectedItem = Hotbar_SelectedItem;
+	if (selectedItem != ITEM_NONE && selectedItem > 0 && selectedItem < ITEM_COUNT) {
+		held_hasTool    = true;
+		held_toolItemId = ItemTextures[selectedItem];
+	} else {
+		held_hasTool = false;
+	}
 
 	lastSwingY  = held_swingY;
 	held_swingY = 0.0f;

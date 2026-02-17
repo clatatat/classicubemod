@@ -63,5 +63,23 @@ void Inventory_AddDefault(BlockID block);
 /* Removes any slots with the given block from the inventory. */
 void Inventory_Remove(BlockID block);
 
+/* =========================== Item system =========================== */
+#define ITEM_COUNT 57
+#define ITEM_NONE 0
+
+/* Item names indexed by item ID (0 = Air) */
+extern const char* const ItemNames[ITEM_COUNT];
+/* items.png tile indices indexed by item ID (-1 = no texture) */
+extern const int ItemTextures[ITEM_COUNT];
+
+/* Item stored in each hotbar slot (ITEM_NONE = no item, just a block) */
+extern int HotbarItems[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
+/* Gets the item ID at the nth index in the current hotbar. */
+#define Hotbar_GetItem(idx) HotbarItems[Inventory.Offset + (idx)]
+/* Sets the item ID at the nth index in the current hotbar. */
+#define Hotbar_SetItem(idx, id) HotbarItems[Inventory.Offset + (idx)] = id
+/* Gets the item ID of the currently selected hotbar slot. */
+#define Hotbar_SelectedItem Hotbar_GetItem(Inventory.SelectedIndex)
+
 CC_END_HEADER
 #endif

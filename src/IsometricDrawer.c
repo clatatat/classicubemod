@@ -186,6 +186,12 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 #endif
 }
 
+void IsometricDrawer_AddItemBatch(int itemTile, float size, float x, float y) {
+	if (itemTile < 0) return;
+	iso_posX = x; iso_posY = y;
+	IsometricDrawer_FlatItem(itemTile, size);
+}
+
 int IsometricDrawer_EndBatch(void) {
 	return (int)(iso_vertices - iso_vertices_base);
 }
