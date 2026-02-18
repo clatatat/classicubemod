@@ -1571,7 +1571,8 @@ static cc_bool mob_vtable_inited;
 #define MOB_PASSIVE_SPEED_FACTOR 0.4f
 #define MOB_WANDER_RANGE 10
 #define MOB_AGGRO_RANGE_SQ   (16.0f * 16.0f)  /* 16 blocks */
-#define MOB_DEAGGRO_RANGE_SQ (24.0f * 24.0f)  /* 24 blocks */
+#define MOB_DEAGGRO_RANGE_SQ (24.0f * 24.0f)  /* 24 blocks - always deaggro */
+#define MOB_DEAGGRO_LOS_RANGE_SQ (10.0f * 10.0f)  /* 10 blocks - deaggro if no line of sight */
 #define MOB_SPACING_DIST_SQ  (2.0f * 2.0f)    /* hostile mobs stay 2 blocks apart */
 
 static cc_uint8 mobType[MAX_NET_PLAYERS];
@@ -1935,12 +1936,21 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 				e->prev.pos.y = e->Position.y;
 			}
 		} else {
-			/* On ground: apply hover animation */
-			droppedItemHoverTime[i] += delta;
-			hoverOffset = Math_SinF(droppedItemHoverTime[i] * MATH_PI * 2.0f) * 0.05f;
-			e->Position.y = e->next.pos.y + hoverOffset;
-			e->prev.pos.y = e->Position.y;
-			e->next.pos.y = e->Position.y;
+			/* On ground: check if block below was removed */
+			bx = (int)Math_Floor(e->Position.x);
+			by = (int)Math_Floor(e->Position.y - 0.05f);
+			bz = (int)Math_Floor(e->Position.z);
+			if (!World_Contains(bx, by, bz) || Blocks.Collide[World_GetBlock(bx, by, bz)] != COLLIDE_SOLID) {
+				droppedItemOnGround[i] = false;
+				droppedItemVelocityY[i] = 0.0f;
+			} else {
+				/* Apply hover animation */
+				droppedItemHoverTime[i] += delta;
+				hoverOffset = Math_SinF(droppedItemHoverTime[i] * MATH_PI * 2.0f) * 0.05f;
+				e->Position.y = e->next.pos.y + hoverOffset;
+				e->prev.pos.y = e->Position.y;
+				e->next.pos.y = e->Position.y;
+			}
 		}
 
 		/* Update rotation (90 degrees per second spin) - skip for 2D item sprites (they billboard) */
@@ -1979,7 +1989,8 @@ static cc_bool Mob_BlockObstructsAt(int x, int blockY, int z, float entityY) {
 	blockTop = (float)blockY + Blocks.MaxBB[b].y;
 	
 	/* Block obstructs if its top is above the entity's feet */
-	return blockTop > entityY;
+	/* Use small epsilon to avoid false positives when mob is standing on block surface */
+	return blockTop > entityY + 0.01f;
 }
 
 static cc_bool Mob_BlockIsPassable(int x, int y, int z) {
@@ -2083,7 +2094,7 @@ static void Mob_PickWanderTarget(int id, struct Entity* e) {
 static cc_bool Mob_MoveTowards(struct Entity* e, int id, Vec3 target, float speed, float delta) {
 	float dx, dz, dist, moveX, moveZ, yawRad, yawDeg;
 	float newX, newZ;
-	int bx, bz, feetY;
+	int bx, bz, feetY, headBlockY, jumpHeadY;
 	cc_bool blockedX, blockedZ, canJump;
 
 	dx = target.x - e->Position.x;
@@ -2105,26 +2116,49 @@ static cc_bool Mob_MoveTowards(struct Entity* e, int id, Vec3 target, float spee
 	newX  = e->Position.x + moveX;
 	newZ  = e->Position.z + moveZ;
 
+	/* Block Y that contains the mob's head (e.g. spiders: same as feetY, tall mobs: feetY+1) */
+	headBlockY = (int)Math_Floor(e->Position.y + e->Size.y - 0.01f);
+
 	/* Check X-axis collision: block at new X, current Z (feet and head height) */
 	bx = (int)Math_Floor(newX);
 	bz = (int)Math_Floor(e->Position.z);
-	blockedX = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) || Mob_BlockIsSolid(bx, feetY + 1, bz);
+	blockedX = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y);
+	if (headBlockY > feetY) blockedX = blockedX || Mob_BlockIsSolid(bx, headBlockY, bz);
 
 	/* Check Z-axis collision: current X, new Z (feet and head height) */
 	bx = (int)Math_Floor(e->Position.x);
 	bz = (int)Math_Floor(newZ);
-	blockedZ = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) || Mob_BlockIsSolid(bx, feetY + 1, bz);
+	blockedZ = Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y);
+	if (headBlockY > feetY) blockedZ = blockedZ || Mob_BlockIsSolid(bx, headBlockY, bz);
 
 	/* Try to jump over 1-block walls */
 	canJump = false;
 	if ((blockedX || blockedZ) && e->OnGround) {
 		bx = (int)Math_Floor(newX);
 		bz = (int)Math_Floor(newZ);
-		/* Can jump if block above the wall is clear (1-block wall) */
-		if (Mob_BlockIsPassable(bx, feetY + 1, bz) && Mob_BlockIsPassable(bx, feetY + 2, bz)) {
+		/* Can jump if mob fits above the wall (check head clearance at landing height) */
+		jumpHeadY = (int)Math_Floor((float)(feetY + 1) + e->Size.y - 0.01f);
+		if (Mob_BlockIsPassable(bx, feetY + 1, bz) && (jumpHeadY <= feetY + 1 || Mob_BlockIsPassable(bx, jumpHeadY, bz))) {
 			e->Velocity.y = MOB_JUMP_VEL;
 			e->OnGround   = false;
 			canJump = true;
+		}
+	}
+
+	/* While mid-air (jumping), recheck collisions to allow movement over 1-block obstacles */
+	/* Only unblock if mob has risen above the blocking block's top surface */
+	if (!e->OnGround && e->Velocity.y > 0.0f) {
+		if (blockedX) {
+			bx = (int)Math_Floor(newX);
+			bz = (int)Math_Floor(e->Position.z);
+			if (!Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) && (headBlockY <= feetY || Mob_BlockIsPassable(bx, headBlockY, bz)))
+				blockedX = false;
+		}
+		if (blockedZ) {
+			bx = (int)Math_Floor(e->Position.x);
+			bz = (int)Math_Floor(newZ);
+			if (!Mob_BlockObstructsAt(bx, feetY, bz, e->Position.y) && (headBlockY <= feetY || Mob_BlockIsPassable(bx, headBlockY, bz)))
+				blockedZ = false;
 		}
 	}
 
@@ -2260,7 +2294,7 @@ static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
 				/* Jumping upward: check ceiling collision */
 				newY = e->Position.y + e->Velocity.y;
 				{
-					int headY = (int)Math_Floor(newY + 1.6f); /* top of mob's head */
+					int headY = (int)Math_Floor(newY + e->Size.y); /* top of mob's head */
 					if (Mob_BlockIsSolid(bx, headY, bz)) {
 						/* Hit ceiling: stop upward movement */
 						e->Velocity.y = 0.0f;
@@ -2294,7 +2328,7 @@ static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
 			/* In air: apply movement with ceiling check */
 			newY = e->Position.y + e->Velocity.y;
 			if (e->Velocity.y > 0.0f) {
-				int headY = (int)Math_Floor(newY + 1.6f);
+				int headY = (int)Math_Floor(newY + e->Size.y);
 				if (Mob_BlockIsSolid(bx, headY, bz)) {
 					e->Velocity.y = 0.0f;
 					newY = e->Position.y;
@@ -2313,7 +2347,7 @@ static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
 		/* Outside world bounds: also check ceiling */
 		newY = e->Position.y + e->Velocity.y;
 		if (e->Velocity.y > 0.0f) {
-			int headY = (int)Math_Floor(newY + 1.6f);
+			int headY = (int)Math_Floor(newY + e->Size.y);
 			if (World_Contains(bx, headY, bz) && Mob_BlockIsSolid(bx, headY, bz)) {
 				e->Velocity.y = 0.0f;
 				newY = e->Position.y;
@@ -2647,8 +2681,9 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		{
 			Vec3 pPos = Entities.CurPlayer->Base.Position;
 			float fdx = pPos.x - e->Position.x;
+			float fdy = pPos.y - e->Position.y;
 			float fdz = pPos.z - e->Position.z;
-			if (fdx * fdx + fdz * fdz > CREEPER_FUSE_CANCEL_RANGE_SQ) {
+			if (fdx * fdx + fdy * fdy + fdz * fdz > CREEPER_FUSE_CANCEL_RANGE_SQ) {
 				mobCreeperFuse[id] = -1.0f;
 			}
 		}
@@ -2739,11 +2774,20 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		int my = (int)Math_Floor(e->Position.y);
 		int mz = (int)Math_Floor(e->Position.z);
 		if (World_Contains(mx, my, mz) && Mob_BlockIsSolid(mx, my, mz)) {
-			BlockID pushBlock = World_GetBlock(mx, my, mz);
-			float pushTop = (float)my + Blocks.MaxBB[pushBlock].y;
-			e->Position.y = pushTop;
-			e->next.pos.y = pushTop;
-			e->prev.pos.y = pushTop;
+			/* Search upward in one step to find the first non-solid block */
+			int pushY = my;
+			while (pushY < World.Height && Mob_BlockIsSolid(mx, pushY, mz)) {
+				pushY++;
+			}
+			/* Only push up if the gap is small (max 2 blocks), otherwise
+			   the mob has clipped deep into a wall and should not teleport to the top */
+			if (pushY - my <= 2 && pushY < World.Height) {
+				BlockID topSolid = World_GetBlock(mx, pushY - 1, mz);
+				float pushTop = (float)(pushY - 1) + Blocks.MaxBB[topSolid].y;
+				e->Position.y = pushTop;
+				e->next.pos.y = pushTop;
+				e->prev.pos.y = pushTop;
+			}
 		}
 	}
 
@@ -2767,12 +2811,29 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 			Mob_BlockIsSolid(sx, sy, sz + 1) || Mob_BlockIsSolid(sx, sy, sz - 1) ||
 			Mob_BlockIsSolid(sx + 1, sy + 1, sz) || Mob_BlockIsSolid(sx - 1, sy + 1, sz) ||
 			Mob_BlockIsSolid(sx, sy + 1, sz + 1) || Mob_BlockIsSolid(sx, sy + 1, sz - 1)) {
-			/* Climb: override gravity with upward speed */
-			float climbSpeed = MOB_SPEED * MOB_HOSTILE_SPEED_FACTOR * SPIDER_CLIMB_SPEED_FACTOR * delta;
-			e->Velocity.y = climbSpeed;
-			e->Position.y += climbSpeed;
-			e->next.pos.y = e->Position.y;
-			e->prev.pos.y = e->Position.y;
+			/* Don't climb if the spider can fit through a gap toward the player */
+			/* (spiders are only 12/16 blocks tall and can walk through 1-block gaps) */
+			Vec3 plrPos = Entities.CurPlayer->Base.Position;
+			float pdx = plrPos.x - e->Position.x;
+			float pdz = plrPos.z - e->Position.z;
+			float pdist = Math_SqrtF(pdx * pdx + pdz * pdz);
+			cc_bool pathBlocked = true;
+
+			if (pdist > 0.1f) {
+				int aheadX = (int)Math_Floor(e->Position.x + pdx / pdist);
+				int aheadZ = (int)Math_Floor(e->Position.z + pdz / pdist);
+				/* Path is clear if block ahead at feet level is passable */
+				pathBlocked = Mob_BlockIsSolid(aheadX, sy, aheadZ);
+			}
+
+			if (pathBlocked) {
+				/* Climb: override gravity with upward speed */
+				float climbSpeed = MOB_SPEED * MOB_HOSTILE_SPEED_FACTOR * SPIDER_CLIMB_SPEED_FACTOR * delta;
+				e->Velocity.y = climbSpeed;
+				e->Position.y += climbSpeed;
+				e->next.pos.y = e->Position.y;
+				e->prev.pos.y = e->Position.y;
+			}
 		}
 	}
 
@@ -2781,15 +2842,16 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		float newX = e->Position.x + e->Velocity.x;
 		float newZ = e->Position.z + e->Velocity.z;
 		float halfW = e->Size.x * 0.5f;
-		int bx, by, bz;
+		int bx, by, bz, kbHeadY;
 		cc_bool hitX = false, hitZ = false;
 
 		by = (int)Math_Floor(e->Position.y);
+		kbHeadY = (int)Math_Floor(e->Position.y + e->Size.y - 0.01f);
 
 		/* Check X movement against solid blocks */
 		bx = (int)Math_Floor(newX + (e->Velocity.x > 0 ? halfW : -halfW));
 		bz = (int)Math_Floor(e->Position.z);
-		if (Mob_BlockIsSolid(bx, by, bz) || Mob_BlockIsSolid(bx, by + 1, bz)) {
+		if (Mob_BlockIsSolid(bx, by, bz) || (kbHeadY > by && Mob_BlockIsSolid(bx, kbHeadY, bz))) {
 			e->Velocity.x = 0.0f;
 			hitX = true;
 		}
@@ -2797,7 +2859,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		/* Check Z movement against solid blocks */
 		bx = (int)Math_Floor(e->Position.x);
 		bz = (int)Math_Floor(newZ + (e->Velocity.z > 0 ? halfW : -halfW));
-		if (Mob_BlockIsSolid(bx, by, bz) || Mob_BlockIsSolid(bx, by + 1, bz)) {
+		if (Mob_BlockIsSolid(bx, by, bz) || (kbHeadY > by && Mob_BlockIsSolid(bx, kbHeadY, bz))) {
 			e->Velocity.z = 0.0f;
 			hitZ = true;
 		}
@@ -2852,12 +2914,28 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		distSq = dx * dx + dy * dy + dz * dz;
 
 		if (!mobIsAggro[id] && distSq < MOB_AGGRO_RANGE_SQ) {
-			mobIsAggro[id] = true;
+			/* Only aggro if mob has line of sight to the player */
+			Vec3 mobEye, plrCenter;
+			mobEye = e->Position; mobEye.y += e->Size.y * 0.8f;
+			plrCenter = playerPos; plrCenter.y += 1.0f;
+			if (Mob_HasLineOfSight(mobEye, plrCenter)) {
+				mobIsAggro[id] = true;
+			}
 		} else if (mobIsAggro[id] && distSq > MOB_DEAGGRO_RANGE_SQ) {
+			/* Always deaggro beyond 24 blocks */
 			mobIsAggro[id] = false;
-			/* Reset to wandering */
 			mobHasTarget[id]   = false;
 			mobWanderPause[id] = 0.5f + Random_Float(&mob_rng) * 2.0f;
+		} else if (mobIsAggro[id] && distSq > MOB_DEAGGRO_LOS_RANGE_SQ) {
+			/* Deaggro beyond 10 blocks if line of sight is blocked */
+			Vec3 mobEye2, plrCenter2;
+			mobEye2 = e->Position; mobEye2.y += e->Size.y * 0.8f;
+			plrCenter2 = playerPos; plrCenter2.y += 1.0f;
+			if (!Mob_HasLineOfSight(mobEye2, plrCenter2)) {
+				mobIsAggro[id] = false;
+				mobHasTarget[id]   = false;
+				mobWanderPause[id] = 1.0f + Random_Float(&mob_rng) * 2.0f;
+			}
 		}
 
 		if (mobIsAggro[id]) {
@@ -2942,10 +3020,21 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 					if (distSq < leapRangeSq && e->OnGround && mobSpiderLeapTimer[id] <= 0.0f) {
 						float leapDist = Math_SqrtF(distSq);
 						if (leapDist > 0.1f) {
-							e->Velocity.x += (dx / leapDist) * SPIDER_LEAP_HORIZONTAL * leapScale;
-							e->Velocity.z += (dz / leapDist) * SPIDER_LEAP_HORIZONTAL * leapScale;
-							e->Velocity.y  = SPIDER_LEAP_VERTICAL;
-							e->OnGround    = false;
+							/* Check for ceiling/wall above before leaping to avoid jumping into walls */
+							/* when the spider could walk through a gap instead */
+							int leapAboveY = (int)Math_Floor(e->Position.y) + 1;
+							int leapCurBx  = (int)Math_Floor(e->Position.x);
+							int leapCurBz  = (int)Math_Floor(e->Position.z);
+							int leapAheadX = (int)Math_Floor(e->Position.x + (dx / leapDist));
+							int leapAheadZ = (int)Math_Floor(e->Position.z + (dz / leapDist));
+							cc_bool ceilingClear = !Mob_BlockIsSolid(leapCurBx, leapAboveY, leapCurBz) &&
+							                       !Mob_BlockIsSolid(leapAheadX, leapAboveY, leapAheadZ);
+							if (ceilingClear) {
+								e->Velocity.x += (dx / leapDist) * SPIDER_LEAP_HORIZONTAL * leapScale;
+								e->Velocity.z += (dz / leapDist) * SPIDER_LEAP_HORIZONTAL * leapScale;
+								e->Velocity.y  = SPIDER_LEAP_VERTICAL;
+								e->OnGround    = false;
+							}
 						}
 						mobSpiderLeapTimer[id] = SPIDER_LEAP_COOLDOWN;
 					}
@@ -2999,13 +3088,30 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 			rdist = rx * rx + rz * rz;
 
 			if (rdist < MOB_SPACING_DIST_SQ && rdist > 0.001f) {
+				float pushX, pushZ;
+				int pushBX, pushBZ, pushFeetY;
 				dist = Math_SqrtF(rdist);
-				e->Position.x += (rx / dist) * 0.05f;
-				e->Position.z += (rz / dist) * 0.05f;
-				e->next.pos.x = e->Position.x;
-				e->next.pos.z = e->Position.z;
-				e->prev.pos.x = e->Position.x;
-				e->prev.pos.z = e->Position.z;
+				pushX = (rx / dist) * 0.05f;
+				pushZ = (rz / dist) * 0.05f;
+				pushFeetY = (int)Math_Floor(e->Position.y);
+
+				/* Only push on X if destination isn't a solid block */
+				pushBX = (int)Math_Floor(e->Position.x + pushX);
+				pushBZ = (int)Math_Floor(e->Position.z);
+				if (!Mob_BlockIsSolid(pushBX, pushFeetY, pushBZ)) {
+					e->Position.x += pushX;
+					e->next.pos.x = e->Position.x;
+					e->prev.pos.x = e->Position.x;
+				}
+
+				/* Only push on Z if destination isn't a solid block */
+				pushBX = (int)Math_Floor(e->Position.x);
+				pushBZ = (int)Math_Floor(e->Position.z + pushZ);
+				if (!Mob_BlockIsSolid(pushBX, pushFeetY, pushBZ)) {
+					e->Position.z += pushZ;
+					e->next.pos.z = e->Position.z;
+					e->prev.pos.z = e->Position.z;
+				}
 			}
 		}
 

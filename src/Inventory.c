@@ -113,14 +113,15 @@ void Inventory_PickBlock(BlockID block) {
 		}
 	}
 
-	/* Is the currently selected block an empty slot? */
-	if (Inventory_SelectedBlock == BLOCK_AIR) {
+	/* Is the currently selected slot truly empty? (no block AND no item) */
+	if (Inventory_SelectedBlock == BLOCK_AIR && Hotbar_SelectedItem == ITEM_NONE) {
 		Inventory_SetSelectedBlock(block); return;
 	}
 
-	/* Try to replace empty slots */
+	/* Try to replace empty slots (must have no block AND no item) */
 	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
 		if (Inventory_Get(i) != BLOCK_AIR) continue;
+		if (Hotbar_GetItem(i) != ITEM_NONE) continue;
 		Inventory_Set(i, block);
 		Inventory_SetSelectedIndex(i); return;
 	}
