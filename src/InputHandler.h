@@ -12,12 +12,46 @@ struct StringsBuffer;
 struct InputDevice;
 extern struct IGameComponent InputHandler_Component;
 
+/* Player damage */
+void Player_Damage(int amount);
+
 /* Mob health system */
 void Mob_DamageMob(int id, int damage, cc_bool fromPlayer);
 void Mob_RemoveAllMobs(void);
 cc_bool Mob_IsMob(int id);
 cc_bool Mob_IsCreeper(int id);
 void Mob_TriggerCreeperChainExplosion(int id);
+
+/* Zombie attack animation state (for Model.c) */
+float Mob_GetAttackAnim(int entityId);
+extern int Mob_CurrentRenderingId; /* entity ID of mob currently being rendered */
+
+/* Spawn a dropped item for a block broken by physics (e.g. torch losing support) */
+void Physics_DropBlock(int x, int y, int z, BlockID block);
+
+/* Drop an item/block from the inventory screen held cursor */
+void SurvInv_DropHeldItem(BlockID block, int itemId, int count);
+/* Add an item/block to the player's inventory (hotbar first, then main) */
+void SurvInv_AddItem(BlockID block, int itemId, int count);
+
+/* Day/night cycle control */
+void DayNightCycle_Enable(void);
+void DayNightCycle_Disable(void);
+void DayNightCycle_SetTimer(float time);
+/* Temporarily restore original daytime env colors (call before saving .cw) */
+void DayNightCycle_RestoreOriginalColors(void);
+/* Re-apply current time-of-day env colors (call after saving .cw) */
+void DayNightCycle_ReapplyCurrentColors(void);
+
+/* Saves per-world settings (health, day/night timer, game mode, etc.) to a binary file */
+void WorldSettings_SaveToFile(const cc_string* path);
+/* Loads per-world settings from a binary file (silently returns if file doesn't exist) */
+void WorldSettings_LoadFromFile(const cc_string* path);
+
+/* Saves all mob and dropped item state to a binary file */
+void Entities_SaveToFile(const cc_string* path);
+/* Loads mob and dropped item state from a binary file (silently returns if file doesn't exist) */
+void Entities_LoadFromFile(const cc_string* path);
 
 
 /* whether to leave text input open for user to enter further input */
@@ -59,6 +93,7 @@ cc_bool InputHandler_SetFOV(int fov);
 cc_bool Input_HandleMouseWheel(float delta);
 void InputHandler_Tick(float delta);
 void InputHandler_OnScreensChanged(void);
+void BlockBreaking_RenderCrack(void);
 
 
 typedef cc_bool (*BindTriggered)(int key, struct InputDevice* device);

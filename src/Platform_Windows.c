@@ -290,6 +290,12 @@ cc_result Directory_Create2(const cc_filepath* path) {
 	return CreateDirectoryA(path->ansi, NULL) ? 0 : GetLastError();
 }
 
+cc_result Directory_Remove(const cc_filepath* path) {
+	if (RemoveDirectoryW(path->uni))  return 0;
+	if (RemoveDirectoryA(path->ansi)) return 0;
+	return GetLastError();
+}
+
 int File_Exists(const cc_filepath* path) {
 	DWORD attribs = GetFileAttributesW(path->uni);
 	

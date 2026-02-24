@@ -702,8 +702,7 @@ static void GuiClassicPngProcess(struct Stream* stream, const cc_string* name) {
 static struct TextureEntry guiClassic_entry = { "gui_classic.png", GuiClassicPngProcess };
 
 static void IconsPngProcess(struct Stream* stream, const cc_string* name) {
-	int heightDivisor = 4; /* only top quarter of icons png is used */
-	Game_UpdateTexture(&Gui.IconsTex, stream, name, NULL, &heightDivisor);
+	Game_UpdateTexture(&Gui.IconsTex, stream, name, NULL, NULL);
 }
 static struct TextureEntry icons_entry = { "icons.png", IconsPngProcess };
 

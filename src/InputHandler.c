@@ -30,20 +30,36 @@
 #include "Lighting.h"
 #include "Commands.h"
 #include "Particle.h"
+#include "TexturePack.h"
+#include "Graphics.h"
+#include "Stream.h"
+#include "Generator.h"
 
 /* Forward declarations for dropped item functions */
 static int DropItem_FindFreeSlot(void);
+static int DropItem_EvictOldest(void);
 static int DropItem_FindFreeEntity(void);
 static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, int itemId);
 static void DropItem_TryPickup(int slot);
 static void DroppedItem_TickAll(struct ScheduledTask* task);
+static void Furnace_ScheduledTick(struct ScheduledTask* task);
 static cc_bool Mob_BlockIsSolid(int x, int y, int z);
+static cc_bool SurvInv_ConsumeItem(int itemId);
+
+/* Forward declaration for Mob_PlaySound (used by Skeleton_ShootArrow before definition) */
+static void Mob_PlaySound(cc_uint8 type, Vec3 mobPos);
+
+/* Forward declaration for DayNightCycle_IsNight (used by Mob_NaturalSpawnTick before definition) */
+static cc_bool DayNightCycle_IsNight(void);
+static cc_bool DayNightCycle_IsDark(void);
 
 /* Forward declarations for dropped item arrays (defined later, used by BindTriggered_DropBlock) */
-#define MAX_DROPPED_ITEMS 32
+#define MAX_DROPPED_ITEMS 96
 static float droppedItemVelocityX[MAX_DROPPED_ITEMS];
 static float droppedItemVelocityY[MAX_DROPPED_ITEMS];
 static float droppedItemVelocityZ[MAX_DROPPED_ITEMS];
+static int   droppedItemCount[MAX_DROPPED_ITEMS]; /* how many items this entity represents */
+static float droppedItemPickupDelay[MAX_DROPPED_ITEMS]; /* seconds before item can be picked up */
 
 static cc_bool input_buttonsDown[3];
 static int input_pickingId = -1;
@@ -53,6 +69,13 @@ static float input_fovIndex = -1.0f;
 static cc_bool suppressEscape;
 #endif
 enum MouseButton_ { MOUSE_LEFT, MOUSE_RIGHT, MOUSE_MIDDLE };
+
+/* Forward declaration for block breaking reset */
+static void BlockBreaking_Reset(void);
+
+/* Forward declarations for mob RNG (used by BreakBlockNow for random drops) */
+static RNGState mob_rng;
+static cc_bool mob_rng_inited;
 
 
 /*########################################################################################################################*
@@ -306,6 +329,7 @@ static void MouseStateRelease(int button) {
 void InputHandler_OnScreensChanged(void) {
 	input_deltaAcc  = 0;
 	input_pickingId = -1;
+	BlockBreaking_Reset();
 	if (!Gui.InputGrab) return;
 
 	/* If input is grabbed, then the mouse isn't used for picking blocks in world anymore. */
@@ -433,14 +457,609 @@ static cc_bool IsIronDoorTop(BlockID b) {
 		|| b == BLOCK_IRON_DOOR_NS_OPEN_TOP || b == BLOCK_IRON_DOOR_EW_OPEN_TOP;
 }
 
+/*########################################################################################################################*
+*---------------------------------------------------Tool/Breaking system------------------------------------------------*
+*#########################################################################################################################*/
+enum ToolType  { TOOL_NONE = 0, TOOL_SWORD = 1, TOOL_SHOVEL = 2, TOOL_PICKAXE = 3, TOOL_AXE = 4 };
+enum ToolTier  { TIER_HAND = 0, TIER_WOOD = 1, TIER_STONE = 2, TIER_IRON = 3, TIER_DIAMOND = 4, TIER_GOLD = 5 };
+static const float tierSpeed[] = { 1.0f, 1.0f, 1.5f, 2.0f, 3.0f, 1.2f };
+
+static void GetToolInfo(int itemId, int* outType, int* outTier) {
+	if (itemId >= 5 && itemId <= 8) {
+		*outTier = TIER_WOOD;    *outType = (itemId - 5) + 1; return;
+	}
+	if (itemId >= 13 && itemId <= 16) {
+		*outTier = TIER_STONE;   *outType = (itemId - 13) + 1; return;
+	}
+	if (itemId >= 21 && itemId <= 24) {
+		*outTier = TIER_IRON;    *outType = (itemId - 21) + 1; return;
+	}
+	if (itemId >= 29 && itemId <= 32) {
+		*outTier = TIER_DIAMOND; *outType = (itemId - 29) + 1; return;
+	}
+	if (itemId >= 37 && itemId <= 40) {
+		*outTier = TIER_GOLD;    *outType = (itemId - 37) + 1; return;
+	}
+	*outType = TOOL_NONE;
+	*outTier = TIER_HAND;
+}
+
+static int Block_PreferredTool(BlockID block) {
+	cc_uint8 sound = Blocks.DigSounds[block];
+	switch (sound) {
+		case SOUND_STONE:  return TOOL_PICKAXE;
+		case SOUND_METAL:  return TOOL_PICKAXE;
+		case SOUND_WOOD:   return TOOL_AXE;
+		case SOUND_GRAVEL: return TOOL_SHOVEL;
+		case SOUND_SAND:   return TOOL_SHOVEL;
+		case SOUND_SNOW:   return TOOL_SHOVEL;
+		case SOUND_GRASS:  return TOOL_SHOVEL;
+		default:           return TOOL_NONE;
+	}
+}
+
+static cc_bool Block_RequiresTool(BlockID block) {
+	cc_uint8 sound = Blocks.DigSounds[block];
+	return sound == SOUND_STONE || sound == SOUND_METAL;
+}
+
+/* Returns minimum pickaxe tier needed to get drops from a block.
+   -1 means block doesn't require a pickaxe for drops. */
+static int Block_MinPickaxeTier(BlockID block) {
+	switch (block) {
+		case BLOCK_STONE:
+		case BLOCK_COBBLE:
+		case BLOCK_COAL_ORE:
+			return TIER_WOOD;
+		case BLOCK_IRON_ORE:
+			return TIER_STONE;
+		case BLOCK_GOLD_ORE:
+		case BLOCK_DIAMOND_ORE:
+		case BLOCK_RED_ORE:
+		case BLOCK_DIAMOND_BLOCK:
+		case BLOCK_GOLD:
+		case BLOCK_IRON:
+		/* Iron doors require iron or diamond pickaxe */
+		case BLOCK_IRON_DOOR:
+		case BLOCK_IRON_DOOR_NS_TOP:
+		case BLOCK_IRON_DOOR_EW_BOTTOM:
+		case BLOCK_IRON_DOOR_EW_TOP:
+		case BLOCK_IRON_DOOR_NS_OPEN_BOTTOM:
+		case BLOCK_IRON_DOOR_NS_OPEN_TOP:
+		case BLOCK_IRON_DOOR_EW_OPEN_BOTTOM:
+		case BLOCK_IRON_DOOR_EW_OPEN_TOP:
+			return TIER_IRON;
+		case BLOCK_OBSIDIAN:
+			return TIER_DIAMOND;
+		default:
+			/* Other stone/metal-sound blocks (brick, mossy rocks, slab, etc.) require any pickaxe */
+			if (Blocks.DigSounds[block] == SOUND_STONE || Blocks.DigSounds[block] == SOUND_METAL) {
+				return TIER_WOOD;
+			}
+			return -1;
+	}
+}
+
+/* Gold pickaxe has same mining capability as wood */
+static int Block_EffectivePickTier(int tier) {
+	if (tier == TIER_GOLD) return TIER_WOOD;
+	return tier;
+}
+
+static float Block_BaseBreakTime(BlockID block);
+
+/* Check if a block is instant-break */
+static cc_bool Block_IsInstaMine(BlockID block) {
+	return Block_BaseBreakTime(block) <= 0.0f && block != BLOCK_BEDROCK;
+}
+
+/* Check if the held tool can get drops from this block */
+static cc_bool Block_CanGetDrops(BlockID block, int toolType, int toolTier) {
+	int minTier;
+	/* Insta-mine blocks never require a tool for drops */
+	if (Block_IsInstaMine(block)) return true;
+	minTier = Block_MinPickaxeTier(block);
+	if (minTier < 0) return true;
+	if (toolType != TOOL_PICKAXE) return false;
+	return Block_EffectivePickTier(toolTier) >= minTier;
+}
+
+static float Block_BaseBreakTime(BlockID block) {
+	cc_uint8 sound;
+
+	/* Instant-break blocks */
+	if (block == BLOCK_TORCH)        return 0.0f;
+	if (block == BLOCK_RED_ORE_DUST) return 0.0f;
+	if (block == BLOCK_LIT_RED_ORE_DUST) return 0.0f;
+	if (block == BLOCK_LEAVES)       return 0.0f;
+	if (block == BLOCK_LEVER)        return 0.0f;
+	if (block == BLOCK_LEVER_ON)     return 0.0f;
+	if (block == BLOCK_BUTTON)       return 0.0f;
+	if (block == BLOCK_BUTTON_PRESSED) return 0.0f;
+	if (block == BLOCK_PRESSURE_PLATE) return 0.0f;
+	if (block == BLOCK_PRESSURE_PLATE_PRESSED) return 0.0f;
+	if (block == BLOCK_STONE_PLATE) return 0.0f;
+	if (block == BLOCK_STONE_PLATE_PRESSED) return 0.0f;
+	if (block == BLOCK_LADDER)       return 0.0f;
+	/* Redstone torches (all variants) */
+	if (block >= BLOCK_RED_TORCH_ON_S && block <= BLOCK_RED_TORCH_OFF_W) return 0.0f;
+	if (block == BLOCK_RED_TORCH_UNMOUNTED)     return 0.0f;
+	if (block == BLOCK_RED_TORCH_UNMOUNTED_OFF) return 0.0f;
+	/* Flowers and mushrooms */
+	if (block == BLOCK_DANDELION)    return 0.0f;
+	if (block == BLOCK_ROSE)         return 0.0f;
+	if (block == BLOCK_BROWN_SHROOM) return 0.0f;
+	if (block == BLOCK_RED_SHROOM)   return 0.0f;
+
+	if (block == BLOCK_OBSIDIAN)     return 50.0f;
+	if (block == BLOCK_IRON)         return 5.0f;
+	if (block == BLOCK_GOLD)         return 3.0f;
+	if (block == BLOCK_DIAMOND_BLOCK)return 5.0f;
+	if (block == BLOCK_IRON_ORE)     return 3.0f;
+	if (block == BLOCK_GOLD_ORE)     return 3.0f;
+	if (block == BLOCK_DIAMOND_ORE)  return 3.0f;
+	if (block == BLOCK_COAL_ORE)     return 3.0f;
+	if (block == BLOCK_RED_ORE)      return 3.0f;
+
+	sound = Blocks.DigSounds[block];
+	switch (sound) {
+		case SOUND_STONE:  return 1.3f;
+		case SOUND_METAL:  return 5.0f;
+		case SOUND_WOOD:   return 2.0f;
+		case SOUND_GRASS:  return 1.0f;
+		case SOUND_GRAVEL: return 1.0f;
+		case SOUND_SAND:   return 0.9f;
+		case SOUND_SNOW:   return 0.2f;
+		case SOUND_GLASS:  return 0.3f;
+		case SOUND_CLOTH:  return 0.8f;
+		default:           return 0.4f;
+	}
+}
+
+/* Block breaking state for survival mode */
+static cc_bool  breaking_active;
+static IVec3    breaking_pos;
+static BlockID  breaking_block;
+static float    breaking_progress;
+static float    breaking_totalTime;
+static int      breaking_crackStage = -1;
+static float    breaking_soundTimer;
+static float    breaking_swingTimer;
+static GfxResourceID crack_vb;
+
+static void BlockBreaking_Reset(void) {
+	breaking_active     = false;
+	breaking_progress   = 0.0f;
+	breaking_crackStage = -1;
+	breaking_soundTimer = 0.0f;
+	breaking_swingTimer = 0.0f;
+}
+
+static float CalcBreakTime(BlockID block) {
+	int toolType, toolTier, preferred;
+	float baseTime, multiplier;
+
+	if (block == BLOCK_BEDROCK) return -1.0f;
+	baseTime = Block_BaseBreakTime(block);
+	if (baseTime <= 0.0f) return 0.0f;
+
+	GetToolInfo(Hotbar_SelectedItem, &toolType, &toolTier);
+	preferred = Block_PreferredTool(block);
+
+	/* Stone/metal without a pickaxe takes as long as obsidian with iron pickaxe (25s) */
+	if (Block_RequiresTool(block) && toolType != preferred) return 25.0f;
+
+	/* Pickaxe tier too low for this block also takes 25s (e.g. stone pickaxe on diamond ore) */
+	if (preferred == TOOL_PICKAXE && toolType == TOOL_PICKAXE) {
+		int minTier = Block_MinPickaxeTier(block);
+		if (minTier > 0 && Block_EffectivePickTier(toolTier) < minTier) return 25.0f;
+	}
+
+	if (toolType == preferred && preferred != TOOL_NONE) {
+		multiplier = tierSpeed[toolTier];
+	} else {
+		multiplier = 1.0f;
+	}
+
+	baseTime = baseTime / multiplier;
+
+	/* Shovels and axes get a flat 0.2s speed bonus */
+	if (toolType == preferred && (toolType == TOOL_SHOVEL || toolType == TOOL_AXE)) {
+		baseTime -= 0.2f;
+		if (baseTime < 0.05f) baseTime = 0.05f;
+	}
+
+	return baseTime;
+}
+
+
 static cc_bool Mob_TryPunchMob(void); /* forward declaration */
 
-static void InputHandler_DeleteBlock(void) {
-	IVec3 pos, otherPos;
-	BlockID old, otherBlock;
+/* Helper: break door/iron door pairs when one half is removed */
+static void BreakDoorPair(BlockID old, IVec3 pos) {
+	IVec3 otherPos;
+	BlockID otherBlock;
 
-	/* Try to punch a mob first (empty hand only) */
-	if (Inventory_SelectedBlock == BLOCK_AIR) {
+	if (old == BLOCK_DOOR_NS_BOTTOM || old == BLOCK_DOOR_EW_BOTTOM) {
+		otherPos.x = pos.x; otherPos.y = pos.y + 1; otherPos.z = pos.z;
+		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+			if (otherBlock == BLOCK_DOOR_NS_TOP || otherBlock == BLOCK_DOOR_EW_TOP) {
+				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+			}
+		}
+	} else if (old == BLOCK_DOOR_NS_TOP || old == BLOCK_DOOR_EW_TOP) {
+		otherPos.x = pos.x; otherPos.y = pos.y - 1; otherPos.z = pos.z;
+		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+			if (otherBlock == BLOCK_DOOR_NS_BOTTOM || otherBlock == BLOCK_DOOR_EW_BOTTOM) {
+				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+			}
+		}
+	}
+
+	if (IsIronDoorBottom(old)) {
+		otherPos.x = pos.x; otherPos.y = pos.y + 1; otherPos.z = pos.z;
+		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+			if (IsIronDoorTop(otherBlock)) {
+				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+			}
+		}
+	} else if (IsIronDoorTop(old)) {
+		otherPos.x = pos.x; otherPos.y = pos.y - 1; otherPos.z = pos.z;
+		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+			if (IsIronDoorBottom(otherBlock)) {
+				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+			}
+		}
+	}
+}
+
+/* Helper: immediately destroy a block and handle side effects */
+/* Helper: check if a block is any wooden door variant */
+static cc_bool IsWoodDoor(BlockID b) {
+	return b == BLOCK_DOOR_NS_BOTTOM || b == BLOCK_DOOR_NS_TOP ||
+		b == BLOCK_DOOR_EW_BOTTOM || b == BLOCK_DOOR_EW_TOP;
+}
+
+/* Helper: check if a block is any iron door variant */
+static cc_bool IsAnyIronDoor(BlockID b) {
+	return IsIronDoorBottom(b) || IsIronDoorTop(b);
+}
+
+/* Helper: apply small random horizontal momentum to a dropped item */
+static void DropItem_ApplyRandomMomentum(int slot) {
+	float angle, speed;
+	if (!mob_rng_inited) {
+		Random_SeedFromCurrentTime(&mob_rng);
+		mob_rng_inited = true;
+	}
+	angle = Random_Float(&mob_rng) * 2.0f * MATH_PI;
+	speed = 0.05f + Random_Float(&mob_rng) * 0.10f;
+	droppedItemVelocityX[slot] = Math_CosF(angle) * speed;
+	droppedItemVelocityZ[slot] = Math_SinF(angle) * speed;
+	droppedItemVelocityY[slot] = 0.15f;
+}
+
+static void BreakBlockNow(IVec3 pos, BlockID old) {
+	Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_AIR);
+	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_AIR);
+	BreakDoorPair(old, pos);
+
+	/* In survival mode, drop the broken block */
+	if (Game_SurvivalMode && old != BLOCK_BEDROCK && old != BLOCK_AIR &&
+		Blocks.Draw[old] != DRAW_GAS) {
+		Vec3 dropPos;
+		int toolType, toolTier, slot;
+		dropPos.x = (float)pos.x + 0.5f;
+		dropPos.y = (float)pos.y + 0.3f;
+		dropPos.z = (float)pos.z + 0.5f;
+
+		if (!mob_rng_inited) {
+			Random_SeedFromCurrentTime(&mob_rng);
+			mob_rng_inited = true;
+		}
+
+		GetToolInfo(Hotbar_SelectedItem, &toolType, &toolTier);
+
+		/* Check pickaxe tier requirement for drops */
+		if (!Block_CanGetDrops(old, toolType, toolTier)) return;
+
+		if (old == BLOCK_STONE) {
+			/* Stone: gold pickaxe drops stone, otherwise cobblestone */
+			slot = DropItem_FindFreeSlot();
+			if (slot == -1) slot = DropItem_EvictOldest();
+			if (slot != -1) {
+				if (toolType == TOOL_PICKAXE && toolTier == TIER_GOLD) {
+					DropItem_Spawn(slot, dropPos, BLOCK_STONE, false, 0);
+				} else {
+					DropItem_Spawn(slot, dropPos, BLOCK_COBBLE, false, 0);
+				}
+				droppedItemPickupDelay[slot] = 0.0f;
+				DropItem_ApplyRandomMomentum(slot);
+			}
+		} else if (old == BLOCK_COAL_ORE) {
+			/* Coal ore drops 1-3 coal items */
+			int count = Random_Next(&mob_rng, 3) + 1;
+			slot = DropItem_FindFreeSlot();
+			if (slot == -1) slot = DropItem_EvictOldest();
+			if (slot != -1) {
+				DropItem_Spawn(slot, dropPos, BLOCK_AIR, true, ITEM_COAL);
+				droppedItemCount[slot] = count;
+				droppedItemPickupDelay[slot] = 0.0f;
+				DropItem_ApplyRandomMomentum(slot);
+			}
+		} else if (old == BLOCK_DIAMOND_ORE) {
+			/* Diamond ore drops 1 diamond item */
+			slot = DropItem_FindFreeSlot();
+			if (slot == -1) slot = DropItem_EvictOldest();
+			if (slot != -1) {
+				DropItem_Spawn(slot, dropPos, BLOCK_AIR, true, ITEM_DIAMOND_ITEM);
+				droppedItemPickupDelay[slot] = 0.0f;
+				DropItem_ApplyRandomMomentum(slot);
+			}
+		} else if (old == BLOCK_RED_ORE) {
+			/* Red ore drops 1-10 red ore dust blocks */
+			int count = Random_Next(&mob_rng, 10) + 1;
+			slot = DropItem_FindFreeSlot();
+			if (slot == -1) slot = DropItem_EvictOldest();
+			if (slot != -1) {
+				DropItem_Spawn(slot, dropPos, BLOCK_RED_ORE_DUST, false, 0);
+				droppedItemCount[slot] = count;
+				droppedItemPickupDelay[slot] = 0.0f;
+				DropItem_ApplyRandomMomentum(slot);
+			}
+		} else if (old == BLOCK_LOG) {
+			/* Oak logs: drop planks unless broken by axe */
+			if (toolType == TOOL_AXE) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_LOG, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else {
+				int numPlanks = Random_Next(&mob_rng, 6) + 1;
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_WOOD, false, 0);
+					droppedItemCount[slot] = numPlanks;
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		} else if (old == BLOCK_GRASS) {
+			/* Grass blocks: drop dirt unless broken by golden shovel */
+			if (toolType == TOOL_SHOVEL && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_GRASS, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_DIRT, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		} else if (old == BLOCK_GRAVEL) {
+			/* Gravel: gold shovel 50% flint, normal 1 in 5 flint, otherwise gravel */
+			cc_bool dropFlint;
+			if (toolType == TOOL_SHOVEL && toolTier == TIER_GOLD) {
+				dropFlint = Random_Next(&mob_rng, 2) == 0;
+			} else {
+				dropFlint = Random_Next(&mob_rng, 5) == 0;
+			}
+			if (dropFlint) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_AIR, true, ITEM_FLINT);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_GRAVEL, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		} else if (old == BLOCK_LEAVES) {
+			/* Leaves: gold axe drops leaves, otherwise 5% sapling */
+			if (toolType == TOOL_AXE && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_LEAVES, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else if (Random_Next(&mob_rng, 20) == 0) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_SAPLING, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		} else if (old == BLOCK_GLASS) {
+			/* Glass: only drops if mined by golden pickaxe */
+			if (toolType == TOOL_PICKAXE && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_GLASS, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+			/* Otherwise glass shatters with no drop */
+		} else if (old == BLOCK_ICE) {
+			/* Ice: only drops if mined by golden pickaxe */
+			if (toolType == TOOL_PICKAXE && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_ICE, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+			/* Otherwise ice melts with no drop */
+		} else {
+			/* Furnace: drop its contents (input, fuel, output) before dropping the block */
+			if (old == BLOCK_FURNACE) {
+				struct FurnaceData fdata;
+				Furnace_Remove(pos.x, pos.y, pos.z, &fdata);
+				if (fdata.input.count > 0) {
+					slot = DropItem_FindFreeSlot();
+					if (slot == -1) slot = DropItem_EvictOldest();
+					if (slot != -1) {
+						DropItem_Spawn(slot, dropPos, fdata.input.block,
+							fdata.input.itemId != ITEM_NONE, fdata.input.itemId);
+						droppedItemCount[slot] = fdata.input.count;
+						droppedItemPickupDelay[slot] = 0.0f;
+						DropItem_ApplyRandomMomentum(slot);
+					}
+				}
+				if (fdata.fuel.count > 0) {
+					slot = DropItem_FindFreeSlot();
+					if (slot == -1) slot = DropItem_EvictOldest();
+					if (slot != -1) {
+						DropItem_Spawn(slot, dropPos, fdata.fuel.block,
+							fdata.fuel.itemId != ITEM_NONE, fdata.fuel.itemId);
+						droppedItemCount[slot] = fdata.fuel.count;
+						droppedItemPickupDelay[slot] = 0.0f;
+						DropItem_ApplyRandomMomentum(slot);
+					}
+				}
+				if (fdata.output.count > 0) {
+					slot = DropItem_FindFreeSlot();
+					if (slot == -1) slot = DropItem_EvictOldest();
+					if (slot != -1) {
+						DropItem_Spawn(slot, dropPos, fdata.output.block,
+							fdata.output.itemId != ITEM_NONE, fdata.output.itemId);
+						droppedItemCount[slot] = fdata.output.count;
+						droppedItemPickupDelay[slot] = 0.0f;
+						DropItem_ApplyRandomMomentum(slot);
+					}
+				}
+			}
+			/* Chest: drop its contents before dropping the block */
+			if (old == BLOCK_CHEST || (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R)) {
+				struct ChestData cdata;
+				int ci;
+				Chest_Remove(pos.x, pos.y, pos.z, &cdata);
+				for (ci = 0; ci < CHEST_SLOTS; ci++) {
+					if (cdata.slots[ci].count <= 0) continue;
+					slot = DropItem_FindFreeSlot();
+					if (slot == -1) slot = DropItem_EvictOldest();
+					if (slot != -1) {
+						DropItem_Spawn(slot, dropPos, cdata.slots[ci].block,
+							cdata.slots[ci].itemId != ITEM_NONE, cdata.slots[ci].itemId);
+						droppedItemCount[slot] = cdata.slots[ci].count;
+						droppedItemPickupDelay[slot] = 0.0f;
+						DropItem_ApplyRandomMomentum(slot);
+					}
+				}
+				/* If breaking half of a double chest, revert the other half to single */
+				if (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R) {
+					int px, py, pz;
+					if (Chest_GetPartnerPos(old, pos.x, pos.y, pos.z, &px, &py, &pz)) {
+						if (World_Contains(px, py, pz)) {
+							BlockID partnerBlock = World_GetBlock(px, py, pz);
+							if (partnerBlock >= BLOCK_DCHEST_S_L && partnerBlock <= BLOCK_DCHEST_W_R) {
+								Game_ChangeBlock(px, py, pz, BLOCK_CHEST);
+							}
+						}
+					}
+				}
+			}
+			/* Normal block drop - map door variants to their craftable form */
+			{
+				BlockID dropBlock = old;
+				if (IsWoodDoor(old)) {
+					dropBlock = BLOCK_DOOR_NS_BOTTOM;
+				} else if (IsAnyIronDoor(old)) {
+					dropBlock = BLOCK_IRON_DOOR;
+				} else if (old == BLOCK_PRESSURE_PLATE_PRESSED) {
+					dropBlock = BLOCK_PRESSURE_PLATE;
+				} else if (old == BLOCK_STONE_PLATE_PRESSED) {
+					dropBlock = BLOCK_STONE_PLATE;
+				} else if (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R) {
+					dropBlock = BLOCK_CHEST;
+				}
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, dropBlock, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		}
+	}
+
+	/* Break dependent blocks sitting on top of the broken block */
+	if (pos.y + 1 < World.Height) {
+		BlockID above = World_GetBlock(pos.x, pos.y + 1, pos.z);
+		if (above == BLOCK_DANDELION || above == BLOCK_ROSE ||
+			above == BLOCK_RED_SHROOM || above == BLOCK_BROWN_SHROOM ||
+			above == BLOCK_SAPLING || above == BLOCK_RED_ORE_DUST ||
+			above == BLOCK_LIT_RED_ORE_DUST ||
+			above == BLOCK_PRESSURE_PLATE || above == BLOCK_PRESSURE_PLATE_PRESSED ||
+			above == BLOCK_STONE_PLATE || above == BLOCK_STONE_PLATE_PRESSED) {
+			IVec3 abovePos;
+			abovePos.x = pos.x; abovePos.y = pos.y + 1; abovePos.z = pos.z;
+			BreakBlockNow(abovePos, above);
+		}
+	}
+}
+
+/* Drop a block item at the given world position (called from BlockPhysics for attached blocks) */
+void Physics_DropBlock(int x, int y, int z, BlockID block) {
+	int slot;
+	Vec3 dropPos;
+	if (!Game_SurvivalMode) return;
+	if (block == BLOCK_AIR || block == BLOCK_BEDROCK) return;
+
+	dropPos.x = (float)x + 0.5f;
+	dropPos.y = (float)y + 0.3f;
+	dropPos.z = (float)z + 0.5f;
+
+	slot = DropItem_FindFreeSlot();
+	if (slot == -1) slot = DropItem_EvictOldest();
+	if (slot != -1) {
+		DropItem_Spawn(slot, dropPos, block, false, 0);
+		droppedItemPickupDelay[slot] = 0.0f;
+		DropItem_ApplyRandomMomentum(slot);
+	}
+}
+
+static void InputHandler_DeleteBlock(void) {
+	IVec3 pos;
+	BlockID old;
+	float breakTime;
+
+	/* Try to punch a mob first (empty hand or holding item) */
+	if (Inventory_SelectedBlock == BLOCK_AIR || Hotbar_SelectedItem != ITEM_NONE) {
 		if (Mob_TryPunchMob()) return;
 	}
 
@@ -453,61 +1072,37 @@ static void InputHandler_DeleteBlock(void) {
 	old = World_GetBlock(pos.x, pos.y, pos.z);
 	if (Blocks.Draw[old] == DRAW_GAS || !Blocks.CanDelete[old]) return;
 
-	Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_AIR);
-	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_AIR);
-	
-	/* If breaking a door, also break the other half */
-	if (old == BLOCK_DOOR_NS_BOTTOM || old == BLOCK_DOOR_EW_BOTTOM) {
-		/* Breaking bottom, remove top */
-		otherPos.x = pos.x;
-		otherPos.y = pos.y + 1;
-		otherPos.z = pos.z;
-		
-		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
-			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
-			if (otherBlock == BLOCK_DOOR_NS_TOP || otherBlock == BLOCK_DOOR_EW_TOP) {
-				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
-				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
-			}
-		}
-	} else if (old == BLOCK_DOOR_NS_TOP || old == BLOCK_DOOR_EW_TOP) {
-		/* Breaking top, remove bottom */
-		otherPos.x = pos.x;
-		otherPos.y = pos.y - 1;
-		otherPos.z = pos.z;
-		
-		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
-			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
-			if (otherBlock == BLOCK_DOOR_NS_BOTTOM || otherBlock == BLOCK_DOOR_EW_BOTTOM) {
-				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
-				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
-			}
-		}
+	/* Creative mode: instant break */
+	if (!Game_SurvivalMode) {
+		BreakBlockNow(pos, old);
+		return;
 	}
-	
-	/* If breaking an iron door, also break the other half */
-	if (IsIronDoorBottom(old)) {
-		otherPos.x = pos.x;
-		otherPos.y = pos.y + 1;
-		otherPos.z = pos.z;
-		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
-			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
-			if (IsIronDoorTop(otherBlock)) {
-				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
-				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
-			}
-		}
-	} else if (IsIronDoorTop(old)) {
-		otherPos.x = pos.x;
-		otherPos.y = pos.y - 1;
-		otherPos.z = pos.z;
-		if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
-			otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
-			if (IsIronDoorBottom(otherBlock)) {
-				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
-				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
-			}
-		}
+
+	/* Survival mode: timed breaking */
+	breakTime = CalcBreakTime(old);
+
+	if (breakTime < 0.0f) {
+		/* Can't break (bedrock, or wrong tool for stone/metal) */
+		BlockBreaking_Reset();
+		return;
+	}
+
+	if (breakTime <= 0.001f) {
+		/* Instant break (e.g. torches, flowers) */
+		BreakBlockNow(pos, old);
+		BlockBreaking_Reset();
+		return;
+	}
+
+	/* Start or continue breaking */
+	if (!breaking_active ||
+		breaking_pos.x != pos.x || breaking_pos.y != pos.y || breaking_pos.z != pos.z) {
+		breaking_active    = true;
+		breaking_pos       = pos;
+		breaking_block     = old;
+		breaking_progress  = 0.0f;
+		breaking_totalTime = breakTime;
+		breaking_crackStage = 0;
 	}
 }
 
@@ -539,7 +1134,28 @@ static void InputHandler_PlaceBlock(void) {
 			Audio_PlayDigSound((targetBlock == BLOCK_LEVER) ? SOUND_BUTTON_ON : SOUND_BUTTON_OFF);
 			return;
 		}
-		
+
+		/* If clicking on a crafting table, open the 3x3 crafting GUI */
+		if (targetBlock == BLOCK_CRAFT) {
+			CraftingTableScreen_Show();
+			return;
+		}
+
+		/* If clicking on a furnace, open the smelting GUI */
+		if (targetBlock == BLOCK_FURNACE) {
+			Furnace_Open(targetPos.x, targetPos.y, targetPos.z);
+			FurnaceScreen_Show();
+			return;
+		}
+
+		/* If clicking on a chest or double chest, open the chest GUI */
+		if (targetBlock == BLOCK_CHEST ||
+		    (targetBlock >= BLOCK_DCHEST_S_L && targetBlock <= BLOCK_DCHEST_W_R)) {
+			Chest_Open(targetPos.x, targetPos.y, targetPos.z);
+			ChestScreen_Show();
+			return;
+		}
+
 		/* If clicking on TNT with empty hand, light the fuse */
 		if (targetBlock == BLOCK_TNT && Inventory_SelectedBlock == BLOCK_AIR) {
 			TNT_ScheduleFuse(targetPos.x, targetPos.y, targetPos.z);
@@ -902,6 +1518,18 @@ static void InputHandler_PlaceBlock(void) {
 
 	Game_ChangeBlock(pos.x, pos.y, pos.z, block);
 	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, block);
+
+	/* In survival mode, consume one block from the hotbar stack */
+	if (Game_SurvivalMode && Hotbar_SelectedItem == ITEM_NONE) {
+		int cnt = Hotbar_GetCount(Inventory.SelectedIndex);
+		if (cnt > 1) {
+			Hotbar_SetCount(Inventory.SelectedIndex, cnt - 1);
+		} else {
+			Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+			Hotbar_SetCount(Inventory.SelectedIndex, 0);
+		}
+		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+	}
 	
 	/* After placing chest, form double chest if adjacent to single chest */
 	if (block == BLOCK_CHEST) {
@@ -1085,7 +1713,50 @@ static cc_bool AnyBlockTouches(void);
 #endif
 void InputHandler_Tick(float delta) {
 	cc_bool left, middle, right;
-	
+	int newStage;
+
+	/* Per-frame breaking progress for survival mode (before delta gate) */
+	left = input_buttonsDown[MOUSE_LEFT];
+	if (Game_SurvivalMode && left && breaking_active) {
+		IVec3 curPos = Game_SelectedPos.pos;
+
+		if (!Game_SelectedPos.valid ||
+			curPos.x != breaking_pos.x || curPos.y != breaking_pos.y || curPos.z != breaking_pos.z) {
+			BlockBreaking_Reset();
+		} else if (World_GetBlock(curPos.x, curPos.y, curPos.z) != breaking_block) {
+			BlockBreaking_Reset();
+		} else {
+			breaking_progress += delta / breaking_totalTime;
+
+			newStage = (int)(breaking_progress * 10.0f);
+			if (newStage > 9) newStage = 9;
+			breaking_crackStage = newStage;
+
+			/* Play step sound at a fixed interval (~5 per second) */
+			breaking_soundTimer += delta;
+			if (breaking_soundTimer >= 0.20f) {
+				cc_uint8 sndType = Blocks.StepSounds[breaking_block];
+				int vol = Audio_SoundsVolume;
+				breaking_soundTimer -= 0.20f;
+				if (sndType == SOUND_GRASS || sndType == SOUND_SAND || sndType == SOUND_GRAVEL)
+					vol = vol / 2;
+				Audio_PlayStepSoundRate(sndType, 50, vol);
+			}
+
+			/* Re-trigger swing animation periodically (dig anim lasts 0.233s, 1.5x faster) */
+			breaking_swingTimer += delta;
+			if (breaking_swingTimer >= 0.233f) {
+				breaking_swingTimer -= 0.233f;
+				HeldBlockRenderer_ClickAnim(true);
+			}
+
+			if (breaking_progress >= 1.0f) {
+				BreakBlockNow(breaking_pos, breaking_block);
+				BlockBreaking_Reset();
+			}
+		}
+	}
+
 	input_deltaAcc += delta;
 	if (Gui.InputGrab) return;
 
@@ -1099,7 +1770,7 @@ void InputHandler_Tick(float delta) {
 	left   = input_buttonsDown[MOUSE_LEFT];
 	middle = input_buttonsDown[MOUSE_MIDDLE];
 	right  = input_buttonsDown[MOUSE_RIGHT];
-	
+
 #ifdef CC_BUILD_TOUCH
 	if (Input_TouchMode) {
 		left   = (Input_HoldMode == INPUT_MODE_DELETE) && AnyBlockTouches();
@@ -1116,7 +1787,11 @@ void InputHandler_Tick(float delta) {
 	}
 
 	if (left) {
-		InputHandler_DeleteBlock();
+		if (!Game_SurvivalMode) {
+			InputHandler_DeleteBlock();
+		} else if (!breaking_active) {
+			InputHandler_DeleteBlock();
+		}
 	} else if (right) {
 		InputHandler_PlaceBlock();
 	} else if (middle) {
@@ -1230,9 +1905,37 @@ static cc_bool BindTriggered_DeleteBlock(int key, struct InputDevice* device) {
 	return true;
 }
 
+static void Player_ShootArrow(void);
 static cc_bool BindTriggered_PlaceBlock(int key, struct InputDevice* device) {
 	if (Gui.InputGrab) return false;
-	
+
+	/* Shoot arrow when holding a bow */
+	if (Hotbar_SelectedItem == 41) {
+		/* In survival mode, require and consume 1 arrow */
+		if (Game_SurvivalMode && !SurvInv_ConsumeItem(ITEM_ARROW)) return true;
+		Player_ShootArrow();
+		return true;
+	}
+
+	/* Eat food when holding pork items */
+	if (Hotbar_SelectedItem == ITEM_RAW_PORK || Hotbar_SelectedItem == ITEM_COOKED_PORK) {
+		if (Player_Health < PLAYER_MAX_HEALTH) {
+			int heal = (Hotbar_SelectedItem == ITEM_RAW_PORK) ? 3 : 8;
+			int idx  = Inventory.SelectedIndex;
+			int cnt  = Hotbar_GetCount(idx);
+			if (cnt > 1) {
+				Hotbar_SetCount(idx, cnt - 1);
+			} else {
+				Hotbar_SetItem(idx, ITEM_NONE);
+				Hotbar_SetCount(idx, 0);
+			}
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+			Player_Health += heal;
+			if (Player_Health > PLAYER_MAX_HEALTH) Player_Health = PLAYER_MAX_HEALTH;
+		}
+		return true;
+	}
+
 	MouseStatePress(MOUSE_RIGHT);
 	InputHandler_PlaceBlock();
 	return true;
@@ -1248,6 +1951,7 @@ static cc_bool BindTriggered_PickBlock(int key, struct InputDevice* device) {
 
 static void BindReleased_DeleteBlock(int key, struct InputDevice* device) {
 	MouseStateRelease(MOUSE_LEFT);
+	BlockBreaking_Reset();
 }
 
 static void BindReleased_PlaceBlock(int key, struct InputDevice* device) {
@@ -1325,20 +2029,23 @@ static cc_bool BindTriggered_ThirdPerson(int key, struct InputDevice* device) {
 static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 	Vec3 pos;
 	BlockID block;
-	int slot, itemId;
+	int slot, itemId, count;
 	float yawRad, tossSpeed;
+	cc_bool dropAll;
 
 	if (Gui.InputGrab) return false;
 	if (!Inventory_CheckChangeSelected()) return false;
 
-	itemId = Hotbar_SelectedItem;
-	block  = Inventory_SelectedBlock;
+	itemId  = Hotbar_SelectedItem;
+	block   = Inventory_SelectedBlock;
+	dropAll = Input_IsShiftPressed();
 
 	/* Nothing to drop */
 	if (itemId == ITEM_NONE && block == BLOCK_AIR) return true;
 
-	/* Find free dropped item slot */
+	/* Find free dropped item slot (evict oldest if full) */
 	slot = DropItem_FindFreeSlot();
+	if (slot == -1) slot = DropItem_EvictOldest();
 	if (slot == -1) return true;
 
 	/* Spawn at player eye position */
@@ -1347,12 +2054,38 @@ static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 
 	if (itemId != ITEM_NONE) {
 		/* Drop item from hotbar */
-		DropItem_Spawn(slot, pos, BLOCK_AIR, true, itemId);
-		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+		count = Hotbar_GetCount(Inventory.SelectedIndex);
+		if (count < 1) count = 1;
+
+		if (dropAll || count <= 1) {
+			/* Shift+Q or last item: drop everything */
+			DropItem_Spawn(slot, pos, BLOCK_AIR, true, itemId);
+			droppedItemCount[slot] = count;
+			Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+			Hotbar_SetCount(Inventory.SelectedIndex, 0);
+		} else {
+			/* Q: drop 1, keep the rest */
+			DropItem_Spawn(slot, pos, BLOCK_AIR, true, itemId);
+			droppedItemCount[slot] = 1;
+			Hotbar_SetCount(Inventory.SelectedIndex, count - 1);
+		}
 	} else {
 		/* Drop block from inventory */
-		DropItem_Spawn(slot, pos, block, false, 0);
-		Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+		count = Hotbar_GetCount(Inventory.SelectedIndex);
+		if (count < 1) count = 1;
+
+		if (dropAll || count <= 1) {
+			/* Shift+Q or last block: drop everything */
+			DropItem_Spawn(slot, pos, block, false, 0);
+			droppedItemCount[slot] = count;
+			Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+			Hotbar_SetCount(Inventory.SelectedIndex, 0);
+		} else {
+			/* Q: drop 1, keep the rest */
+			DropItem_Spawn(slot, pos, block, false, 0);
+			droppedItemCount[slot] = 1;
+			Hotbar_SetCount(Inventory.SelectedIndex, count - 1);
+		}
 	}
 
 	/* Give initial forward toss velocity based on player's look direction */
@@ -1366,6 +2099,164 @@ static cc_bool BindTriggered_DropBlock(int key, struct InputDevice* device) {
 	return true;
 }
 
+/* Try to consume 1 of the specified item from inventory. Returns true if successful. */
+static cc_bool SurvInv_ConsumeItem(int itemId) {
+	int i;
+	/* Check hotbar first */
+	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		if (Hotbar_GetItem(i) == itemId && Inventory_Get(i) == BLOCK_AIR && Hotbar_GetCount(i) > 0) {
+			Hotbar_SetCount(i, Hotbar_GetCount(i) - 1);
+			if (Hotbar_GetCount(i) <= 0) {
+				Hotbar_SetItem(i, ITEM_NONE);
+				Hotbar_SetCount(i, 0);
+			}
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+			return true;
+		}
+	}
+	/* Check main inventory */
+	for (i = 0; i < 27; i++) {
+		if (SurvInv_Main[i].itemId == itemId && SurvInv_Main[i].block == BLOCK_AIR && SurvInv_Main[i].count > 0) {
+			SurvInv_Main[i].count--;
+			if (SurvInv_Main[i].count <= 0) {
+				SurvInv_Main[i].itemId = ITEM_NONE;
+				SurvInv_Main[i].count  = 0;
+			}
+			return true;
+		}
+	}
+	return false;
+}
+
+/* Add an item/block to the player's inventory (hotbar first, then main inventory) */
+void SurvInv_AddItem(BlockID block, int itemId, int count) {
+	int i, canFit, remaining;
+	cc_bool hotbarChanged = false;
+	remaining = count;
+
+	if (itemId != ITEM_NONE && block == BLOCK_AIR) {
+		/* Item pickup */
+		int maxStack = Item_MaxStackSize(itemId);
+		/* Stack with existing same item in hotbar */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Hotbar_GetItem(i) == itemId && Inventory_Get(i) == BLOCK_AIR &&
+				Hotbar_GetCount(i) < maxStack) {
+				canFit = maxStack - Hotbar_GetCount(i);
+				if (canFit > remaining) canFit = remaining;
+				Hotbar_SetCount(i, Hotbar_GetCount(i) + canFit);
+				remaining -= canFit;
+				hotbarChanged = true;
+			}
+		}
+		/* Stack in main inventory */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].itemId == itemId && SurvInv_Main[i].block == BLOCK_AIR &&
+				SurvInv_Main[i].count < maxStack) {
+				canFit = maxStack - SurvInv_Main[i].count;
+				if (canFit > remaining) canFit = remaining;
+				SurvInv_Main[i].count += canFit;
+				remaining -= canFit;
+			}
+		}
+		/* Empty hotbar slot */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Inventory_Get(i) != BLOCK_AIR || Hotbar_GetItem(i) != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > maxStack) canFit = maxStack;
+			Hotbar_SetItem(i, itemId);
+			Hotbar_SetCount(i, canFit);
+			remaining -= canFit;
+			hotbarChanged = true;
+		}
+		/* Empty main inventory slot */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block != BLOCK_AIR || SurvInv_Main[i].itemId != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > maxStack) canFit = maxStack;
+			SurvInv_Main[i].itemId = itemId;
+			SurvInv_Main[i].count  = canFit;
+			remaining -= canFit;
+		}
+	} else {
+		/* Block pickup */
+		int blockMaxStack = Block_MaxStackSize(block);
+		/* Stack with existing same block in hotbar */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Inventory_Get(i) == block && Hotbar_GetItem(i) == ITEM_NONE &&
+				Hotbar_GetCount(i) < blockMaxStack) {
+				canFit = blockMaxStack - Hotbar_GetCount(i);
+				if (canFit > remaining) canFit = remaining;
+				Hotbar_SetCount(i, Hotbar_GetCount(i) + canFit);
+				remaining -= canFit;
+				hotbarChanged = true;
+			}
+		}
+		/* Stack in main inventory */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block == block && SurvInv_Main[i].itemId == ITEM_NONE &&
+				SurvInv_Main[i].count < blockMaxStack) {
+				canFit = blockMaxStack - SurvInv_Main[i].count;
+				if (canFit > remaining) canFit = remaining;
+				SurvInv_Main[i].count += canFit;
+				remaining -= canFit;
+			}
+		}
+		/* Empty hotbar slot */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Inventory_Get(i) != BLOCK_AIR || Hotbar_GetItem(i) != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > blockMaxStack) canFit = blockMaxStack;
+			Inventory_Set(i, block);
+			Hotbar_SetCount(i, canFit);
+			remaining -= canFit;
+			hotbarChanged = true;
+		}
+		/* Empty main inventory slot */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block != BLOCK_AIR || SurvInv_Main[i].itemId != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > blockMaxStack) canFit = blockMaxStack;
+			SurvInv_Main[i].block = block;
+			SurvInv_Main[i].count = canFit;
+			remaining -= canFit;
+		}
+	}
+
+	if (remaining < count) {
+		Audio_PlayDigSoundRate(SOUND_PICKUP, 75);
+		if (hotbarChanged) Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+	}
+}
+
+/* Drop an item/block from the inventory screen held cursor */
+void SurvInv_DropHeldItem(BlockID block, int itemId, int count) {
+	Vec3 pos;
+	int slot;
+	float yawRad, tossSpeed;
+
+	if (count < 1) return;
+
+	slot = DropItem_FindFreeSlot();
+	if (slot == -1) slot = DropItem_EvictOldest();
+	if (slot == -1) return;
+
+	pos = Entities.CurPlayer->Base.Position;
+	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
+
+	if (itemId != ITEM_NONE) {
+		DropItem_Spawn(slot, pos, BLOCK_AIR, true, itemId);
+	} else {
+		DropItem_Spawn(slot, pos, block, false, 0);
+	}
+	droppedItemCount[slot] = count;
+
+	yawRad   = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
+	tossSpeed = 0.25f;
+	droppedItemVelocityX[slot] = Math_SinF(yawRad) * tossSpeed;
+	droppedItemVelocityZ[slot] = -Math_CosF(yawRad) * tossSpeed;
+	droppedItemVelocityY[slot] = 0.12f;
+}
+
 static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
 	if (Gui.InputGrab) return false;
 	if (!Inventory_CheckChangeSelected()) return false;
@@ -1373,6 +2264,7 @@ static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
 	/* Delete item from hotbar if present */
 	if (Hotbar_SelectedItem != ITEM_NONE) {
 		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+		Hotbar_SetCount(Inventory.SelectedIndex, 0);
 		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 		return true;
 	}
@@ -1381,34 +2273,21 @@ static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
 
 	/* Just delete the block, no entity spawn */
 	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+	Hotbar_SetCount(Inventory.SelectedIndex, 0);
 	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 	return true;
 }
 
 static cc_bool BindTriggered_DropItemSprite(int key, struct InputDevice* device) {
-	Vec3 pos;
-	int slot;
-	float yawRad, tossSpeed;
-
-	if (Gui.InputGrab) return false;
-
-	/* Find free dropped item slot */
-	slot = DropItem_FindFreeSlot();
-	if (slot == -1) return true;
-
-	/* Spawn at player eye position */
-	pos = Entities.CurPlayer->Base.Position;
-	pos.y += Entity_GetEyeHeight(&Entities.CurPlayer->Base);
-
-	DropItem_Spawn(slot, pos, BLOCK_AIR, true, 29); /* item 29 = diamond sword */
-
-	/* Give initial forward toss velocity based on player's look direction */
-	yawRad    = Entities.CurPlayer->Base.Yaw * MATH_DEG2RAD;
-	tossSpeed = 0.25f;
-	droppedItemVelocityX[slot] = Math_SinF(yawRad) * tossSpeed;
-	droppedItemVelocityZ[slot] = -Math_CosF(yawRad) * tossSpeed;
-	droppedItemVelocityY[slot] = 0.12f;
-
+	struct Screen* s;
+	/* Item menu requires cheats in any mode */
+	if (!Player_CheatsEnabled) return false;
+	s = Gui_GetScreen(GUI_PRIORITY_INVENTORY);
+	if (s) {
+		Gui_Remove(s);
+	} else if (!Gui.InputGrab) {
+		ItemInventoryScreen_Show();
+	}
 	return true;
 }
 
@@ -1554,8 +2433,6 @@ static const char* const mobDisplayNames[] = { "Pig", "Sheep", "Creeper", "Spide
 /* 0=passive, 1=hostile - matches mobModelNames order */
 static const cc_uint8 mobIsHostile[] = { 0, 0, 1, 1, 1, 1 };
 
-static RNGState mob_rng;
-static cc_bool mob_rng_inited;
 static const struct EntityVTABLE* origNetPlayerVTABLE;
 static struct EntityVTABLE mobEntity_VTABLE;
 static cc_bool mob_vtable_inited;
@@ -1586,6 +2463,8 @@ static cc_bool  mobIsAggro[MAX_NET_PLAYERS];     /* whether hostile mob is curre
 static float    mobHurtFlash[MAX_NET_PLAYERS];   /* hurt flash timer (seconds remaining, 0.5s) */
 static float    mobDeathTimer[MAX_NET_PLAYERS];  /* death animation timer (seconds remaining) */
 static float    mobDeathRotZ[MAX_NET_PLAYERS];   /* death tip-over rotation direction */
+static Vec3     mobLastStuckPos[MAX_NET_PLAYERS];  /* last recorded position for stuck detection */
+static float    mobStuckTimer[MAX_NET_PLAYERS];    /* time spent near the same position while walking */
 static cc_uint8 mobModelIdx[MAX_NET_PLAYERS];    /* index into mobModelNames (0-5), creeper=2 */
 static float    mobCreeperFuse[MAX_NET_PLAYERS]; /* creeper fuse timer (seconds remaining, -1=inactive) */
 
@@ -1600,7 +2479,7 @@ static float    mobCreeperFuse[MAX_NET_PLAYERS]; /* creeper fuse timer (seconds 
 #define CREEPER_ATTACK_FUSE_TIME 3.0f     /* seconds of fuse before explosion attack */
 
 #define SKELETON_SHOOT_RANGE_SQ  (12.0f * 12.0f)   /* shoot within 12 blocks */
-#define SKELETON_BACKPEDAL_RANGE_SQ (6.0f * 6.0f)   /* backpedal if closer than 6 blocks */
+#define SKELETON_BACKPEDAL_RANGE_SQ (4.0f * 4.0f)   /* backpedal if closer than 4 blocks */
 #define SKELETON_PREFERRED_DIST_SQ  (10.0f * 10.0f)  /* try to maintain 10 blocks */
 #define SKELETON_SPEED_FACTOR  0.5f                  /* 50% of player speed */
 #define SKELETON_SHOOT_COOLDOWN 2.0f                 /* seconds between shots */
@@ -1635,6 +2514,22 @@ static float    mobSunDamageTimer[MAX_NET_PLAYERS];     /* accumulates time in s
 static float    mobLavaDamageTimer[MAX_NET_PLAYERS];    /* accumulates time in lava for lava damage */
 static float    mobCactusDamageTimer[MAX_NET_PLAYERS];  /* accumulates time touching cactus for cactus damage */
 static cc_uint8 mobCreeperVariant[MAX_NET_PLAYERS];     /* creeper variant type (only valid when mobModelIdx == MOB_IDX_CREEPER) */
+static cc_bool  mobSheepSheared[MAX_NET_PLAYERS];       /* true = sheep has been sheared (no wool layer) */
+
+/* Melee attack system */
+#define MOB_MELEE_DAMAGE        3     /* base melee damage for all enemies */
+#define MOB_MELEE_RANGE_SQ      (1.5f * 1.5f) /* melee range: 1.5 blocks */
+#define MOB_MELEE_COOLDOWN      1.0f  /* seconds between melee attacks */
+#define SPIDER_LEAP_DAMAGE_MULT 1.5f  /* leap does 1.5x melee damage on contact */
+#define SPIDER_LEAP_CONTACT_SQ  (1.8f * 1.8f) /* slightly larger than melee for leap contact */
+static float    mobMeleeTimer[MAX_NET_PLAYERS];         /* cooldown between melee attacks */
+static float    mobAttackAnimTimer[MAX_NET_PLAYERS];    /* timer for zombie arm swing animation */
+#define MOB_ATTACK_ANIM_DURATION 0.3f /* seconds for arm swing animation */
+
+/* Apply mob damage multiplier: 0=0.5x, 1=1.0x, 2=1.5x, 3=2.0x */
+static int Mob_GetDamageWithMultiplier(int baseDamage) {
+	return max(1, (baseDamage * (1 + Game_MobDamageMultiplier)) / 2);
+}
 
 /* Creeper variant constants */
 #define CREEPER_VAR_STANDARD  0  /* normal creeper: explosion attack */
@@ -1645,7 +2540,7 @@ static cc_uint8 mobCreeperVariant[MAX_NET_PLAYERS];     /* creeper variant type 
 #define CREEPER_FUSE_CANCEL_RANGE_SQ (5.0f * 5.0f) /* cancel fuse if player > 5 blocks away */
 
 /* Arrow projectile state */
-#define MAX_ARROWS 32
+#define MAX_ARROWS 64
 static cc_bool  arrowActive[MAX_ARROWS];
 static int      arrowEntityId[MAX_ARROWS];    /* entity ID in Entities.List */
 static Vec3     arrowVelocity[MAX_ARROWS];    /* per-tick velocity */
@@ -1653,6 +2548,30 @@ static float    arrowLifetime[MAX_ARROWS];    /* seconds remaining */
 static IVec3    arrowStuckBlock[MAX_ARROWS];  /* block coords arrow is stuck in */
 static cc_bool  arrowIsPlayerArrow[MAX_ARROWS]; /* true if shot by the player (hits mobs, not player) */
 
+/* Player damage state (survival mode) */
+static float playerLavaDamageTimer;   /* accumulates time in lava */
+static float playerCactusDamageTimer; /* accumulates time touching cactus */
+static float playerFallStartY;        /* Y position when player started falling */
+static cc_bool playerWasOnGround;     /* whether player was on ground last tick */
+static float playerInvulnTimer;       /* invulnerability frames after taking damage */
+#define PLAYER_INVULN_TIME 0.5f       /* seconds of invulnerability after damage */
+#define SKELETON_ARROW_PLAYER_DAMAGE 2 /* damage from skeleton arrow to player */
+
+/* Apply damage to the player (survival mode only) */
+void Player_Damage(int amount) {
+	if (!Game_SurvivalMode) return;
+	if (Player_Health <= 0) return;
+	if (playerInvulnTimer > 0.0f) return;
+	if (Player_CheatsEnabled) return; /* invincible with cheats */
+
+	Player_Health -= amount;
+	if (Player_Health < 0) Player_Health = 0;
+	playerInvulnTimer = PLAYER_INVULN_TIME;
+	Audio_PlayDigSound(SOUND_HURT);
+}
+
+#define DROPPED_ITEM_HOVER_HEIGHT 0.25f  /* base hover height above ground */
+#define DROPPED_ITEM_HOVER_AMPLITUDE 0.05f /* bobbing amplitude */
 /* Dropped item state (MAX_DROPPED_ITEMS and velocity arrays declared at top of file) */
 static cc_bool  droppedItemActive[MAX_DROPPED_ITEMS];
 static int      droppedItemEntityId[MAX_DROPPED_ITEMS];  /* entity ID in Entities.List */
@@ -1660,9 +2579,9 @@ static BlockID  droppedItemBlock[MAX_DROPPED_ITEMS];     /* which block this ite
 static float    droppedItemLifetime[MAX_DROPPED_ITEMS];  /* seconds until despawn (180s = 3min) */
 static float    droppedItemHoverTime[MAX_DROPPED_ITEMS]; /* animation phase for hover */
 static cc_bool  droppedItemOnGround[MAX_DROPPED_ITEMS];  /* whether item has landed */
-static float    droppedItemPickupDelay[MAX_DROPPED_ITEMS]; /* seconds before item can be picked up */
 static cc_bool  droppedItemIsItem[MAX_DROPPED_ITEMS]; /* true = 2D item sprite, false = 3D block */
 static int      droppedItemItemId[MAX_DROPPED_ITEMS]; /* items.png tile index for 2D item sprites */
+static float    droppedItemGroundY[MAX_DROPPED_ITEMS]; /* base Y when item is on ground (for hover) */
 
 static int DropItem_FindFreeSlot(void) {
 	int i;
@@ -1670,6 +2589,24 @@ static int DropItem_FindFreeSlot(void) {
 		if (!droppedItemActive[i]) return i;
 	}
 	return -1;  /* No free slots */
+}
+
+static int DropItem_EvictOldest(void) {
+	int i, oldest = -1;
+	float oldestLife = 999.0f;
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		if (!droppedItemActive[i]) continue;
+		/* Lower lifetime = older (lifetime counts down from 180) */
+		if (droppedItemLifetime[i] < oldestLife) {
+			oldestLife = droppedItemLifetime[i];
+			oldest = i;
+		}
+	}
+	if (oldest != -1) {
+		Entities_Remove(droppedItemEntityId[oldest]);
+		droppedItemActive[oldest] = false;
+	}
+	return oldest;
 }
 
 static int DropItem_FindFreeEntity(void) {
@@ -1690,7 +2627,6 @@ static int DropItem_GetItemTex(BlockID block) {
 
 static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, int itemId) {
 	struct NetPlayer* np;
-	struct LocationUpdate update;
 	cc_string modelName;
 	int eid, blockItemTex, itemTile;
 
@@ -1729,11 +2665,10 @@ static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, in
 		np->Base.ModelScale = Vec3_Create3(0.25f, 0.25f, 0.25f);
 	}
 
-	/* Set position */
-	update.flags = LU_HAS_POS;
-	update.pos = pos;
-	np->Base.VTABLE->SetLocation(&np->Base, &update);
+	/* Set position directly - bypass interpolation to avoid jitter */
 	np->Base.Position = pos;
+	np->Base.next.pos = pos;
+	np->Base.prev.pos = pos;
 
 	/* Initialize dropped item state */
 	droppedItemActive[slot]     = true;
@@ -1748,6 +2683,7 @@ static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, in
 	droppedItemPickupDelay[slot] = 1.0f;  /* 1 second before pickup allowed */
 	droppedItemIsItem[slot]     = isItem;
 	droppedItemItemId[slot]     = isItem ? itemId : 0;
+	droppedItemCount[slot]      = 1;
 }
 
 static void DropItem_TryPickup(int slot) {
@@ -1755,7 +2691,8 @@ static void DropItem_TryPickup(int slot) {
 	struct Entity* player;
 	float dx, dy, dz, distSq;
 	BlockID block;
-	int i;
+	int i, pickupCount, canFit;
+	cc_bool hotbarChanged = false;
 
 	if (!mob_rng_inited) {
 		Random_SeedFromCurrentTime(&mob_rng);
@@ -1773,41 +2710,132 @@ static void DropItem_TryPickup(int slot) {
 
 	if (distSq > (1.5f * 1.5f)) return;
 
-	/* Item pickups (non-block items) - place in hotbar */
+	pickupCount = droppedItemCount[slot];
+	if (pickupCount < 1) pickupCount = 1;
+
+	/* Item pickups (non-block items) */
 	if (droppedItemIsItem[slot]) {
 		int itemId = droppedItemItemId[slot];
+		int remaining = pickupCount;
+		int maxStack = Item_MaxStackSize(itemId);
 
-		/* Try to find an empty slot (no block and no item) */
-		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		/* First try to stack with existing same item in hotbar */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Hotbar_GetItem(i) == itemId && Inventory_Get(i) == BLOCK_AIR &&
+				Hotbar_GetCount(i) < maxStack) {
+				canFit = maxStack - Hotbar_GetCount(i);
+				if (canFit > remaining) canFit = remaining;
+				Hotbar_SetCount(i, Hotbar_GetCount(i) + canFit);
+				remaining -= canFit;
+				hotbarChanged = true;
+			}
+		}
+		/* Then try to stack in main inventory */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].itemId == itemId && SurvInv_Main[i].block == BLOCK_AIR &&
+				SurvInv_Main[i].count < maxStack) {
+				canFit = maxStack - SurvInv_Main[i].count;
+				if (canFit > remaining) canFit = remaining;
+				SurvInv_Main[i].count += canFit;
+				remaining -= canFit;
+			}
+		}
+		/* Try empty hotbar slot */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
 			if (Inventory_Get(i) != BLOCK_AIR) continue;
 			if (Hotbar_GetItem(i) != ITEM_NONE) continue;
 
+			canFit = remaining;
+			if (canFit > maxStack) canFit = maxStack;
 			Hotbar_SetItem(i, itemId);
-			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
-			Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
-			Entities_Remove(droppedItemEntityId[slot]);
-			droppedItemActive[slot] = false;
-			return;
+			Hotbar_SetCount(i, canFit);
+			remaining -= canFit;
+			hotbarChanged = true;
 		}
-		/* No room in hotbar - item stays on ground */
+		/* Try empty main inventory slot */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block != BLOCK_AIR || SurvInv_Main[i].itemId != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > maxStack) canFit = maxStack;
+			SurvInv_Main[i].itemId = itemId;
+			SurvInv_Main[i].count  = canFit;
+			remaining -= canFit;
+		}
+
+		if (remaining < pickupCount) {
+			/* Picked up at least some items */
+			Audio_PlayDigSoundRate(SOUND_PICKUP, 50 + Random_Next(&mob_rng, 101));
+			if (remaining <= 0) {
+				Entities_Remove(droppedItemEntityId[slot]);
+				droppedItemActive[slot] = false;
+			} else {
+				droppedItemCount[slot] = remaining;
+			}
+			if (hotbarChanged) Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+		}
 		return;
 	}
 
 	block = droppedItemBlock[slot];
+	{
+		int remaining = pickupCount;
+		int blockMaxStack = Block_MaxStackSize(block);
 
-	/* Try to find an empty slot in the hotbar (no block and no item) */
-	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
-		if (Inventory_Get(i) != BLOCK_AIR) continue;
-		if (Hotbar_GetItem(i) != ITEM_NONE) continue;
+		/* First try to stack with existing same block in hotbar */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Inventory_Get(i) == block && Hotbar_GetItem(i) == ITEM_NONE &&
+				Hotbar_GetCount(i) < blockMaxStack) {
+				canFit = blockMaxStack - Hotbar_GetCount(i);
+				if (canFit > remaining) canFit = remaining;
+				Hotbar_SetCount(i, Hotbar_GetCount(i) + canFit);
+				remaining -= canFit;
+				hotbarChanged = true;
+			}
+		}
+		/* Then try to stack in main inventory */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block == block && SurvInv_Main[i].itemId == ITEM_NONE &&
+				SurvInv_Main[i].count < blockMaxStack) {
+				canFit = blockMaxStack - SurvInv_Main[i].count;
+				if (canFit > remaining) canFit = remaining;
+				SurvInv_Main[i].count += canFit;
+				remaining -= canFit;
+			}
+		}
+		/* Try empty hotbar slot */
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR && remaining > 0; i++) {
+			if (Inventory_Get(i) != BLOCK_AIR) continue;
+			if (Hotbar_GetItem(i) != ITEM_NONE) continue;
 
-		Inventory_Set(i, block);
-		Event_RaiseVoid(&UserEvents.HeldBlockChanged);
-		Audio_PlayDigSoundRate(SOUND_PICKUP, 90 + Random_Next(&mob_rng, 21));
-		Entities_Remove(droppedItemEntityId[slot]);
-		droppedItemActive[slot] = false;
-		return;
+			canFit = remaining;
+			if (canFit > blockMaxStack) canFit = blockMaxStack;
+			Inventory_Set(i, block);
+			Hotbar_SetCount(i, canFit);
+			remaining -= canFit;
+			hotbarChanged = true;
+		}
+		/* Try empty main inventory slot */
+		for (i = 0; i < 27 && remaining > 0; i++) {
+			if (SurvInv_Main[i].block != BLOCK_AIR || SurvInv_Main[i].itemId != ITEM_NONE) continue;
+			canFit = remaining;
+			if (canFit > blockMaxStack) canFit = blockMaxStack;
+			SurvInv_Main[i].block = block;
+			SurvInv_Main[i].count = canFit;
+			remaining -= canFit;
+		}
+
+		if (remaining < pickupCount) {
+			/* Picked up at least some blocks */
+			Audio_PlayDigSoundRate(SOUND_PICKUP, 50 + Random_Next(&mob_rng, 101));
+			if (remaining <= 0) {
+				Entities_Remove(droppedItemEntityId[slot]);
+				droppedItemActive[slot] = false;
+			} else {
+				droppedItemCount[slot] = remaining;
+			}
+			if (hotbarChanged) Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+		}
 	}
-	/* No room in hotbar - item stays on ground */
 }
 
 static void DroppedItem_TickAll(struct ScheduledTask* task) {
@@ -1849,39 +2877,44 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 			}
 		}
 
-		/* Apply horizontal toss velocity with wall collision and friction */
+		/* Apply horizontal toss velocity with wall collision (stop all momentum on contact) */
 		if (droppedItemVelocityX[i] != 0.0f || droppedItemVelocityZ[i] != 0.0f) {
 			float newX = e->Position.x + droppedItemVelocityX[i];
 			float newZ = e->Position.z + droppedItemVelocityZ[i];
 			int feetY = (int)Math_Floor(e->Position.y);
+			cc_bool hitBlock = false;
 
 			/* Check X-axis wall collision */
 			bx = (int)Math_Floor(newX);
 			bz = (int)Math_Floor(e->Position.z);
 			if (World_Contains(bx, feetY, bz) && Mob_BlockIsSolid(bx, feetY, bz)) {
-				droppedItemVelocityX[i] = 0.0f;
+				hitBlock = true;
 			} else {
 				e->Position.x = newX;
 				e->next.pos.x = newX;
-				e->prev.pos.x = newX;
 			}
 
 			/* Check Z-axis wall collision */
 			bx = (int)Math_Floor(e->Position.x);
 			bz = (int)Math_Floor(newZ);
 			if (World_Contains(bx, feetY, bz) && Mob_BlockIsSolid(bx, feetY, bz)) {
-				droppedItemVelocityZ[i] = 0.0f;
+				hitBlock = true;
 			} else {
 				e->Position.z = newZ;
 				e->next.pos.z = newZ;
-				e->prev.pos.z = newZ;
 			}
 
-			/* Apply friction */
-			droppedItemVelocityX[i] *= 0.92f;
-			droppedItemVelocityZ[i] *= 0.92f;
-			if (Math_AbsF(droppedItemVelocityX[i]) < 0.001f) droppedItemVelocityX[i] = 0.0f;
-			if (Math_AbsF(droppedItemVelocityZ[i]) < 0.001f) droppedItemVelocityZ[i] = 0.0f;
+			/* Stop all horizontal momentum on any block contact */
+			if (hitBlock) {
+				droppedItemVelocityX[i] = 0.0f;
+				droppedItemVelocityZ[i] = 0.0f;
+			} else {
+				/* Apply friction */
+				droppedItemVelocityX[i] *= 0.92f;
+				droppedItemVelocityZ[i] *= 0.92f;
+				if (Math_AbsF(droppedItemVelocityX[i]) < 0.001f) droppedItemVelocityX[i] = 0.0f;
+				if (Math_AbsF(droppedItemVelocityZ[i]) < 0.001f) droppedItemVelocityZ[i] = 0.0f;
+			}
 		}
 
 		/* Apply gravity (same pattern as Mob_ApplyGravity) */
@@ -1893,11 +2926,12 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 			if (World_Contains(bx, by, bz)) {
 				below = World_GetBlock(bx, by, bz);
 				if (Blocks.Collide[below] == COLLIDE_SOLID) {
-					blockTop = (float)by + Blocks.MaxBB[below].y;
+					blockTop = (float)by + Blocks.MaxBB[below].y + DROPPED_ITEM_HOVER_HEIGHT;
 					if (droppedItemVelocityY[i] <= 0.0f && e->Position.y <= blockTop + 0.05f) {
-						/* Land on block */
+						/* Land on block (hovering above surface) */
 						droppedItemVelocityY[i] = 0.0f;
 						droppedItemOnGround[i]  = true;
+						droppedItemGroundY[i]   = blockTop;
 						e->Position.y  = blockTop;
 						e->next.pos.y  = blockTop;
 						e->prev.pos.y  = blockTop;
@@ -1907,6 +2941,7 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 						if (newY <= blockTop) {
 							droppedItemVelocityY[i] = 0.0f;
 							droppedItemOnGround[i]  = true;
+							droppedItemGroundY[i]   = blockTop;
 							e->Position.y  = blockTop;
 							e->next.pos.y  = blockTop;
 							e->prev.pos.y  = blockTop;
@@ -1914,7 +2949,6 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 							e->Position.y  = newY;
 							droppedItemVelocityY[i] -= MOB_GRAVITY;
 							e->next.pos.y  = e->Position.y;
-							e->prev.pos.y  = e->Position.y;
 						}
 					}
 				} else {
@@ -1922,7 +2956,6 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 					e->Position.y += droppedItemVelocityY[i];
 					droppedItemVelocityY[i] -= MOB_GRAVITY;
 					e->next.pos.y = e->Position.y;
-					e->prev.pos.y = e->Position.y;
 				}
 			} else if (by < 0) {
 				/* Below world: stop */
@@ -1933,23 +2966,22 @@ static void DroppedItem_TickAll(struct ScheduledTask* task) {
 				e->Position.y += droppedItemVelocityY[i];
 				droppedItemVelocityY[i] -= MOB_GRAVITY;
 				e->next.pos.y = e->Position.y;
-				e->prev.pos.y = e->Position.y;
 			}
 		} else {
 			/* On ground: check if block below was removed */
+			float baseY = droppedItemGroundY[i] - DROPPED_ITEM_HOVER_HEIGHT;
 			bx = (int)Math_Floor(e->Position.x);
-			by = (int)Math_Floor(e->Position.y - 0.05f);
+			by = (int)Math_Floor(baseY - 0.05f);
 			bz = (int)Math_Floor(e->Position.z);
 			if (!World_Contains(bx, by, bz) || Blocks.Collide[World_GetBlock(bx, by, bz)] != COLLIDE_SOLID) {
 				droppedItemOnGround[i] = false;
 				droppedItemVelocityY[i] = 0.0f;
 			} else {
-				/* Apply hover animation */
+				/* Apply hover animation using stored ground Y as base */
 				droppedItemHoverTime[i] += delta;
-				hoverOffset = Math_SinF(droppedItemHoverTime[i] * MATH_PI * 2.0f) * 0.05f;
-				e->Position.y = e->next.pos.y + hoverOffset;
-				e->prev.pos.y = e->Position.y;
-				e->next.pos.y = e->Position.y;
+				hoverOffset = Math_SinF(droppedItemHoverTime[i] * MATH_PI * 2.0f) * DROPPED_ITEM_HOVER_AMPLITUDE;
+				e->Position.y  = droppedItemGroundY[i] + hoverOffset;
+				e->next.pos.y  = e->Position.y;
 			}
 		}
 
@@ -2261,10 +3293,18 @@ static void MobEntity_RenderModel(struct Entity* e, float delta, float t) {
 			e->prev.rotZ = mobDeathRotZ[id] * progress;
 			e->next.rotZ = mobDeathRotZ[id] * progress;
 		}
+
+		/* Zombie attack arm animation: tick timer for rendering */
+		if (mobAttackAnimTimer[id] > 0.0f) {
+			mobAttackAnimTimer[id] -= delta;
+			if (mobAttackAnimTimer[id] < 0.0f) mobAttackAnimTimer[id] = 0.0f;
+		}
 	}
 
 	/* Now call original NetPlayer RenderModel (lerp + render) - will get our angles */
+	Mob_CurrentRenderingId = id;
 	origNetPlayerVTABLE->RenderModel(e, delta, t);
+	Mob_CurrentRenderingId = -1;
 }
 
 static void Mob_ApplyGravity(struct Entity* e, float delta, int id) {
@@ -2439,7 +3479,7 @@ static void Skeleton_ShootArrow(struct Entity* skeleton, int skelId) {
 	arrowLifetime[slot] = 5.0f; /* 5 second flight lifetime */
 	arrowIsPlayerArrow[slot] = false;
 
-	Audio_PlayDigSound(SOUND_SHOOT); /* shoot.wav at 100% speed */
+	Mob_PlaySound(SOUND_SHOOT, spawnPos); /* shoot.wav at distance-attenuated volume */
 }
 
 /* Tick all active arrow projectiles */
@@ -2463,6 +3503,20 @@ static void Arrow_TickAll(float delta) {
 
 		/* If arrow is stuck in a block (velocity=0), just tick lifetime */
 		if (arrowVelocity[slot].x == 0.0f && arrowVelocity[slot].y == 0.0f && arrowVelocity[slot].z == 0.0f) {
+			/* Player arrows can be picked up in survival mode */
+			if (arrowIsPlayerArrow[slot] && Game_SurvivalMode) {
+				dx = e->Position.x - player->Position.x;
+				dy = e->Position.y - (player->Position.y + 0.9f);
+				dz = e->Position.z - player->Position.z;
+				distSq = dx * dx + dy * dy + dz * dz;
+				if (distSq < 2.25f) { /* 1.5 block radius */
+					/* Give player 1 arrow item */
+					SurvInv_AddItem(BLOCK_AIR, ITEM_ARROW, 1);
+					Entities_Remove(eid);
+					arrowActive[slot] = false;
+					continue;
+				}
+			}
 			arrowLifetime[slot] -= delta;
 			if (arrowLifetime[slot] <= 0.0f) {
 				Entities_Remove(eid);
@@ -2491,8 +3545,8 @@ static void Arrow_TickAll(float delta) {
 			arrowStuckBlock[slot].x = bx;
 			arrowStuckBlock[slot].y = by;
 			arrowStuckBlock[slot].z = bz;
-			arrowLifetime[slot] = 5.0f;
-			Audio_PlayDigSound(SOUND_ARROW);
+			arrowLifetime[slot] = arrowIsPlayerArrow[slot] ? 20.0f : 5.0f;
+			Mob_PlaySound(SOUND_ARROW, newPos);
 			{
 				struct LocationUpdate stickUpdate;
 				stickUpdate.flags = LU_HAS_POS;
@@ -2513,6 +3567,7 @@ static void Arrow_TickAll(float delta) {
 			distSq = dx * dx + dy * dy + dz * dz;
 			if (distSq < 1.0f) {
 				/* Hit the player: deal damage and remove arrow */
+				Player_Damage(Mob_GetDamageWithMultiplier(SKELETON_ARROW_PLAYER_DAMAGE));
 				{
 					/* Push player away from arrow */
 					float pushX = arrowVelocity[slot].x;
@@ -2523,7 +3578,6 @@ static void Arrow_TickAll(float delta) {
 						player->Velocity.z += (pushZ / pushDist) * 0.4f;
 						player->Velocity.y += 0.2f;
 					}
-					Audio_PlayDigSound(SOUND_HURT);
 				}
 				Entities_Remove(eid);
 				arrowActive[slot] = false;
@@ -2621,6 +3675,64 @@ static void Arrow_ScheduledTick(struct ScheduledTask* task) {
 	Arrow_TickAll((float)task->interval);
 }
 
+/* Player environmental damage tick (20 tps) */
+static void PlayerDamage_ScheduledTick(struct ScheduledTask* task) {
+	struct Entity* player;
+	float delta;
+
+	if (!Game_SurvivalMode) return;
+	if (Player_Health <= 0) return;
+	if (Gui_GetInputGrab()) return;
+
+	player = &Entities.CurPlayer->Base;
+	delta  = (float)task->interval;
+
+	/* Tick down invulnerability timer */
+	if (playerInvulnTimer > 0.0f) {
+		playerInvulnTimer -= delta;
+		if (playerInvulnTimer < 0.0f) playerInvulnTimer = 0.0f;
+	}
+
+	/* Fall damage tracking (water nullifies fall damage) */
+	if (Mob_IsInWater(player)) {
+		/* Reset fall start while in water so no fall damage accumulates */
+		playerFallStartY = player->Position.y;
+	} else if (!playerWasOnGround && player->OnGround) {
+		/* Just landed on solid ground */
+		int fallDist = (int)(playerFallStartY - player->Position.y);
+		if (fallDist > 3) {
+			Player_Damage(fallDist - 3);
+		}
+		playerFallStartY = player->Position.y;
+	} else if (playerWasOnGround && !player->OnGround) {
+		/* Just left ground */
+		playerFallStartY = player->Position.y;
+	}
+	playerWasOnGround = player->OnGround;
+
+	/* Lava damage: 5 damage per half second */
+	if (Mob_IsInLava(player)) {
+		playerLavaDamageTimer += delta;
+		if (playerLavaDamageTimer >= 0.5f) {
+			playerLavaDamageTimer -= 0.5f;
+			Player_Damage(5);
+		}
+	} else {
+		playerLavaDamageTimer = 0.0f;
+	}
+
+	/* Cactus damage: 1 damage per second */
+	if (Mob_IsTouchingCactus(player)) {
+		playerCactusDamageTimer += delta;
+		if (playerCactusDamageTimer >= 1.0f) {
+			playerCactusDamageTimer -= 1.0f;
+			Player_Damage(1);
+		}
+	} else {
+		playerCactusDamageTimer = 0.0f;
+	}
+}
+
 static void MobEntity_Tick(struct Entity* e, float delta) {
 	int id, j;
 	float dx, dy, dz, distSq, dist, rx, rz, rdist;
@@ -2653,7 +3765,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 						TNT_Explode(bx, by, bz);
 					} else if (mobCreeperVariant[id] == CREEPER_VAR_NUKE) {
 						TNT_ExplodeRadius(bx, by, bz, CREEPER_NUKE_POWER);
-						Audio_PlayDigSound(SOUND_EXPLODE_BIG);
+						Mob_PlaySound(SOUND_EXPLODE_BIG, e->Position);
 					}
 					/* CREEPER_VAR_STANDARD and CREEPER_VAR_MELEE: no death explosion */
 				} else if (Game_CreeperBehavior == CREEPER_EXPLODE_DEATH) {
@@ -2696,7 +3808,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				int bz = (int)Math_Floor(e->Position.z);
 				if (Game_CreeperVariants && mobCreeperVariant[id] == CREEPER_VAR_NUKE) {
 					TNT_ExplodeRadius(bx, by, bz, CREEPER_NUKE_POWER);
-					Audio_PlayDigSound(SOUND_EXPLODE_BIG);
+					Mob_PlaySound(SOUND_EXPLODE_BIG, e->Position);
 				} else {
 					TNT_Explode(bx, by, bz);
 				}
@@ -2734,7 +3846,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 			int sx = (int)Math_Floor(e->Position.x);
 			int sy = (int)Math_Floor(e->Position.y);
 			int sz = (int)Math_Floor(e->Position.z);
-			if (World_Contains(sx, sy, sz) && Lighting.IsLit(sx, sy, sz) && !Mob_IsInWater(e)) {
+			if (World_Contains(sx, sy, sz) && Lighting.IsLit(sx, sy, sz) && !Mob_IsInWater(e) && !DayNightCycle_IsNight()) {
 				mobSunDamageTimer[id] += delta;
 				if (mobSunDamageTimer[id] >= 1.0f) {
 					mobSunDamageTimer[id] -= 1.0f;
@@ -2951,7 +4063,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				if (useExplosionAI) {
 					if (distSq < CREEPER_ATTACK_RANGE_SQ && mobCreeperFuse[id] < 0.0f) {
 						mobCreeperFuse[id] = CREEPER_ATTACK_FUSE_TIME;
-						Audio_PlayDigSound(SOUND_FUSE);
+						Mob_PlaySound(SOUND_FUSE, e->Position);
 					}
 					/* Keep following player at 50% speed while fuse is lit */
 					if (mobCreeperFuse[id] >= 0.0f) {
@@ -3039,6 +4151,12 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 						mobSpiderLeapTimer[id] = SPIDER_LEAP_COOLDOWN;
 					}
 				}
+
+				/* Spider leap contact damage: deal 1.5x melee on contact while airborne */
+				if (!e->OnGround && distSq < SPIDER_LEAP_CONTACT_SQ) {
+					int leapDmg = Mob_GetDamageWithMultiplier((int)(MOB_MELEE_DAMAGE * SPIDER_LEAP_DAMAGE_MULT));
+					Player_Damage(leapDmg);
+				}
 			} else if (mobModelIdx[id] == MOB_IDX_ZOMBIE) {
 				/* Zombie: chase at configurable speed */
 				{
@@ -3051,6 +4169,34 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				Mob_MoveTowards(e, id, playerPos, MOB_SPEED * MOB_HOSTILE_SPEED_FACTOR, delta);
 				mobIsMoving[id] = true;
 			}
+
+			/* === Melee attack check for all aggro hostile mobs === */
+			mobMeleeTimer[id] -= delta;
+			if (distSq < MOB_MELEE_RANGE_SQ && mobMeleeTimer[id] <= 0.0f) {
+				cc_bool canMelee = false;
+				int meleeDmg = Mob_GetDamageWithMultiplier(MOB_MELEE_DAMAGE);
+
+				if (mobModelIdx[id] == MOB_IDX_ZOMBIE) {
+					canMelee = true;
+					mobAttackAnimTimer[id] = MOB_ATTACK_ANIM_DURATION;
+				} else if (mobModelIdx[id] == MOB_IDX_SPIDER) {
+					canMelee = true;
+				} else if (mobModelIdx[id] == MOB_IDX_CREEPER) {
+					/* Only melee variants (survtest, melee) do melee damage */
+					cc_bool isMeleeVariant = false;
+					if (Game_CreeperVariants) {
+						isMeleeVariant = (mobCreeperVariant[id] == CREEPER_VAR_SURVTEST || mobCreeperVariant[id] == CREEPER_VAR_MELEE);
+					} else {
+						isMeleeVariant = (Game_CreeperBehavior != CREEPER_EXPLOSION_ATK);
+					}
+					canMelee = isMeleeVariant;
+				}
+
+				if (canMelee) {
+					Player_Damage(meleeDmg);
+					mobMeleeTimer[id] = MOB_MELEE_COOLDOWN;
+				}
+			}
 		} else {
 				/* Not aggro: behave like passive mob (wander) */
 			if (mobWanderPause[id] > 0.0f) {
@@ -3059,6 +4205,9 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				Mob_PickWanderTarget(id, e);
 				if (!mobHasTarget[id]) {
 					mobWanderPause[id] = 2.0f;
+				} else {
+					mobLastStuckPos[id] = e->Position;
+					mobStuckTimer[id]   = 0.0f;
 				}
 			} else {
 				dx = mobWanderTarget[id].x - e->Position.x;
@@ -3073,6 +4222,23 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 					if (stuck) {
 						mobHasTarget[id]   = false;
 						mobWanderPause[id] = 0.3f + Random_Float(&mob_rng) * 0.5f;
+					}
+					/* Position-based stuck detection: if barely moved in 2 seconds, pick new target */
+					{
+						float sdx = e->Position.x - mobLastStuckPos[id].x;
+						float sdz = e->Position.z - mobLastStuckPos[id].z;
+						float sDistSq = sdx * sdx + sdz * sdz;
+						if (sDistSq < 0.25f) {
+							mobStuckTimer[id] += delta;
+							if (mobStuckTimer[id] >= 2.0f) {
+								mobHasTarget[id]   = false;
+								mobWanderPause[id] = 0.3f + Random_Float(&mob_rng) * 0.5f;
+								mobStuckTimer[id]  = 0.0f;
+							}
+						} else {
+							mobLastStuckPos[id] = e->Position;
+							mobStuckTimer[id]   = 0.0f;
+						}
 					}
 				}
 			}
@@ -3123,6 +4289,10 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 			Mob_PickWanderTarget(id, e);
 			if (!mobHasTarget[id]) {
 				mobWanderPause[id] = 2.0f; /* retry after 2 seconds */
+			} else {
+				/* Reset stuck tracking when picking a new target */
+				mobLastStuckPos[id] = e->Position;
+				mobStuckTimer[id]   = 0.0f;
 			}
 		} else {
 			/* Move towards wander target */
@@ -3140,6 +4310,23 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				if (stuck) {
 					mobHasTarget[id]   = false;
 					mobWanderPause[id] = 0.3f + Random_Float(&mob_rng) * 0.5f;
+				}
+				/* Position-based stuck detection: if barely moved in 2 seconds, pick new target */
+				{
+					float sdx = e->Position.x - mobLastStuckPos[id].x;
+					float sdz = e->Position.z - mobLastStuckPos[id].z;
+					float sDistSq = sdx * sdx + sdz * sdz;
+					if (sDistSq < 0.25f) {
+						mobStuckTimer[id] += delta;
+						if (mobStuckTimer[id] >= 2.0f) {
+							mobHasTarget[id]   = false;
+							mobWanderPause[id] = 0.3f + Random_Float(&mob_rng) * 0.5f;
+							mobStuckTimer[id]  = 0.0f;
+						}
+					} else {
+						mobLastStuckPos[id] = e->Position;
+						mobStuckTimer[id]   = 0.0f;
+					}
 				}
 			}
 		}
@@ -3192,6 +4379,25 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 	}
 }
 
+/* ---- Mob sound helper: distance-attenuated dig sounds ---- */
+static void Mob_PlaySound(cc_uint8 type, Vec3 mobPos) {
+	struct Entity* pe = &Entities.CurPlayer->Base;
+	float dx = mobPos.x - pe->Position.x;
+	float dy = mobPos.y - pe->Position.y;
+	float dz = mobPos.z - pe->Position.z;
+	float distSq = dx * dx + dy * dy + dz * dz;
+	int vol;
+
+	if (distSq < 1.0f) {
+		vol = Audio_SoundsVolume;
+	} else if (distSq < 400.0f) { /* within 20 blocks */
+		vol = (int)(Audio_SoundsVolume * (1.0f - Math_SqrtF(distSq) / 20.0f));
+	} else {
+		return; /* too far away to hear */
+	}
+	if (vol > 0) Audio_PlayDigSoundVolume(type, vol);
+}
+
 /* ---- Mob health/damage system ---- */
 cc_bool Mob_IsMob(int id) {
 	return id >= 0 && id < MAX_NET_PLAYERS && mobType[id] != MOB_TYPE_NONE;
@@ -3199,6 +4405,13 @@ cc_bool Mob_IsMob(int id) {
 
 cc_bool Mob_IsCreeper(int id) {
 	return Mob_IsMob(id) && mobModelIdx[id] == MOB_IDX_CREEPER;
+}
+
+int Mob_CurrentRenderingId = -1;
+
+float Mob_GetAttackAnim(int entityId) {
+	if (!Mob_IsMob(entityId)) return 0.0f;
+	return mobAttackAnimTimer[entityId];
 }
 
 void Mob_TriggerCreeperChainExplosion(int id) {
@@ -3217,7 +4430,7 @@ void Mob_TriggerCreeperChainExplosion(int id) {
 	mobDeathRotZ[id]  = (Random_Float(&mob_rng) < 0.5f) ? 90.0f : -90.0f;
 	mobHasTarget[id]  = false;
 	mobIsMoving[id]   = false;
-	Audio_PlayDigSound(SOUND_FUSE);
+	if (Entities.List[id]) Mob_PlaySound(SOUND_FUSE, Entities.List[id]->Position);
 }
 
 void Mob_DamageMob(int id, int damage, cc_bool fromPlayer) {
@@ -3251,14 +4464,183 @@ void Mob_DamageMob(int id, int damage, cc_bool fromPlayer) {
 		float deathDuration = 0.5f;
 
 		/* Play mob-specific death sound (NOT hurt sound) */
-		switch (mobModelIdx[id]) {
-			case MOB_IDX_SKELETON: Audio_PlayDigSound(SOUND_SKELETON_DEATH); break;
-			case MOB_IDX_CREEPER:  Audio_PlayDigSound(SOUND_CREEPER_DEATH);  break;
-			case MOB_IDX_SPIDER:   Audio_PlayDigSound(SOUND_SPIDER_DEATH);   break;
-			case MOB_IDX_ZOMBIE:   Audio_PlayDigSound(SOUND_ZOMBIE_DEATH);   break;
-			case MOB_IDX_PIG:      Audio_PlayDigSound(SOUND_PIG_DEATH);      break;
-			case MOB_IDX_SHEEP:    Audio_PlayDigSound(SOUND_SHEEP);          break;
-			default:               Audio_PlayDigSound(SOUND_HURT);           break;
+		if (e) {
+			switch (mobModelIdx[id]) {
+				case MOB_IDX_SKELETON: Mob_PlaySound(SOUND_SKELETON_DEATH, e->Position); break;
+				case MOB_IDX_CREEPER:  Mob_PlaySound(SOUND_CREEPER_DEATH,  e->Position); break;
+				case MOB_IDX_SPIDER:   Mob_PlaySound(SOUND_SPIDER_DEATH,   e->Position); break;
+				case MOB_IDX_ZOMBIE:   Mob_PlaySound(SOUND_ZOMBIE_DEATH,   e->Position); break;
+				case MOB_IDX_PIG:      Mob_PlaySound(SOUND_PIG_DEATH,      e->Position); break;
+				case MOB_IDX_SHEEP:    Mob_PlaySound(SOUND_SHEEP,          e->Position); break;
+				default:               Mob_PlaySound(SOUND_HURT,           e->Position); break;
+			}
+		}
+
+		/* Drop loot in survival mode */
+		if (Game_SurvivalMode && e) {
+			Vec3 dropPos;
+			int lootCount, lootSlot;
+			cc_bool goldSword = (fromPlayer && Hotbar_SelectedItem == ITEM_GOLD_SWORD);
+			dropPos.x = e->Position.x;
+			dropPos.y = e->Position.y + 0.3f;
+			dropPos.z = e->Position.z;
+
+			switch (mobModelIdx[id]) {
+				case MOB_IDX_ZOMBIE:
+					/* Zombie: 0-3 feathers (gold sword: always 3) */
+					lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+					if (lootCount > 0) {
+						lootSlot = DropItem_FindFreeSlot();
+						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+						if (lootSlot != -1) {
+							DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_FEATHER);
+							droppedItemCount[lootSlot] = lootCount;
+							droppedItemPickupDelay[lootSlot] = 0.0f;
+							DropItem_ApplyRandomMomentum(lootSlot);
+						}
+					}
+					break;
+				case MOB_IDX_SKELETON:
+					/* Skeleton: 0-3 arrows (gold sword: always 3) */
+					lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+					if (lootCount > 0) {
+						lootSlot = DropItem_FindFreeSlot();
+						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+						if (lootSlot != -1) {
+							DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_ARROW);
+							droppedItemCount[lootSlot] = lootCount;
+							droppedItemPickupDelay[lootSlot] = 0.0f;
+							DropItem_ApplyRandomMomentum(lootSlot);
+						}
+					}
+					break;
+				case MOB_IDX_SPIDER:
+					/* Spider (both types): 0-3 string (gold sword: always 3) */
+					lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+					if (lootCount > 0) {
+						lootSlot = DropItem_FindFreeSlot();
+						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+						if (lootSlot != -1) {
+							DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_STRING);
+							droppedItemCount[lootSlot] = lootCount;
+							droppedItemPickupDelay[lootSlot] = 0.0f;
+							DropItem_ApplyRandomMomentum(lootSlot);
+						}
+					}
+					break;
+				case MOB_IDX_CREEPER:
+					/* Creeper loot depends on variant or global behavior */
+					if (Game_CreeperVariants) {
+						if (mobCreeperVariant[id] == CREEPER_VAR_STANDARD || mobCreeperVariant[id] == CREEPER_VAR_NUKE) {
+							/* Explosion variants: 0-3 sulphur (gold sword: always 3) */
+							lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+							if (lootCount > 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_SULPHUR);
+									droppedItemCount[lootSlot] = lootCount;
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						} else if (mobCreeperVariant[id] == CREEPER_VAR_SURVTEST) {
+							/* Survtest: explodes on death, 1 in 10 chance TNT */
+							if (Random_Next(&mob_rng, 10) == 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_TNT, false, 0);
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						} else if (mobCreeperVariant[id] == CREEPER_VAR_MELEE) {
+							/* Melee variant (don't explode): 0-3 flint (gold sword: always 3) */
+							lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+							if (lootCount > 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_FLINT);
+									droppedItemCount[lootSlot] = lootCount;
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						}
+					} else {
+						/* Global creeper behavior setting */
+						if (Game_CreeperBehavior == CREEPER_EXPLOSION_ATK) {
+							/* Explode on attack (default): 0-3 sulphur (gold sword: always 3) */
+							lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+							if (lootCount > 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_SULPHUR);
+									droppedItemCount[lootSlot] = lootCount;
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						} else if (Game_CreeperBehavior == CREEPER_EXPLODE_DEATH) {
+							/* Explode on death: 1 in 10 chance TNT */
+							if (Random_Next(&mob_rng, 10) == 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_TNT, false, 0);
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						} else {
+							/* Don't explode: 0-3 flint (gold sword: always 3) */
+							lootCount = goldSword ? 3 : Random_Next(&mob_rng, 4);
+							if (lootCount > 0) {
+								lootSlot = DropItem_FindFreeSlot();
+								if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+								if (lootSlot != -1) {
+									DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_FLINT);
+									droppedItemCount[lootSlot] = lootCount;
+									droppedItemPickupDelay[lootSlot] = 0.0f;
+									DropItem_ApplyRandomMomentum(lootSlot);
+								}
+							}
+						}
+					}
+					break;
+				case MOB_IDX_PIG:
+					/* Pig: 0-2 raw pork (gold sword: always 2) */
+					lootCount = goldSword ? 2 : Random_Next(&mob_rng, 3);
+					if (lootCount > 0) {
+						lootSlot = DropItem_FindFreeSlot();
+						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+						if (lootSlot != -1) {
+							DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_RAW_PORK);
+							droppedItemCount[lootSlot] = lootCount;
+							droppedItemPickupDelay[lootSlot] = 0.0f;
+							DropItem_ApplyRandomMomentum(lootSlot);
+						}
+					}
+					break;
+				case MOB_IDX_SHEEP:
+					/* Sheep: drop 1-3 wool if not yet sheared (gold sword: always 3) */
+					if (!mobSheepSheared[id]) {
+						int woolCount = goldSword ? 3 : Random_Next(&mob_rng, 3) + 1;
+						mobSheepSheared[id] = true;
+						lootSlot = DropItem_FindFreeSlot();
+						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+						if (lootSlot != -1) {
+							DropItem_Spawn(lootSlot, dropPos, BLOCK_WHITE, false, 0);
+							droppedItemCount[lootSlot] = woolCount;
+							droppedItemPickupDelay[lootSlot] = 0.0f;
+							DropItem_ApplyRandomMomentum(lootSlot);
+						}
+					}
+					break;
+			}
 		}
 
 		if (mobModelIdx[id] == MOB_IDX_CREEPER) {
@@ -3277,14 +4659,40 @@ void Mob_DamageMob(int id, int damage, cc_bool fromPlayer) {
 		mobIsMoving[id]   = false;
 	} else {
 		/* Play mob-specific hurt sound */
-		switch (mobModelIdx[id]) {
-			case MOB_IDX_SKELETON: Audio_PlayDigSound(SOUND_SKELETON_HURT); break;
-			case MOB_IDX_CREEPER:  Audio_PlayDigSound(SOUND_CREEPER_HURT);  break;
-			case MOB_IDX_SPIDER:   Audio_PlayDigSound(SOUND_SPIDER_HURT);   break;
-			case MOB_IDX_ZOMBIE:   Audio_PlayDigSound(SOUND_ZOMBIE_HURT);   break;
-			case MOB_IDX_PIG:      Audio_PlayDigSound(SOUND_PIG_HURT);      break;
-			case MOB_IDX_SHEEP:    Audio_PlayDigSound(SOUND_SHEEP);         break;
-			default:               Audio_PlayDigSound(SOUND_HURT);          break;
+		if (e) {
+			switch (mobModelIdx[id]) {
+				case MOB_IDX_SKELETON: Mob_PlaySound(SOUND_SKELETON_HURT, e->Position); break;
+				case MOB_IDX_CREEPER:  Mob_PlaySound(SOUND_CREEPER_HURT,  e->Position); break;
+				case MOB_IDX_SPIDER:   Mob_PlaySound(SOUND_SPIDER_HURT,   e->Position); break;
+				case MOB_IDX_ZOMBIE:   Mob_PlaySound(SOUND_ZOMBIE_HURT,   e->Position); break;
+				case MOB_IDX_PIG:      Mob_PlaySound(SOUND_PIG_HURT,      e->Position); break;
+				case MOB_IDX_SHEEP:    Mob_PlaySound(SOUND_SHEEP,         e->Position); break;
+				default:               Mob_PlaySound(SOUND_HURT,          e->Position); break;
+			}
+		}
+
+		/* Sheep wool shearing: on first hit, drop 1-3 white cloth and remove wool layer */
+		if (Game_SurvivalMode && e && mobModelIdx[id] == MOB_IDX_SHEEP && !mobSheepSheared[id]) {
+			cc_bool goldSwordShear = (fromPlayer && Hotbar_SelectedItem == ITEM_GOLD_SWORD);
+			int woolCount = goldSwordShear ? 3 : Random_Next(&mob_rng, 3) + 1;
+			Vec3 woolPos;
+			int woolSlot;
+			mobSheepSheared[id] = true;
+			{
+				cc_string shearedModel = String_FromReadonly("sheep_nofur");
+				Entity_SetModel(e, &shearedModel);
+			}
+			woolPos.x = e->Position.x;
+			woolPos.y = e->Position.y + 0.3f;
+			woolPos.z = e->Position.z;
+			woolSlot = DropItem_FindFreeSlot();
+			if (woolSlot == -1) woolSlot = DropItem_EvictOldest();
+			if (woolSlot != -1) {
+				DropItem_Spawn(woolSlot, woolPos, BLOCK_WHITE, false, 0);
+				droppedItemCount[woolSlot] = woolCount;
+				droppedItemPickupDelay[woolSlot] = 0.0f;
+				DropItem_ApplyRandomMomentum(woolSlot);
+			}
 		}
 	}
 }
@@ -3312,6 +4720,7 @@ void Mob_RemoveAllMobs(void) {
 			mobLavaDamageTimer[i] = 0.0f;
 			mobCactusDamageTimer[i] = 0.0f;
 			mobCreeperVariant[i] = CREEPER_VAR_STANDARD;
+			mobSheepSheared[i] = false;
 		}
 	}
 	/* Remove all active arrows */
@@ -3326,13 +4735,16 @@ void Mob_RemoveAllMobs(void) {
 /* Try to punch a mob with empty hand. Returns true if a mob was hit. */
 static cc_bool Mob_TryPunchMob(void) {
 	struct Entity* p = &Entities.CurPlayer->Base;
-	int targetId;
+	int targetId, damage, itemId;
 
-	/* Only punch with empty hand */
-	if (Inventory_SelectedBlock != BLOCK_AIR) return false;
+	/* Can attack with empty hand or while holding an item (not a block) */
+	if (Inventory_SelectedBlock != BLOCK_AIR && Hotbar_SelectedItem == ITEM_NONE) return false;
 
 	targetId = Entities_GetClosest(p);
 	if (targetId < 0 || !Mob_IsMob(targetId)) return false;
+
+	/* Mob is invulnerable during hurt flash (red tint) */
+	if (mobHurtFlash[targetId] > 0.0f) return false;
 
 	/* Range check: max 4 blocks */
 	{
@@ -3346,7 +4758,17 @@ static cc_bool Mob_TryPunchMob(void) {
 	/* Play punch animation */
 	HeldBlockRenderer_ClickAnim(true);
 
-	Mob_DamageMob(targetId, 2, true);
+	/* Determine damage from held item */
+	itemId = Hotbar_SelectedItem;
+	if (itemId > ITEM_NONE && itemId < ITEM_COUNT) {
+		damage = ItemDamage[itemId];
+		if (damage <= 0) damage = ITEM_BARE_HAND_DAMAGE;
+	} else {
+		/* Creative mode: instant kill with bare hand */
+		damage = Game_SurvivalMode ? ITEM_BARE_HAND_DAMAGE : 100;
+	}
+
+	Mob_DamageMob(targetId, damage, true);
 	return true;
 }
 
@@ -3441,6 +4863,7 @@ static void SpawnRandomMob(void) {
 	mobLavaDamageTimer[id] = 0.0f;
 	mobCactusDamageTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_STANDARD;
+	mobSheepSheared[id] = false;
 
 	/* Set model */
 	model = String_FromReadonly(mobModelNames[idx]);
@@ -3460,8 +4883,8 @@ static void SpawnRandomMob(void) {
 		}
 	}
 
-	/* 15% chance for brown spider variant (hostile type, passive behavior) */
-	if (idx == MOB_IDX_SPIDER && Game_SpiderVariants && Random_Next(&mob_rng, 100) < 15) {
+	/* 3% chance for brown spider variant (hostile type, passive behavior) */
+	if (idx == MOB_IDX_SPIDER && Game_SpiderVariants && Random_Next(&mob_rng, 100) < 3) {
 		model = String_FromReadonly("spiderb");
 		Entity_SetModel(&np->Base, &model);
 		mobIsBrownSpider[id] = true;
@@ -3546,6 +4969,7 @@ static cc_bool SpawnMobAt(Vec3 spawnPos, int idx) {
 	mobIsBrownSpider[id] = false;
 	mobSunDamageTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_STANDARD;
+	mobSheepSheared[id] = false;
 
 	model = String_FromReadonly(mobModelNames[idx]);
 	Entity_SetModel(&np->Base, &model);
@@ -3567,8 +4991,8 @@ static cc_bool SpawnMobAt(Vec3 spawnPos, int idx) {
 		/* else: standard variant (50%), uses default creeper model */
 	}
 
-	/* 15% chance for brown spider variant (hostile type, passive behavior) */
-	if (idx == MOB_IDX_SPIDER && Game_SpiderVariants && Random_Next(&mob_rng, 100) < 15) {
+	/* 3% chance for brown spider variant (hostile type, passive behavior) */
+	if (idx == MOB_IDX_SPIDER && Game_SpiderVariants && Random_Next(&mob_rng, 100) < 3) {
 		model = String_FromReadonly("spiderb");
 		Entity_SetModel(&np->Base, &model);
 		mobIsBrownSpider[id] = true;
@@ -3586,8 +5010,80 @@ static cc_bool SpawnMobAt(Vec3 spawnPos, int idx) {
 	return true;
 }
 
+/* Spawn a mob at a specific entity ID and position (used by save/load).
+   Unlike SpawnMobAt, this takes a fixed entity ID and skips solid-block validation. */
+void Mob_SpawnAt(int id, int modelIdx, Vec3 pos) {
+	struct NetPlayer* np;
+	struct LocationUpdate update;
+	cc_string model, name;
+
+	if (!mob_rng_inited) {
+		Random_SeedFromCurrentTime(&mob_rng);
+		mob_rng_inited = true;
+	}
+
+	if (id < 0 || id >= MAX_NET_PLAYERS) return;
+	if (modelIdx < 0 || modelIdx >= (int)Array_Elems(mobModelNames)) return;
+
+	/* Remove existing entity at this slot if any */
+	if (Entities.List[id]) {
+		Entities_Remove((EntityID)id);
+	}
+
+	np = &NetPlayers_List[id];
+	NetPlayer_Init(np);
+
+	if (!mob_vtable_inited) {
+		origNetPlayerVTABLE = np->Base.VTABLE;
+		mobEntity_VTABLE    = *origNetPlayerVTABLE;
+		mobEntity_VTABLE.Tick        = MobEntity_Tick;
+		mobEntity_VTABLE.RenderModel = MobEntity_RenderModel;
+		mobEntity_VTABLE.GetCol      = MobEntity_GetCol;
+		mob_vtable_inited            = true;
+	}
+	np->Base.VTABLE = &mobEntity_VTABLE;
+
+	Entities.List[id] = &np->Base;
+	Event_RaiseInt(&EntityEvents.Added, id);
+
+	mobType[id]        = mobIsHostile[modelIdx] ? MOB_TYPE_HOSTILE : MOB_TYPE_PASSIVE;
+	mobHealth[id]      = Mob_GetHealthWithMultiplier(mobIsHostile[modelIdx] ? MOB_HP_HOSTILE : MOB_HP_PASSIVE);
+	mobHasTarget[id]   = false;
+	mobWanderPause[id] = 0.5f;
+	mobDeathTimer[id]  = 0.0f;
+	mobHurtFlash[id]   = 0.0f;
+	mobIsAggro[id]     = false;
+	mobModelIdx[id]    = (cc_uint8)modelIdx;
+	mobCreeperFuse[id] = -1.0f;
+	mobSkeletonShootTimer[id] = SKELETON_SHOOT_COOLDOWN;
+	mobWalkBackwards[id] = false;
+	mobTargetYaw[id] = 0.0f;
+	mobSpiderLeapTimer[id] = SPIDER_LEAP_COOLDOWN;
+	mobFallStartY[id] = pos.y;
+	mobIsBrownSpider[id] = false;
+	mobSunDamageTimer[id] = 0.0f;
+	mobCreeperVariant[id] = CREEPER_VAR_STANDARD;
+	mobFacingYaw[id] = 0.0f;
+	mobSheepSheared[id] = false;
+
+	model = String_FromReadonly(mobModelNames[modelIdx]);
+	Entity_SetModel(&np->Base, &model);
+
+	name = String_FromReadonly(mobDisplayNames[modelIdx]);
+	Entity_SetName(&np->Base, &name);
+
+	Mem_Set(&update, 0, sizeof(update));
+	update.flags = LU_HAS_POS | LU_HAS_YAW | LU_HAS_PITCH;
+	update.pos   = pos;
+	update.yaw   = 0.0f;
+	update.pitch = 0.0f;
+	np->Base.VTABLE->SetLocation(&np->Base, &update);
+}
+
 static cc_bool BindTriggered_SpawnMob(int key, struct InputDevice* device) {
 	if (Gui.InputGrab) return false;
+	/* Block mob spawning in survival unless cheats enabled */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) return false;
 	SpawnRandomMob();
 	return true;
 }
@@ -3654,6 +5150,7 @@ static void BoomCommand_Execute(const cc_string* args, int argsCount) {
 	mobLavaDamageTimer[id] = 0.0f;
 	mobCactusDamageTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_NUKE;
+	mobSheepSheared[id] = false;
 
 	model = String_FromReadonly("creeperc");
 	Entity_SetModel(&np->Base, &model);
@@ -3807,7 +5304,12 @@ static void Mob_NaturalSpawnTick(struct ScheduledTask* task) {
 	/* Try to spawn a group of hostile mobs */
 	if (Game_EnemySpawning && hostileCount < 20) {
 		/* lightMode: 0 = no restriction, 1 = must be shadow */
-		lightMode = Game_LightRestrictSpawning ? 1 : 0;
+		/* During night (near full darkness), hostiles can spawn on surface too */
+		if (DayNightCycle_IsDark()) {
+			lightMode = 0;
+		} else {
+			lightMode = Game_LightRestrictSpawning ? 1 : 0;
+		}
 		groupSize = 1 + Random_Next(&mob_rng, 5); /* 1-5 */
 		for (i = 0; i < groupSize && hostileCount < 20; i++) {
 			/* Pick a random hostile mob (creeper=2, spider=3, zombie=4, skeleton=5) */
@@ -3876,7 +5378,7 @@ static void Player_ShootArrow(void) {
 
 	arrowActive[slot]   = true;
 	arrowEntityId[slot] = id;
-	arrowLifetime[slot] = 5.0f;
+	arrowLifetime[slot] = 20.0f;
 	arrowIsPlayerArrow[slot] = true;
 
 	Audio_PlayDigSound(SOUND_SHOOT);
@@ -3891,7 +5393,13 @@ static void OnInputDown(void* obj, int key, cc_bool was, struct InputDevice* dev
 #ifndef CC_BUILD_WEB
 	if (key == device->escapeButton && (s = Gui_GetClosable())) {
 		/* Don't want holding down escape to go in and out of pause menu */
-		if (!was) Gui_Remove(s);
+		if (!was) {
+			Gui_Remove(s);
+			/* Return to death screen if player is dead */
+			if (Player_Health <= 0 && Game_SurvivalMode) {
+				DeathScreen_Show();
+			}
+		}
 		return;
 	}
 #endif
@@ -3901,10 +5409,9 @@ static void OnInputDown(void* obj, int key, cc_bool was, struct InputDevice* dev
 	} else if (InputBind_Claims(BIND_SCREENSHOT, key, device) && !was) {
 		Game_ScreenshotRequested = true; return;
 	}
-	
-	/* TAB key shoots arrow - must be before bind loop and screen handlers
-	   to prevent tab list screen from consuming the event */
-	if (key == CCKEY_TAB && !was && !Gui.InputGrab) {
+
+	/* TAB key shoots arrow in creative mode */
+	if (key == CCKEY_TAB && !was && !Gui.InputGrab && !Game_SurvivalMode) {
 		Player_ShootArrow();
 		return;
 	}
@@ -3967,7 +5474,9 @@ static void OnInputUp(void* obj, int key, cc_bool was, struct InputDevice* devic
 	/* done in key up, the cursor disappears as expected. */
 	if (key == CCKEY_ESCAPE && (s = Gui_GetClosable())) {
 		if (suppressEscape) { suppressEscape = false; return; }
-		Gui_Remove(s); return;
+		Gui_Remove(s);
+		if (Player_Health <= 0 && Game_SurvivalMode) DeathScreen_Show();
+		return;
 	}
 #endif
 
@@ -4030,6 +5539,285 @@ static void PlayerInputNormal(struct LocalPlayer* p, float* xMoving, float* zMov
 }
 static struct LocalPlayerInput normalInput = { PlayerInputNormal };
 
+/*########################################################################################################################*
+*------------------------------------------------Block breaking crack overlay-------------------------------------------*
+*#########################################################################################################################*/
+#define CRACK_NUM_VERTICES (6 * 4)
+
+static void BlockBreaking_BuildCrackMesh(void) {
+	struct VertexTextured* v;
+	TextureRec rec;
+	TextureLoc texLoc;
+	int atlasIdx;
+	float offset, x1, y1, z1, x2, y2, z2;
+	PackedCol col;
+
+	texLoc = 240 + breaking_crackStage;
+	rec    = Atlas1D_TexRec(texLoc, 1, &atlasIdx);
+	offset = 0.002f;
+	col    = PackedCol_Make(255, 255, 255, 220);
+
+	/* Use block bounding box for non-full blocks (slabs, etc.) */
+	x1 = (float)breaking_pos.x + Blocks.MinBB[breaking_block].x - offset;
+	y1 = (float)breaking_pos.y + Blocks.MinBB[breaking_block].y - offset;
+	z1 = (float)breaking_pos.z + Blocks.MinBB[breaking_block].z - offset;
+	x2 = (float)breaking_pos.x + Blocks.MaxBB[breaking_block].x + offset;
+	y2 = (float)breaking_pos.y + Blocks.MaxBB[breaking_block].y + offset;
+	z2 = (float)breaking_pos.z + Blocks.MaxBB[breaking_block].z + offset;
+
+	v = (struct VertexTextured*)Gfx_LockDynamicVb(crack_vb,
+				VERTEX_FORMAT_TEXTURED, CRACK_NUM_VERTICES);
+
+	/* FACE_YMIN (bottom) */
+	v->x = x1; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x1; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x2; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+	v->x = x2; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+
+	/* FACE_YMAX (top) */
+	v->x = x1; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x1; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x2; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+	v->x = x2; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+
+	/* FACE_ZMIN (north) */
+	v->x = x1; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+	v->x = x2; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x2; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x1; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+
+	/* FACE_ZMAX (south) */
+	v->x = x2; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+	v->x = x1; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x1; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x2; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+
+	/* FACE_XMIN (west) */
+	v->x = x1; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+	v->x = x1; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x1; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x1; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+
+	/* FACE_XMAX (east) */
+	v->x = x2; v->y = y2; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v1; v++;
+	v->x = x2; v->y = y2; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v1; v++;
+	v->x = x2; v->y = y1; v->z = z2; v->Col = col; v->U = rec.u1; v->V = rec.v2; v++;
+	v->x = x2; v->y = y1; v->z = z1; v->Col = col; v->U = rec.u2; v->V = rec.v2; v++;
+
+	Gfx_UnlockDynamicVb(crack_vb);
+	Gfx_BindTexture(Atlas1D.TexIds[atlasIdx]);
+}
+
+void BlockBreaking_RenderCrack(void) {
+	if (!breaking_active || breaking_crackStage < 0) return;
+	if (Gfx.LostContext) return;
+
+	if (!crack_vb)
+		crack_vb = Gfx_CreateDynamicVb(VERTEX_FORMAT_TEXTURED, CRACK_NUM_VERTICES);
+
+	Gfx_SetAlphaBlending(true);
+	Gfx_SetDepthWrite(false);
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
+
+	BlockBreaking_BuildCrackMesh();
+	Gfx_DrawVb_IndexedTris(CRACK_NUM_VERTICES);
+
+	Gfx_SetDepthWrite(true);
+	Gfx_SetAlphaBlending(false);
+}
+
+
+static void BlockBreaking_OnHeldChanged(void* obj) {
+	float newTime;
+	if (!breaking_active) return;
+	newTime = CalcBreakTime(breaking_block);
+	if (newTime < 0.0f) {
+		BlockBreaking_Reset();
+	} else if (newTime > 0.001f) {
+		/* Scale progress to new total time (keep time already spent) */
+		float spent = breaking_progress * breaking_totalTime;
+		breaking_totalTime = newTime;
+		breaking_progress  = spent / newTime;
+		if (breaking_progress > 1.0f) breaking_progress = 1.0f;
+	}
+}
+
+static void BlockBreaking_ContextLost(void* obj) {
+	Gfx_DeleteDynamicVb(&crack_vb);
+}
+
+static void Furnace_ScheduledTick(struct ScheduledTask* task) {
+	Furnace_TickAll(task->interval);
+}
+
+/*########################################################################################################################*
+*---------------------------------------------------Day/Night Cycle-------------------------------------------------------*
+*#########################################################################################################################*/
+/* Cycle phase timing (in seconds) */
+#define DN_DAY_END     600.0f   /* 10 minutes of daylight */
+#define DN_SUNSET_END  650.0f   /* + 50 seconds sunset transition */
+#define DN_NIGHT_END  1130.0f   /* + 8 minutes of night */
+#define DN_CYCLE_END  1180.0f   /* + 50 seconds sunrise transition */
+#define DN_TRANSITION_DURATION 50.0f
+
+/* Night sky/fog/cloud target colors */
+#define DN_NIGHT_SKY_COL    PackedCol_Make(5,   5,   8,   255)
+#define DN_NIGHT_FOG_COL    PackedCol_Make(8,   8,   12,  255)
+#define DN_NIGHT_CLOUDS_COL PackedCol_Make(15,  15,  20,  255)
+
+static cc_bool  dn_active;
+static float    dn_timer;
+static PackedCol dn_origSunCol, dn_origSkyCol, dn_origFogCol, dn_origCloudsCol, dn_origShadowCol;
+static PackedCol dn_lastSunCol;      /* avoid redundant Env_SetSunCol calls */
+static PackedCol dn_lastShadowCol;   /* avoid redundant Env_SetShadowCol calls */
+
+static PackedCol DayNight_LerpColor(PackedCol a, PackedCol b, float t) {
+	int r = (int)(PackedCol_R(a) + (PackedCol_R(b) - PackedCol_R(a)) * t);
+	int g = (int)(PackedCol_G(a) + (PackedCol_G(b) - PackedCol_G(a)) * t);
+	int bl = (int)(PackedCol_B(a) + (PackedCol_B(b) - PackedCol_B(a)) * t);
+	if (r < 0) r = 0; if (r > 255) r = 255;
+	if (g < 0) g = 0; if (g > 255) g = 255;
+	if (bl < 0) bl = 0; if (bl > 255) bl = 255;
+	return PackedCol_Make(r, g, bl, 255);
+}
+
+static cc_bool DayNightCycle_IsNight(void) {
+	return dn_active && dn_timer >= DN_DAY_END && dn_timer < DN_CYCLE_END;
+}
+
+/* Stricter check: only true when nearly or fully dark (for hostile spawning) */
+static cc_bool DayNightCycle_IsDark(void) {
+	/* Start spawning when sunset is 90% complete, stop when sunrise is 90% complete */
+	float sunsetThreshold = DN_DAY_END + DN_TRANSITION_DURATION * 0.9f;
+	float sunriseStopAt   = DN_NIGHT_END + DN_TRANSITION_DURATION * 0.1f;
+	return dn_active && dn_timer >= sunsetThreshold && dn_timer < sunriseStopAt;
+}
+
+static void DayNight_ApplyColors(float t) {
+	/* t: 0.0 = full day, 1.0 = full night */
+	/* Night sun target: slightly darker than shadow color (~80% of original shadow brightness) */
+	PackedCol nightSunTarget = PackedCol_Make(
+		PackedCol_R(dn_origShadowCol) * 4 / 5,
+		PackedCol_G(dn_origShadowCol) * 4 / 5,
+		PackedCol_B(dn_origShadowCol) * 4 / 5, 255);
+	/* Night shadow target: same as sun at night */
+	PackedCol nightShadowTarget = nightSunTarget;
+	PackedCol sunCol    = DayNight_LerpColor(dn_origSunCol,    nightSunTarget,      t);
+	PackedCol shadowCol = DayNight_LerpColor(dn_origShadowCol, nightShadowTarget,   t);
+	PackedCol skyCol    = DayNight_LerpColor(dn_origSkyCol,    DN_NIGHT_SKY_COL,    t);
+	PackedCol fogCol    = DayNight_LerpColor(dn_origFogCol,    DN_NIGHT_FOG_COL,    t);
+	PackedCol cloudsCol = DayNight_LerpColor(dn_origCloudsCol, DN_NIGHT_CLOUDS_COL, t);
+
+	/* Only update sun/shadow colors if changed (triggers expensive chunk rebuild) */
+	if (sunCol != dn_lastSunCol) {
+		dn_lastSunCol = sunCol;
+		Env_SetSunCol(sunCol);
+	}
+	if (shadowCol != dn_lastShadowCol) {
+		dn_lastShadowCol = shadowCol;
+		Env_SetShadowCol(shadowCol);
+	}
+	/* Sky/fog/clouds are cheap to update */
+	Env_SetSkyCol(skyCol);
+	Env_SetFogCol(fogCol);
+	Env_SetCloudsCol(cloudsCol);
+}
+
+static void DayNightCycle_Tick(struct ScheduledTask* task) {
+	float t;
+	if (!dn_active) return;
+
+	dn_timer += (float)task->interval;
+
+	while (dn_timer >= DN_CYCLE_END) {
+		dn_timer -= DN_CYCLE_END; /* wrap around */
+	}
+
+	if (dn_timer < DN_DAY_END) {
+		/* Daytime: full original colors */
+		DayNight_ApplyColors(0.0f);
+	} else if (dn_timer < DN_SUNSET_END) {
+		/* Sunset transition */
+		t = (dn_timer - DN_DAY_END) / DN_TRANSITION_DURATION;
+		DayNight_ApplyColors(t);
+	} else if (dn_timer < DN_NIGHT_END) {
+		/* Night: full dark */
+		DayNight_ApplyColors(1.0f);
+	} else {
+		/* Sunrise transition */
+		t = 1.0f - (dn_timer - DN_NIGHT_END) / DN_TRANSITION_DURATION;
+		DayNight_ApplyColors(t);
+	}
+}
+
+void DayNightCycle_Enable(void) {
+	if (!World.Loaded) return;
+
+	/* Capture current environment colors as "daytime" originals */
+	dn_origSunCol    = Env.SunCol;
+	dn_origShadowCol = Env.ShadowCol;
+	dn_origSkyCol    = Env.SkyCol;
+	dn_origFogCol    = Env.FogCol;
+	dn_origCloudsCol = Env.CloudsCol;
+	dn_lastSunCol    = Env.SunCol;
+	dn_lastShadowCol = Env.ShadowCol;
+	dn_timer         = 0.0f;
+	dn_active        = true;
+}
+
+void DayNightCycle_SetTimer(float time) {
+	dn_timer = time;
+	/* Immediately apply the colors for the new time */
+	if (!dn_active) return;
+	if (dn_timer < DN_DAY_END) {
+		DayNight_ApplyColors(0.0f);
+	} else if (dn_timer < DN_SUNSET_END) {
+		DayNight_ApplyColors((dn_timer - DN_DAY_END) / DN_TRANSITION_DURATION);
+	} else if (dn_timer < DN_NIGHT_END) {
+		DayNight_ApplyColors(1.0f);
+	} else {
+		DayNight_ApplyColors(1.0f - (dn_timer - DN_NIGHT_END) / DN_TRANSITION_DURATION);
+	}
+}
+
+void DayNightCycle_RestoreOriginalColors(void) {
+	if (!dn_active) return;
+	/* Temporarily set env to original daytime colors (for saving .cw) */
+	Env.SunCol    = dn_origSunCol;
+	Env.ShadowCol = dn_origShadowCol;
+	Env.SkyCol    = dn_origSkyCol;
+	Env.FogCol    = dn_origFogCol;
+	Env.CloudsCol = dn_origCloudsCol;
+}
+
+void DayNightCycle_ReapplyCurrentColors(void) {
+	if (!dn_active) return;
+	/* Re-apply colors for the current timer position */
+	dn_lastSunCol    = 0;
+	dn_lastShadowCol = 0;
+	if (dn_timer < DN_DAY_END) {
+		DayNight_ApplyColors(0.0f);
+	} else if (dn_timer < DN_SUNSET_END) {
+		DayNight_ApplyColors((dn_timer - DN_DAY_END) / DN_TRANSITION_DURATION);
+	} else if (dn_timer < DN_NIGHT_END) {
+		DayNight_ApplyColors(1.0f);
+	} else {
+		DayNight_ApplyColors(1.0f - (dn_timer - DN_NIGHT_END) / DN_TRANSITION_DURATION);
+	}
+}
+
+void DayNightCycle_Disable(void) {
+	if (dn_active && World.Loaded) {
+		/* Restore original daytime colors */
+		Env_SetSunCol(dn_origSunCol);
+		Env_SetShadowCol(dn_origShadowCol);
+		Env_SetSkyCol(dn_origSkyCol);
+		Env_SetFogCol(dn_origFogCol);
+		Env_SetCloudsCol(dn_origCloudsCol);
+	}
+	dn_active = false;
+}
+
 static void OnInit(void) {
 	LocalPlayerInput_Add(&normalInput);
 	LocalPlayerInput_Add(&gamepadInput);
@@ -4037,7 +5825,10 @@ static void OnInit(void) {
 
 	ScheduledTask_Add(1.0 / 20, Arrow_ScheduledTick);
 	ScheduledTask_Add(1.0 / 20.0, DroppedItem_TickAll);
+	ScheduledTask_Add(1.0 / 20.0, PlayerDamage_ScheduledTick);
 	ScheduledTask_Add(1.0, Mob_NaturalSpawnTick);
+	ScheduledTask_Add(1.0 / 20.0, Furnace_ScheduledTick);
+	ScheduledTask_Add(2.0, DayNightCycle_Tick);
 
 	Commands_Register(&BoomCommand);
 
@@ -4049,6 +5840,8 @@ static void OnInit(void) {
 	Event_Register_(&InputEvents.Up2,     NULL, OnInputUp);
 
 	Event_Register_(&UserEvents.HackPermsChanged, NULL, InputHandler_CheckZoomFov);
+	Event_Register_(&UserEvents.HeldBlockChanged, NULL, BlockBreaking_OnHeldChanged);
+	Event_Register_(&GfxEvents.ContextLost, NULL, BlockBreaking_ContextLost);
 	StoredHotkeys_LoadAll();
 
 	Bind_OnTriggered[BIND_FORWARD] = Player_TriggerUp;
@@ -4062,18 +5855,305 @@ static void OnInit(void) {
 	Bind_OnReleased[BIND_RIGHT]   = Player_ReleaseRight;
 }
 
+/*########################################################################################################################*
+*-------------------------------------------------World settings save/load----------------------------------------------*
+*#########################################################################################################################*/
+/* Extensible key-value format for per-world settings.
+ * Version 1 layout:
+ *   [0]     version (1 byte)
+ *   [1-3]   reserved (3 bytes)
+ *   [4-7]   Player_Health (4 bytes, int)
+ *   [8-11]  dn_timer (4 bytes, float)
+ *   [12]    Game_SurvivalMode (1 byte, bool)
+ *   [13]    Game_DaylightCycle (1 byte, bool)
+ *   [14]    Player_CheatsEnabled (1 byte, bool)
+ *   [15]    reserved (1 byte)
+ */
+#define WORLDSETTINGS_VERSION 1
+#define WORLDSETTINGS_SIZE    16
+
+void WorldSettings_SaveToFile(const cc_string* path) {
+	cc_uint8 buf[WORLDSETTINGS_SIZE];
+	struct Stream stream;
+	cc_filepath raw;
+	cc_result res;
+
+	Platform_EncodePath(&raw, path);
+	res = Stream_CreatePath(&stream, &raw);
+	if (res) { Logger_IOWarn2(res, "saving world settings", &raw); return; }
+
+	Mem_Set(buf, 0, WORLDSETTINGS_SIZE);
+	buf[0] = WORLDSETTINGS_VERSION;
+	Mem_Copy(buf + 4,  &Player_Health, 4);
+	Mem_Copy(buf + 8,  &dn_timer, 4);
+	buf[12] = Game_SurvivalMode ? 1 : 0;
+	buf[13] = Game_DaylightCycle ? 1 : 0;
+	buf[14] = Player_CheatsEnabled ? 1 : 0;
+	buf[15] = 0;
+
+	Stream_Write(&stream, buf, WORLDSETTINGS_SIZE);
+	stream.Close(&stream);
+}
+
+void WorldSettings_LoadFromFile(const cc_string* path) {
+	cc_uint8 buf[WORLDSETTINGS_SIZE];
+	struct Stream stream;
+	cc_filepath raw;
+	cc_result res;
+	float savedTimer;
+
+	Platform_EncodePath(&raw, path);
+	res = Stream_OpenPath(&stream, &raw);
+	if (res) return; /* File doesn't exist = new world, use defaults */
+
+	Stream_Read(&stream, buf, WORLDSETTINGS_SIZE);
+	stream.Close(&stream);
+
+	if (buf[0] != WORLDSETTINGS_VERSION) return;
+
+	/* Restore player health */
+	Mem_Copy(&Player_Health, buf + 4, 4);
+	if (Player_Health < 0) Player_Health = 0;
+	if (Player_Health > PLAYER_MAX_HEALTH) Player_Health = PLAYER_MAX_HEALTH;
+
+	/* Restore day/night timer */
+	Mem_Copy(&savedTimer, buf + 8, 4);
+	if (dn_active && savedTimer >= 0.0f) {
+		DayNightCycle_SetTimer(savedTimer);
+	}
+
+	/* Restore game mode flags */
+	Game_SurvivalMode = buf[12];
+	Game_DaylightCycle = buf[13];
+	Player_CheatsEnabled = buf[14];
+
+	/* Re-apply survival mode hacks restriction */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) {
+		Entities.CurPlayer->Hacks.Enabled = false;
+		HacksComp_Update(&Entities.CurPlayer->Hacks);
+	}
+}
+
+/*########################################################################################################################*
+*-------------------------------------------------Entity save/load-------------------------------------------------*
+*#########################################################################################################################*/
+#define ENTITY_SAVE_VERSION 1
+
+void Entities_SaveToFile(const cc_string* path) {
+	cc_uint8 buf[64];
+	struct Stream stream;
+	cc_filepath raw;
+	cc_result res;
+	struct Entity* e;
+	int i, numMobs = 0, numDrops = 0;
+
+	Platform_EncodePath(&raw, path);
+	res = Stream_CreatePath(&stream, &raw);
+	if (res) { Logger_IOWarn2(res, "saving entities", &raw); return; }
+
+	/* Header */
+	buf[0] = ENTITY_SAVE_VERSION;
+	buf[1] = buf[2] = buf[3] = 0;
+	Stream_Write(&stream, buf, 4);
+
+	/* Count active mobs */
+	for (i = 0; i < MAX_NET_PLAYERS; i++) {
+		if (mobType[i] != MOB_TYPE_NONE && Entities.List[i]) numMobs++;
+	}
+	Stream_Write(&stream, (cc_uint8*)&numMobs, 4);
+
+	/* Write each active mob */
+	for (i = 0; i < MAX_NET_PLAYERS; i++) {
+		if (mobType[i] == MOB_TYPE_NONE) continue;
+		e = Entities.List[i];
+		if (!e) continue;
+
+		/* entityId(1), mobType(1), modelIdx(1), creeperVar(1),
+		   posXYZ(12), yaw(4), health(4), isAggro(1) = 25 bytes */
+		buf[0] = (cc_uint8)i;
+		buf[1] = mobType[i];
+		buf[2] = mobModelIdx[i];
+		buf[3] = mobCreeperVariant[i];
+		Mem_Copy(buf + 4,  &e->Position.x, 4);
+		Mem_Copy(buf + 8,  &e->Position.y, 4);
+		Mem_Copy(buf + 12, &e->Position.z, 4);
+		Mem_Copy(buf + 16, &mobFacingYaw[i], 4);
+		Mem_Copy(buf + 20, &mobHealth[i], 4);
+		buf[24] = mobIsAggro[i] ? 1 : 0;
+		Stream_Write(&stream, buf, 25);
+	}
+
+	/* Count active drops */
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		if (droppedItemActive[i] && Entities.List[droppedItemEntityId[i]]) numDrops++;
+	}
+	Stream_Write(&stream, (cc_uint8*)&numDrops, 4);
+
+	/* Write each active drop */
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		struct Entity* de;
+		if (!droppedItemActive[i]) continue;
+		de = Entities.List[droppedItemEntityId[i]];
+		if (!de) continue;
+
+		/* posXYZ(12), block(2), isItem(1), itemId(4), count(4), lifetime(4), velXYZ(12) = 39 bytes */
+		Mem_Copy(buf + 0,  &de->Position.x, 4);
+		Mem_Copy(buf + 4,  &de->Position.y, 4);
+		Mem_Copy(buf + 8,  &de->Position.z, 4);
+		Mem_Copy(buf + 12, &droppedItemBlock[i], 2);
+		buf[14] = droppedItemIsItem[i] ? 1 : 0;
+		Mem_Copy(buf + 15, &droppedItemItemId[i], 4);
+		Mem_Copy(buf + 19, &droppedItemCount[i], 4);
+		Mem_Copy(buf + 23, &droppedItemLifetime[i], 4);
+		Mem_Copy(buf + 27, &droppedItemVelocityX[i], 4);
+		Mem_Copy(buf + 31, &droppedItemVelocityY[i], 4);
+		Mem_Copy(buf + 35, &droppedItemVelocityZ[i], 4);
+		Stream_Write(&stream, buf, 39);
+	}
+
+	stream.Close(&stream);
+}
+
+void Entities_LoadFromFile(const cc_string* path) {
+	cc_uint8 buf[64];
+	struct Stream stream;
+	cc_filepath raw;
+	cc_result res;
+	int i, numMobs, numDrops;
+	int entityId, slot;
+	Vec3 pos;
+	BlockID block;
+	float lifetime;
+
+	Platform_EncodePath(&raw, path);
+	res = Stream_OpenPath(&stream, &raw);
+	if (res) return; /* File doesn't exist = no saved entities */
+
+	/* Header */
+	Stream_Read(&stream, buf, 4);
+	if (buf[0] != ENTITY_SAVE_VERSION) { stream.Close(&stream); return; }
+
+	/* Clear existing mob state */
+	for (i = 0; i < MAX_NET_PLAYERS; i++) {
+		if (mobType[i] != MOB_TYPE_NONE && Entities.List[i]) {
+			Entities_Remove((EntityID)i);
+		}
+		mobType[i] = MOB_TYPE_NONE;
+	}
+
+	/* Clear existing drops */
+	for (i = 0; i < MAX_DROPPED_ITEMS; i++) {
+		if (droppedItemActive[i]) {
+			Entities_Remove(droppedItemEntityId[i]);
+			droppedItemActive[i] = false;
+		}
+	}
+
+	/* Clear existing arrows */
+	for (i = 0; i < MAX_ARROWS; i++) {
+		if (arrowActive[i]) {
+			Entities_Remove(arrowEntityId[i]);
+			arrowActive[i] = false;
+		}
+	}
+
+	/* Read mobs */
+	Stream_Read(&stream, (cc_uint8*)&numMobs, 4);
+	for (i = 0; i < numMobs; i++) {
+		Stream_Read(&stream, buf, 25);
+		entityId = buf[0];
+
+		Mem_Copy(&pos.x, buf + 4,  4);
+		Mem_Copy(&pos.y, buf + 8,  4);
+		Mem_Copy(&pos.z, buf + 12, 4);
+
+		/* Spawn mob at saved position with saved model index */
+		Mob_SpawnAt(entityId, buf[2], pos);
+
+		/* Override with saved state */
+		mobType[entityId] = buf[1];
+		mobCreeperVariant[entityId] = buf[3];
+		Mem_Copy(&mobFacingYaw[entityId], buf + 16, 4);
+		Mem_Copy(&mobHealth[entityId], buf + 20, 4);
+		mobIsAggro[entityId] = buf[24];
+
+		/* Restore creeper/spider variant model if needed */
+		if (buf[2] == MOB_IDX_CREEPER && Entities.List[entityId]) {
+			cc_string model;
+			if (buf[3] == CREEPER_VAR_SURVTEST) {
+				model = String_FromReadonly("creepera");
+				Entity_SetModel(Entities.List[entityId], &model);
+			} else if (buf[3] == CREEPER_VAR_MELEE) {
+				model = String_FromReadonly("creeperb");
+				Entity_SetModel(Entities.List[entityId], &model);
+			}
+		}
+	}
+
+	/* Read drops */
+	Stream_Read(&stream, (cc_uint8*)&numDrops, 4);
+	for (i = 0; i < numDrops; i++) {
+		int itemId, count;
+		cc_bool isItem;
+
+		Stream_Read(&stream, buf, 39);
+		Mem_Copy(&pos.x, buf + 0,  4);
+		Mem_Copy(&pos.y, buf + 4,  4);
+		Mem_Copy(&pos.z, buf + 8,  4);
+		Mem_Copy(&block, buf + 12, 2);
+		isItem = buf[14];
+		Mem_Copy(&itemId, buf + 15, 4);
+		Mem_Copy(&count,  buf + 19, 4);
+		Mem_Copy(&lifetime, buf + 23, 4);
+
+		slot = DropItem_FindFreeSlot();
+		if (slot == -1) slot = DropItem_EvictOldest();
+		if (slot == -1) continue;
+
+		DropItem_Spawn(slot, pos, block, isItem, itemId);
+		droppedItemCount[slot] = count;
+		droppedItemLifetime[slot] = lifetime;
+		droppedItemPickupDelay[slot] = 0.0f;
+
+		/* Restore velocity */
+		Mem_Copy(&droppedItemVelocityX[slot], buf + 27, 4);
+		Mem_Copy(&droppedItemVelocityY[slot], buf + 31, 4);
+		Mem_Copy(&droppedItemVelocityZ[slot], buf + 35, 4);
+	}
+
+	stream.Close(&stream);
+}
+
+
 static void OnFree(void) {
 	HotkeysText.count = 0;
+	Gfx_DeleteDynamicVb(&crack_vb);
 }
 
 static void OnNewMap(void) {
 	Mob_RemoveAllMobs();
 	mobSpawnTimer = 0.0f;
+	BlockBreaking_Reset();
+	dn_active = false;
+	/* Reset player damage state */
+	playerLavaDamageTimer   = 0.0f;
+	playerCactusDamageTimer = 0.0f;
+	playerFallStartY        = 0.0f;
+	playerWasOnGround       = true;
+	playerInvulnTimer       = 0.0f;
+}
+
+static void OnNewMapLoaded(void) {
+	/* Auto-start day/night cycle if enabled and not in hell/cave theme */
+	if (Game_DaylightCycle && !Gen_GetTheme()->hasShadowCeiling) {
+		DayNightCycle_Enable();
+	}
 }
 
 struct IGameComponent InputHandler_Component = {
-	OnInit,   /* Init  */
-	OnFree,   /* Free  */
-	NULL,     /* Reset */
-	OnNewMap, /* OnNewMap */
+	OnInit,          /* Init  */
+	OnFree,          /* Free  */
+	NULL,            /* Reset */
+	OnNewMap,        /* OnNewMap */
+	OnNewMapLoaded   /* OnNewMapLoaded */
 };

@@ -14,6 +14,7 @@
 #include "Utils.h"
 #include "Logger.h"
 #include "Entity.h"
+#include "EntityComponents.h"
 #include "Chat.h"
 #include "Commands.h"
 #include "Drawer2D.h"
@@ -62,6 +63,7 @@ cc_bool Game_AllowServerTextures;
 cc_bool Game_EnemySpawning;
 cc_bool Game_PassiveSpawning;
 cc_bool Game_SurvivalMode;
+cc_bool Player_CheatsEnabled;
 int     Game_CreeperBehavior;
 cc_bool Game_SpiderWallclimb;
 cc_bool Game_SkeletonShoot;
@@ -71,9 +73,11 @@ cc_bool Game_CreeperVariants;
 int     Game_ZombieSpeed;
 int     Game_MobSpawnRate;
 cc_bool Game_LightRestrictSpawning;
+cc_bool Game_DaylightCycle;
 int     Game_MobLightSensitivity;
 int     Game_MobHealthMultiplier;
 int     Game_MobDamageMultiplier;
+int     Player_Health = PLAYER_MAX_HEALTH;
 cc_bool Game_Anaglyph3D;
 
 cc_bool Game_ViewBobbing, Game_HideGui;
@@ -336,6 +340,14 @@ static void HandleOnNewMapLoaded(void* obj) {
 	for (comp = comps_head; comp; comp = comp->next) {
 		if (comp->OnNewMapLoaded) comp->OnNewMapLoaded();
 	}
+	/* Reset player health when a new map is loaded */
+	Player_Health = PLAYER_MAX_HEALTH;
+	Player_CheatsEnabled = false;
+	/* Disable hacks in survival mode by default */
+	if (Game_SurvivalMode) {
+		Entities.CurPlayer->Hacks.Enabled = false;
+		HacksComp_Update(&Entities.CurPlayer->Hacks);
+	}
 }
 
 static void HandleInactiveChanged(void* obj) {
@@ -394,6 +406,7 @@ static void LoadOptions(void) {
 	Game_ZombieSpeed         = Options_GetInt(OPT_ZOMBIE_SPEED,       0, 3, 2);
 	Game_MobSpawnRate        = Options_GetInt(OPT_MOB_SPAWN_RATE,     0, 4, 2);
 	Game_LightRestrictSpawning = Options_GetBool(OPT_LIGHT_RESTRICT_SPAWN, false);
+	Game_DaylightCycle         = Options_GetBool(OPT_DAYLIGHT_CYCLE, false);
 	Game_MobLightSensitivity   = Options_GetInt(OPT_MOB_LIGHT_SENSITIVITY, 0, 2, 0);
 	Game_MobHealthMultiplier   = Options_GetInt(OPT_MOB_HEALTH_MULTIPLIER, 0, 3, 1);
 	Game_MobDamageMultiplier   = Options_GetInt(OPT_MOB_DAMAGE_MULTIPLIER, 0, 3, 1);
@@ -586,6 +599,7 @@ static void Render3DFrame(float delta, float t) {
 	if (Game_SelectedPos.valid && !Game_HideGui) {
 		SelOutlineRenderer_Render(&Game_SelectedPos, true);
 	}
+	if (!Game_HideGui) BlockBreaking_RenderCrack();
 
 	/* Render water over translucent blocks when under the water outside the map for proper alpha blending */
 	pos = Camera.CurrentPos;
@@ -601,6 +615,7 @@ static void Render3DFrame(float delta, float t) {
 	/* is drawn without writing to the depth buffer */
 	if (Game_SelectedPos.valid && !Game_HideGui && Blocks.Draw[Game_SelectedPos.block] == DRAW_TRANSLUCENT) {
 		SelOutlineRenderer_Render(&Game_SelectedPos, false);
+		BlockBreaking_RenderCrack();
 	}
 
 	Selections_Render();

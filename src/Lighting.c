@@ -13,7 +13,7 @@
 #include "Options.h"
 #include "Builder.h"
 
-const char* const LightingMode_Names[LIGHTING_MODE_COUNT] = { "Classic", "Fancy" };
+const char* const LightingMode_Names[LIGHTING_MODE_COUNT] = { "Classic", "Fancy", "Advanced" };
 
 cc_uint8 Lighting_Mode;
 cc_bool  Lighting_ModeLockedByServer;
@@ -35,6 +35,8 @@ void Lighting_SetMode(cc_uint8 mode, cc_bool fromServer) {
 *#########################################################################################################################*/
 static cc_int16* classic_heightmap;
 static cc_uint8* torch_lightmap;
+/* Fixed torch colors - always full white, independent of day/night cycle */
+static PackedCol Torch_Col, Torch_XSide, Torch_ZSide, Torch_YMin;
 #define HEIGHT_UNCALCULATED Int16_MaxValue
 #define TORCH_LIGHT_RADIUS 4
 
@@ -194,50 +196,50 @@ static void TorchLight_ScanWorld(void) {
 
 static PackedCol ClassicLighting_Color(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunCol;
-	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunCol;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Torch_Col;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol SmoothLighting_Color(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunCol;
 	if (Blocks.Brightness[World_GetBlock(x, y, z)]) return Env.SunCol;
-	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunCol;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Torch_Col;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_XSide(int x, int y, int z) {
 	if (!World_Contains(x, y, z)) return Env.SunXSide;
-	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Env.SunXSide;
+	if (torch_lightmap && torch_lightmap[World_Pack(x, y, z)]) return Torch_XSide;
 	return y > ClassicLighting_GetLightHeight(x, z) ? Env.SunXSide : Env.ShadowXSide;
 }
 
 static PackedCol ClassicLighting_Color_Sprite_Fast(int x, int y, int z) {
 	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
-		return Env.SunCol;
+		return Torch_Col;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMax_Fast(int x, int y, int z) {
 	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
-		return Env.SunCol;
+		return Torch_Col;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunCol : Env.ShadowCol;
 }
 
 static PackedCol ClassicLighting_Color_YMin_Fast(int x, int y, int z) {
 	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
-		return Env.SunYMin;
+		return Torch_YMin;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunYMin : Env.ShadowYMin;
 }
 
 static PackedCol ClassicLighting_Color_XSide_Fast(int x, int y, int z) {
 	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
-		return Env.SunXSide;
+		return Torch_XSide;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunXSide : Env.ShadowXSide;
 }
 
 static PackedCol ClassicLighting_Color_ZSide_Fast(int x, int y, int z) {
 	if (torch_lightmap && World_Contains(x, y, z) && torch_lightmap[World_Pack(x, y, z)])
-		return Env.SunZSide;
+		return Torch_ZSide;
 	return y > classic_heightmap[Lighting_Pack(x, z)] ? Env.SunZSide : Env.ShadowZSide;
 }
 
@@ -575,7 +577,9 @@ static void ClassicLighting_SetActive(void) {
 *---------------------------------------------------Lighting component----------------------------------------------------*
 *#########################################################################################################################*/
 static void Lighting_ApplyActive(void) {
-	if (Lighting_Mode != LIGHTING_MODE_CLASSIC) {
+	if (Lighting_Mode == LIGHTING_MODE_ADVANCED) {
+		AdvancedLighting_SetActive();
+	} else if (Lighting_Mode == LIGHTING_MODE_FANCY) {
 		FancyLighting_SetActive();
 	} else {
 		ClassicLighting_SetActive();
@@ -607,7 +611,12 @@ static void OnInit(void) {
 	Lighting_ModeUserCached = Lighting_Mode;
 
 	FancyLighting_OnInit();
+	AdvancedLighting_OnInit();
 	Lighting_ApplyActive();
+
+	/* Initialize fixed torch colors (always white, regardless of sun color) */
+	Torch_Col = PACKEDCOL_WHITE;
+	PackedCol_GetShaded(Torch_Col, &Torch_XSide, &Torch_ZSide, &Torch_YMin);
 
 	Event_Register_(&WorldEvents.LightingModeChanged, NULL, Lighting_HandleModeChanged);
 }

@@ -272,6 +272,8 @@ extern const cc_result ReturnCode_DirectoryExists;
 
 /* Attempts to create a new directory. */
 CC_API cc_result Directory_Create2(const cc_filepath* path);
+/* Attempts to remove an empty directory. */
+cc_result Directory_Remove(const cc_filepath* path);
 /* Callback function invoked for each file found. */
 typedef void (*Directory_EnumCallback)(const cc_string* filename, void* obj, int isDirectory);
 /* Invokes a callback function on all filenames in the given directory (and its sub-directories) */

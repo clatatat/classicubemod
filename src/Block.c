@@ -52,9 +52,9 @@ static const struct SimpleBlockDef invalid_blockDef = {
 };
 
 /* Extra block definitions for survival mode blocks */
-static const struct SimpleBlockDef door_ns_top_def = {"Door NS Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
-static const struct SimpleBlockDef door_ew_bottom_def = {"Door EW Bottom", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
-static const struct SimpleBlockDef door_ew_top_def = {"Door EW Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef door_ns_top_def = {"Door NS Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef door_ew_bottom_def = {"Door EW Bottom", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef door_ew_top_def = {"Door EW Top", 81, 81, 81, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef lit_red_ore_dust_def = {"Lit Red Ore Dust", 100, 102, 102, 1, FOG_NONE, 0, BRIT_FULL, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
 static const struct SimpleBlockDef red_ore_torch_off_def = {"Red Ore Torch Off", 115, 115, 115, 11, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef red_torch_wall_on_def = {"Red Torch Wall On", 99, 99, 99, 11, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
@@ -68,6 +68,7 @@ static const struct SimpleBlockDef iron_door_def = {"Iron Door", 55, 55, 55, 16,
 static const struct SimpleBlockDef double_chest_def = {"Double Chest", 26, 27, 26, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef shadow_ceiling_def = {"Shadow Ceiling", 0, 0, 0, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_GAS, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
 static const struct SimpleBlockDef snowy_grass_def = {"Snowy Grass", 116, 118, 2, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS, SOUND_SNOW};
+static const struct SimpleBlockDef stone_plate_pressed_def = {"Stone Pressure Plate Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
 
 /* Properties for all built-in blocks (Classic and CPE blocks) */
 static const struct SimpleBlockDef core_blockDefs[] = {
@@ -139,7 +140,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Chest",            26, 27, 26, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD,   SOUND_WOOD   },
 { "Cobweb",           11, 11, 11, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_CLOTH,  SOUND_NONE   },
 { "Ladder",           83, 83, 83, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_CLIMB, SOUND_WOOD, SOUND_WOOD },
-{ "Door",             97, 97, 97, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE },
+{ "Door",             97, 97, 97, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD },
 { "Red Ore Dust",     84, 86, 86, 1,  FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },
 { "Torch",            80, 80, 80, 10, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_WOOD,   SOUND_WOOD   },
 { "Red Ore Torch",    99, 99, 99, 11, FOG_NONE ,   0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_WOOD,   SOUND_WOOD   },
@@ -150,6 +151,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Snow",            116,116,116,  2, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_SNOW,  SOUND_SNOW   },
 { "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_ICE, SOUND_GLASS, SOUND_STONE  },
 { "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
+{ "Stone Pressure Plate", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },
 
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
 /*                    TEX ES  TOM GHT            ITY   NESS      LIGHT  ITY                                                         */
@@ -334,7 +336,8 @@ static cc_bool IsLeverOn(BlockID block) {
 
 /* Helper: check if a block is any kind of pressure plate (pressed or unpressed) */
 static cc_bool IsPressurePlate(BlockID block) {
-	return block == BLOCK_PRESSURE_PLATE || block == BLOCK_PRESSURE_PLATE_PRESSED;
+	return block == BLOCK_PRESSURE_PLATE || block == BLOCK_PRESSURE_PLATE_PRESSED
+		|| block == BLOCK_STONE_PLATE || block == BLOCK_STONE_PLATE_PRESSED;
 }
 
 /* Helper: check if a block is any iron door variant */
@@ -681,7 +684,13 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 	
 	/* Get textures for this block type */
 	if (block == BLOCK_FURNACE) {
-		frontTex = 46; sideTex = 47; topTex = 1; bottomTex = 1;
+		/* Use lit front texture (63) if this furnace is actively smelting */
+		if (Furnace_IsActiveAt(x, y, z)) {
+			frontTex = 63;
+		} else {
+			frontTex = 46;
+		}
+		sideTex = 47; topTex = 1; bottomTex = 1;
 	} else if (block == BLOCK_CHEST) {
 		frontTex = 44; sideTex = 27; topTex = 26; bottomTex = 26;
 	} else if (block == BLOCK_LADDER) {
@@ -1061,8 +1070,9 @@ static void Block_CalcStretch(BlockID block) {
 
 	/* Redstone dust and torches use position-dependent dynamic rendering, so */
 	/*  adjacent blocks must never be merged into a single stretch */
+	/* Furnaces and chests have unique face textures that differ per-block */
 	if (block == BLOCK_RED_ORE_DUST || block == BLOCK_LIT_RED_ORE_DUST ||
-	    IsAnyTorch(block)) {
+	    IsAnyTorch(block) || block == BLOCK_FURNACE || block == BLOCK_CHEST) {
 		Blocks.CanStretch[block] = 0;
 	}
 
@@ -1258,6 +1268,8 @@ void Block_ResetProps(BlockID block) {
 		def = &shadow_ceiling_def;
 	} else if (block == BLOCK_SNOWY_GRASS) {
 		def = &snowy_grass_def;
+	} else if (block == BLOCK_STONE_PLATE_PRESSED) {
+		def = &stone_plate_pressed_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1451,13 +1463,13 @@ void Block_ResetProps(BlockID block) {
 		Vec3_Set(Blocks.MaxBB[block], 11.0f/16.0f, 12.0f/16.0f, 1);
 		Vec3_Set(Blocks.RenderMinBB[block], 5.0f/16.0f, 4.0f/16.0f, 13.0f/16.0f);
 		Vec3_Set(Blocks.RenderMaxBB[block], 11.0f/16.0f, 12.0f/16.0f, 1);
-	} else if (block == BLOCK_PRESSURE_PLATE) {
+	} else if (block == BLOCK_PRESSURE_PLATE || block == BLOCK_STONE_PLATE) {
 		/* Unpressed pressure plate: full width, 2 pixels tall */
 		Vec3_Set(Blocks.MinBB[block], 1.0f/16.0f, 0, 1.0f/16.0f);
 		Vec3_Set(Blocks.MaxBB[block], 15.0f/16.0f, 2.0f/16.0f, 15.0f/16.0f);
 		Vec3_Set(Blocks.RenderMinBB[block], 1.0f/16.0f, 0, 1.0f/16.0f);
 		Vec3_Set(Blocks.RenderMaxBB[block], 15.0f/16.0f, 2.0f/16.0f, 15.0f/16.0f);
-	} else if (block == BLOCK_PRESSURE_PLATE_PRESSED) {
+	} else if (block == BLOCK_PRESSURE_PLATE_PRESSED || block == BLOCK_STONE_PLATE_PRESSED) {
 		/* Pressed pressure plate: full width, 1 pixel tall (pushed down) */
 		Vec3_Set(Blocks.MinBB[block], 1.0f/16.0f, 0, 1.0f/16.0f);
 		Vec3_Set(Blocks.MaxBB[block], 15.0f/16.0f, 1.0f/16.0f, 15.0f/16.0f);
@@ -1801,6 +1813,9 @@ static void OnReset(void) {
 	
 	/* Remove pressed pressure plate from inventory (auto-placed by physics) */
 	Inventory_Remove(BLOCK_PRESSURE_PLATE_PRESSED);
+	
+	/* Remove pressed stone pressure plate from inventory (auto-placed by physics) */
+	Inventory_Remove(BLOCK_STONE_PLATE_PRESSED);
 	
 	/* Remove iron door variants from inventory (auto-placed by physics/redstone) */
 	Inventory_Remove(BLOCK_IRON_DOOR_NS_TOP);

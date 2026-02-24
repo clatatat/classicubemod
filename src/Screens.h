@@ -28,12 +28,18 @@ void Screen_NullUpdate(void* screen, float delta);
 
 void InventoryScreen_Show(void);
 void InventoryScreen_Hide(void);
+void ItemInventoryScreen_Show(void);
+void SurvivalInventoryScreen_Show(void);
+void CraftingTableScreen_Show(void);
+void FurnaceScreen_Show(void);
+void ChestScreen_Show(void);
 void HUDScreen_Show(void);
 void LoadingScreen_Show(const cc_string* title, const cc_string* message);
 void GeneratingScreen_Show(void);
 void ChatScreen_Show(void);
 void SpecialTextScreen_Show(void);
 void DisconnectScreen_Show(const cc_string* title, const cc_string* message);
+void DeathScreen_Show(void);
 #ifdef CC_BUILD_TOUCH
 void TouchScreen_Refresh(void);
 void TouchScreen_Show(void);

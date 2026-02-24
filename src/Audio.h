@@ -49,9 +49,11 @@ extern const cc_string Sounds_ZipPathCC;
 void Audio_SetMusic(int volume);
 void Audio_SetSounds(int volume);
 void Audio_PlayDigSound(cc_uint8 type);
+void Audio_PlayDigSoundVolume(cc_uint8 type, int volume);
 void Audio_PlayDigSoundRate(cc_uint8 type, int rate);
 void Audio_PlayStepSound(cc_uint8 type);
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume);
+void Audio_PlayStepSoundRate(cc_uint8 type, int rate, int volume);
 #define AUDIO_MAX_BUFFERS 4
 
 cc_bool AudioBackend_Init(void);

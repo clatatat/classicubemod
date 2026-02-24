@@ -465,12 +465,63 @@ static void HotbarWidget_RenderEntries(struct HotbarWidget* w, int offset) {
 	IsometricDrawer_Render(w->verticesCount, offset, w->state);
 }
 
+/* Stack count texture cache for hotbar */
+static struct FontDesc hotbar_countFont;
+static struct Texture  hotbar_countTex[MAX_STACK_SIZE + 1];
+static cc_bool         hotbar_countTexValid[MAX_STACK_SIZE + 1];
+static cc_bool         hotbar_countFontValid;
+
+static void Hotbar_EnsureCountTex(int count) {
+	struct DrawTextArgs args;
+	cc_string str; char buf[8];
+
+	if (count < 2 || count > MAX_STACK_SIZE) return;
+	if (hotbar_countTexValid[count]) return;
+
+	if (!hotbar_countFontValid) {
+		Font_Make(&hotbar_countFont, 16, FONT_FLAGS_NONE);
+		hotbar_countFontValid = true;
+	}
+
+	String_InitArray(str, buf);
+	String_AppendInt(&str, count);
+	DrawTextArgs_Make(&args, &str, &hotbar_countFont, true);
+	Drawer2D_MakeTextTexture(&hotbar_countTex[count], &args);
+	hotbar_countTexValid[count] = true;
+}
+
+static void Hotbar_RenderCounts(struct HotbarWidget* w) {
+	int i, x, y, count;
+	struct Texture tex;
+
+	if (!Game_SurvivalMode) return;
+
+	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		if (i == HOTBAR_MAX_INDEX && Gui_TouchUI) continue;
+
+		count = Hotbar_GetCount(i);
+		if (count < 2) continue;
+
+		Hotbar_EnsureCountTex(count);
+		tex = hotbar_countTex[count];
+
+		x = HotbarWidget_TileX(w, i);
+		y = w->y + (w->height / 2);
+
+		/* Position at bottom-right of hotbar slot */
+		tex.x = x + (int)(w->slotWidth / 2) - tex.width;
+		tex.y = y + (int)(w->elemSize / 2) - tex.height + 10;
+		Texture_Render(&tex);
+	}
+}
+
 static int HotbarWidget_Render2(void* widget, int offset) {
 	struct HotbarWidget* w = (struct HotbarWidget*)widget;
 	Gfx_3DS_SetRenderScreen(BOTTOM_SCREEN);
 
 	HotbarWidget_RenderOutline(w, offset    );
 	HotbarWidget_RenderEntries(w, offset + 8);
+	Hotbar_RenderCounts(w);
 
 	if (Gui_TouchUI) {
 		w->ellipsisTex.x = HotbarWidget_TileX(w, HOTBAR_MAX_INDEX) - w->ellipsisTex.width / 2;
@@ -669,8 +720,21 @@ static int HotbarWidget_MouseScroll(void* widget, float delta) {
 
 static void HotbarWidget_Free(void* widget) {
 	struct HotbarWidget* w = (struct HotbarWidget*)widget;
-	if (!Gui_TouchUI) return;
+	int i;
 
+	/* Free count textures */
+	for (i = 2; i <= MAX_STACK_SIZE; i++) {
+		if (hotbar_countTexValid[i]) {
+			Gfx_DeleteTexture(&hotbar_countTex[i].ID);
+			hotbar_countTexValid[i] = false;
+		}
+	}
+	if (hotbar_countFontValid) {
+		Font_Free(&hotbar_countFont);
+		hotbar_countFontValid = false;
+	}
+
+	if (!Gui_TouchUI) return;
 	Gfx_DeleteTexture(&w->ellipsisTex.ID);
 }
 
@@ -1083,6 +1147,318 @@ void TableWidget_OnInventoryChanged(struct TableWidget* w) {
 	w->scroll.topRow = w->selectedIndex / w->blocksPerRow;
 	ScrollbarWidget_ClampTopRow(&w->scroll);
 	TableWidget_RecreateTitle(w, true);
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------------ItemTableWidget-----------------------------------------------------*
+*#########################################################################################################################*/
+static int ItemTable_X(struct ItemTableWidget* w)      { return w->x - w->paddingL; }
+static int ItemTable_Y(struct ItemTableWidget* w)      { return w->y - w->paddingT; }
+static int ItemTable_Width(struct ItemTableWidget* w)  { return w->width  + w->paddingL + w->paddingR; }
+static int ItemTable_Height(struct ItemTableWidget* w) { return w->height + w->paddingT + w->paddingB; }
+
+static cc_bool ItemTableWidget_GetCoords(struct ItemTableWidget* w, int i, int* cellX, int* cellY) {
+	int x, y;
+	x = i % w->itemsPerRow;
+	y = i / w->itemsPerRow - w->scroll.topRow;
+
+	*cellX = w->x + w->cellSizeX * x;
+	*cellY = w->y + w->cellSizeY * y + 3;
+	return y >= 0 && y < w->rowsVisible;
+}
+
+static void ItemTableWidget_MoveCursorToSelected(struct ItemTableWidget* w) {
+	int x, y;
+	if (w->selectedIndex == -1) return;
+
+	ItemTableWidget_GetCoords(w, w->selectedIndex, &x, &y);
+	x += w->cellSizeX / 2; y += w->cellSizeY / 2;
+	Cursor_SetPosition(x, y);
+}
+
+void ItemTableWidget_RecreateItems(struct ItemTableWidget* w) {
+	int i;
+	w->itemsCount = 0;
+
+	for (i = 1; i < ITEM_COUNT; i++) {
+		if (ItemTextures[i] < 0) continue;
+		w->items[w->itemsCount++] = i;
+	}
+
+	w->rowsTotal = Math_CeilDiv(w->itemsCount, w->itemsPerRow);
+	Widget_Layout(w);
+}
+
+static void ItemTableWidget_BuildMesh(void* widget, struct VertexTextured** vertices) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	struct VertexTextured* data = *vertices;
+	int cellSizeX, cellSizeY;
+	int i, x, y, itemId;
+
+	cellSizeX = w->cellSizeX;
+	cellSizeY = w->cellSizeY;
+
+	IsometricDrawer_BeginBatch(data, w->state);
+	for (i = 0; i < w->itemsCount; i++) {
+		if (!ItemTableWidget_GetCoords(w, i, &x, &y)) continue;
+
+		itemId = w->items[i];
+		if (i == w->selectedIndex) continue;
+		IsometricDrawer_AddItemBatch(ItemTextures[itemId],
+			w->normItemSize, x + cellSizeX / 2, y + cellSizeY / 2);
+	}
+
+	i = w->selectedIndex;
+	if (i != -1 && i < w->itemsCount) {
+		ItemTableWidget_GetCoords(w, i, &x, &y);
+		itemId = w->items[i];
+		IsometricDrawer_AddItemBatch(ItemTextures[itemId],
+			w->selItemSize, x + cellSizeX / 2, y + cellSizeY / 2);
+	}
+
+	w->verticesCount = IsometricDrawer_EndBatch();
+	*vertices        = data + ITEMTABLE_MAX_VERTICES;
+}
+
+static int ItemTableWidget_Render2(void* widget, int offset) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	int cellSizeX, cellSizeY, size;
+	float off;
+	int x, y;
+
+	PackedCol topBackColor    = PackedCol_Make( 34,  34,  34, 168);
+	PackedCol bottomBackColor = PackedCol_Make( 57,  57, 104, 202);
+	PackedCol topSelColor     = PackedCol_Make(255, 255, 255, 142);
+	PackedCol bottomSelColor  = PackedCol_Make(255, 255, 255, 192);
+
+	Gfx_Draw2DGradient(ItemTable_X(w), ItemTable_Y(w),
+		ItemTable_Width(w), ItemTable_Height(w), topBackColor, bottomBackColor);
+
+	if (w->rowsVisible < w->rowsTotal) {
+		Elem_Render(&w->scroll);
+	}
+
+	cellSizeX = w->cellSizeX;
+	cellSizeY = w->cellSizeY;
+	if (w->selectedIndex != -1) {
+		ItemTableWidget_GetCoords(w, w->selectedIndex, &x, &y);
+
+		off  = cellSizeX * 0.1f;
+		size = (int)(cellSizeX + off * 2);
+		Gfx_Draw2DGradient((int)(x - off), (int)(y - off),
+			size, size, topSelColor, bottomSelColor);
+	}
+
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
+	Gfx_BindDynamicVb(w->vb);
+
+	if (w->verticesCount) {
+		IsometricDrawer_Render(w->verticesCount, offset, w->state);
+	}
+	return offset + ITEMTABLE_MAX_VERTICES;
+}
+
+static int ItemTableWidget_MaxVertices(void* w) { return ITEMTABLE_MAX_VERTICES; }
+static void ItemTableWidget_Free(void* widget) { }
+
+static void ItemTableWidget_Reposition(void* widget) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	float scale = Math_SqrtF(w->scale);
+	int cellSize, blockSize;
+
+	cellSize     = 50;
+	w->cellSizeX = Display_ScaleX(cellSize * scale);
+	w->cellSizeY = Display_ScaleY(cellSize * scale);
+
+	blockSize    = Display_ScaleX(50 * scale);
+	w->normItemSize = (blockSize             ) * 0.7f / 2.0f;
+	w->selItemSize  = (blockSize + 25 * scale) * 0.7f / 2.0f;
+	w->rowsVisible  = min(8, w->rowsTotal);
+
+	do {
+		w->width  = w->cellSizeX * w->itemsPerRow;
+		w->height = w->cellSizeY * w->rowsVisible;
+		Widget_CalcPosition(w);
+
+		if (ItemTable_Y(w) >= 0) break;
+		w->rowsVisible--;
+	} while (w->rowsVisible > 1);
+
+	w->scroll.x = ItemTable_X(w) + ItemTable_Width(w);
+	w->scroll.y = ItemTable_Y(w);
+	w->scroll.height      = ItemTable_Height(w);
+	w->scroll.rowsTotal   = w->rowsTotal;
+	w->scroll.rowsVisible = w->rowsVisible;
+}
+
+static void ItemTableWidget_ScrollRelative(struct ItemTableWidget* w, int delta) {
+	int start = w->selectedIndex, index = start;
+	index += delta;
+	if (index < 0) index -= delta;
+	if (index >= w->itemsCount) index -= delta;
+	w->selectedIndex = index;
+
+	w->scroll.topRow += (index / w->itemsPerRow) - (start / w->itemsPerRow);
+	ScrollbarWidget_ClampTopRow(&w->scroll);
+
+	ItemTableWidget_RecreateTitle(w, false);
+	ItemTableWidget_MoveCursorToSelected(w);
+}
+
+static int ItemTableWidget_PointerDown(void* widget, int id, int x, int y) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	w->pendingClose = false;
+
+	if (Elem_HandlesPointerDown(&w->scroll, id, x, y)) {
+		return TOUCH_TYPE_GUI;
+	} else if (w->selectedIndex != -1) {
+		w->pendingClose = true;
+		return TOUCH_TYPE_GUI;
+	} else if (Gui_Contains(ItemTable_X(w), ItemTable_Y(w), ItemTable_Width(w), ItemTable_Height(w), x, y)) {
+		return TOUCH_TYPE_GUI;
+	}
+	return false;
+}
+
+static void ItemTableWidget_PointerUp(void* widget, int id, int x, int y) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	Elem_OnPointerUp(&w->scroll, id, x, y);
+}
+
+static int ItemTableWidget_MouseScroll(void* widget, float delta) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	int origTopRow, index;
+
+	cc_bool bounds = Gui_ContainsPointers(ItemTable_X(w), ItemTable_Y(w),
+		ItemTable_Width(w) + w->scroll.width, ItemTable_Height(w));
+	if (!bounds) return false;
+
+	origTopRow = w->scroll.topRow;
+	Elem_HandlesMouseScroll(&w->scroll, delta);
+	if (w->selectedIndex == -1) return true;
+
+	index = w->selectedIndex;
+	index += (w->scroll.topRow - origTopRow) * w->itemsPerRow;
+	if (index >= w->itemsCount) index = -1;
+
+	w->selectedIndex = index;
+	ItemTableWidget_RecreateTitle(w, false);
+	return true;
+}
+
+static int ItemTableWidget_PointerMove(void* widget, int id, int x, int y) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	int cellSizeX, cellSizeY, maxHeight;
+	int i, cellX, cellY;
+
+	if (Elem_HandlesPointerMove(&w->scroll, id, x, y)) return true;
+	if (w->lastX == x && w->lastY == y) return true;
+	w->lastX = x; w->lastY = y;
+
+	w->selectedIndex = -1;
+	cellSizeX = w->cellSizeX;
+	cellSizeY = w->cellSizeY;
+	maxHeight = cellSizeY * w->rowsVisible;
+
+	if (Gui_Contains(w->x, w->y + 3, w->width, maxHeight - 3 * 2, x, y)) {
+		for (i = 0; i < w->itemsCount; i++) {
+			ItemTableWidget_GetCoords(w, i, &cellX, &cellY);
+
+			if (Gui_Contains(cellX, cellY, cellSizeX, cellSizeY, x, y)) {
+				w->selectedIndex = i;
+				break;
+			}
+		}
+	}
+	ItemTableWidget_RecreateTitle(w, false);
+	return true;
+}
+
+static int ItemTableWidget_ScrollXY(struct ItemTableWidget* w, int deltaX, int deltaY) {
+	if (w->selectedIndex == -1) {
+		if (w->itemsCount == 0) return false;
+
+		w->selectedIndex = 0;
+		w->scroll.topRow = 0;
+		ScrollbarWidget_ClampTopRow(&w->scroll);
+		ItemTableWidget_RecreateTitle(w, false);
+		ItemTableWidget_MoveCursorToSelected(w);
+		return true;
+	}
+
+	ItemTableWidget_ScrollRelative(w, deltaX + deltaY * w->itemsPerRow);
+	return true;
+}
+
+static int ItemTableWidget_KeyDown(void* widget, int key, struct InputDevice* device) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	int deltaX, deltaY;
+
+	Input_CalcDelta(key, device, &deltaX, &deltaY);
+	if (deltaX || deltaY) {
+		return ItemTableWidget_ScrollXY(w, deltaX, deltaY);
+	}
+	return false;
+}
+
+static int ItemTableWidget_PadAxis(void* widget, struct PadAxisUpdate* upd) {
+	struct ItemTableWidget* w = (struct ItemTableWidget*)widget;
+	int deltaX, deltaY;
+
+	deltaX = upd->xSteps == 0 ? 0 : (upd->xSteps > 0 ? 1 : -1);
+	deltaY = upd->ySteps == 0 ? 0 : (upd->ySteps > 0 ? 1 : -1);
+
+	return ItemTableWidget_ScrollXY(w, deltaX, deltaY);
+}
+
+void ItemTableWidget_RecreateTitle(struct ItemTableWidget* w, cc_bool force) {
+	int itemId;
+	if (!force && w->selectedIndex == w->selectedIndex) { /* always recreate for simplicity */ }
+	if (w->itemsCount == 0) return;
+
+	itemId = w->selectedIndex == -1 ? ITEM_NONE : w->items[w->selectedIndex];
+	w->UpdateTitle(itemId);
+}
+
+static void ItemTableWidget_SetToIndex(struct ItemTableWidget* w, int index) {
+	w->selectedIndex = index;
+
+	w->scroll.topRow = w->selectedIndex / w->itemsPerRow;
+	w->scroll.topRow -= (w->rowsVisible - 1);
+	ScrollbarWidget_ClampTopRow(&w->scroll);
+	ItemTableWidget_MoveCursorToSelected(w);
+	ItemTableWidget_RecreateTitle(w, true);
+}
+
+static const struct WidgetVTABLE ItemTableWidget_VTABLE = {
+	NULL,                         ItemTableWidget_Free,      ItemTableWidget_Reposition,
+	ItemTableWidget_KeyDown,      Widget_InputUp,            ItemTableWidget_MouseScroll,
+	ItemTableWidget_PointerDown,  ItemTableWidget_PointerUp, ItemTableWidget_PointerMove,
+	ItemTableWidget_BuildMesh,    ItemTableWidget_Render2,   ItemTableWidget_MaxVertices,
+	ItemTableWidget_PadAxis
+};
+
+void ItemTableWidget_Add(void* screen, struct ItemTableWidget* w, int sbWidth) {
+	Widget_Reset(w);
+	w->VTABLE = &ItemTableWidget_VTABLE;
+	ScrollbarWidget_Create(&w->scroll, sbWidth);
+
+	w->horAnchor = ANCHOR_CENTRE;
+	w->verAnchor = ANCHOR_CENTRE;
+	w->lastX = -20; w->lastY = -20;
+	w->scale = 1;
+
+	if (!w->everCreated) {
+		w->everCreated   = true;
+		w->selectedIndex = -1;
+	}
+	AddWidget(screen, w);
+
+	w->paddingL = Display_ScaleX(15);
+	w->paddingR = Display_ScaleX(15);
+	w->paddingT = Display_ScaleY(35);
+	w->paddingB = Display_ScaleY(15);
 }
 
 

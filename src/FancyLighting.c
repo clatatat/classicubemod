@@ -574,8 +574,8 @@ static void OnEnvVariableChanged(void* obj, int envVar) {
 
 	if (envVar == ENV_VAR_SUN_COLOR || envVar == ENV_VAR_SHADOW_COLOR || envVar == ENV_VAR_LAVALIGHT_COLOR || envVar == ENV_VAR_LAMPLIGHT_COLOR) {
 		InitPalettes();
+		MapRenderer_Refresh();
 	}
-	if (envVar == ENV_VAR_LAVALIGHT_COLOR || envVar == ENV_VAR_LAMPLIGHT_COLOR) MapRenderer_Refresh();
 }
 
 void FancyLighting_OnInit(void) {

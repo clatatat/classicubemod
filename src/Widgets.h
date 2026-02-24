@@ -120,6 +120,31 @@ CC_NOINLINE void TableWidget_RecreateTitle(struct TableWidget* w, cc_bool force)
 /* Like RecreateTitle, but the block's title to be shown can be changed from the currently selected index. Pass -1 to use the currently selected index. */
 CC_NOINLINE void TableWidget_RecreateTitleForBlock(struct TableWidget* w, cc_bool force, int blockForTitle);
 
+#define ITEMTABLE_MAX_VERTICES (8 * 10 * ISOMETRICDRAWER_MAXVERTICES)
+/* A table of items (similar to TableWidget but for item sprites). */
+struct ItemTableWidget {
+	Widget_Body
+	int itemsCount, itemsPerRow;
+	int rowsTotal, rowsVisible;
+	int selectedIndex, cellSizeX, cellSizeY;
+	float normItemSize, selItemSize;
+	GfxResourceID vb;
+	cc_bool pendingClose, everCreated;
+	float scale;
+
+	int items[ITEM_COUNT]; /* item IDs */
+	struct ScrollbarWidget scroll;
+	int lastX, lastY;
+	int paddingL, paddingR, paddingT, paddingB;
+	void (*UpdateTitle)(int itemId);
+
+	int state[ITEMTABLE_MAX_VERTICES / 4];
+	int verticesCount;
+};
+
+CC_NOINLINE void ItemTableWidget_Add(void* screen, struct ItemTableWidget* w, int sbWidth);
+CC_NOINLINE void ItemTableWidget_RecreateItems(struct ItemTableWidget* w);
+CC_NOINLINE void ItemTableWidget_RecreateTitle(struct ItemTableWidget* w, cc_bool force);
 
 #define INPUTWIDGET_MAX_LINES 3
 #define INPUTWIDGET_LEN STRING_SIZE

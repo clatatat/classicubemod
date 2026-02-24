@@ -1040,6 +1040,7 @@ static cc_bool LocalPlayer_TriggerFlyUp(int key, struct InputDevice* device) {
 static cc_bool LocalPlayer_TriggerFlyDown(int key, struct InputDevice* device) {
 	struct HacksComp* hacks = &LocalPlayer_Instances[device->mappedIndex].Hacks;
 	if (Gui.InputGrab) return false;
+	if (Game_SurvivalMode) return false;
 	
 	hacks->FlyingDown = true;
 	return hacks->CanFly && hacks->Enabled;

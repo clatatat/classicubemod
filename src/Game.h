@@ -65,6 +65,7 @@ extern cc_bool Game_AllowServerTextures;
 extern cc_bool Game_EnemySpawning;
 extern cc_bool Game_PassiveSpawning;
 extern cc_bool Game_SurvivalMode;
+extern cc_bool Player_CheatsEnabled;
 
 #define CREEPER_DONT_EXPLODE   0
 #define CREEPER_EXPLOSION_ATK  1
@@ -87,6 +88,7 @@ extern int     Game_ZombieSpeed;
 #define MOB_SPAWN_RATE_COUNT 5
 extern int     Game_MobSpawnRate;
 extern cc_bool Game_LightRestrictSpawning;
+extern cc_bool Game_DaylightCycle;
 
 #define MOB_LIGHT_SENSITIVITY_COUNT 3
 extern int     Game_MobLightSensitivity;
@@ -94,6 +96,10 @@ extern int     Game_MobLightSensitivity;
 #define MOB_MULTIPLIER_COUNT 4
 extern int     Game_MobHealthMultiplier;
 extern int     Game_MobDamageMultiplier;
+
+/* Player health system (survival mode only) */
+#define PLAYER_MAX_HEALTH 20
+extern int Player_Health; /* 0 to PLAYER_MAX_HEALTH (20 = 10 full hearts) */
 
 extern cc_bool Game_Anaglyph3D;
 extern cc_bool Game_ViewBobbing;

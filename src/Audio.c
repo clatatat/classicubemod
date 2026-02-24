@@ -60,9 +60,11 @@ static void Sounds_Start(void) {
 }
 
 void Audio_PlayDigSound(cc_uint8 type)  { }
+void Audio_PlayDigSoundVolume(cc_uint8 type, int volume) { }
 void Audio_PlayDigSoundRate(cc_uint8 type, int rate) { }
 void Audio_PlayStepSound(cc_uint8 type) { }
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) { }
+void Audio_PlayStepSoundRate(cc_uint8 type, int rate, int volume) { }
 
 void Sounds_LoadDefault(void) { }
 #else
@@ -576,6 +578,25 @@ static void Sounds_Free(void) { Sounds_Stop(); }
 
 void Audio_PlayDigSound(cc_uint8 type)  { Sounds_Play(type, &digBoard); }
 
+void Audio_PlayDigSoundVolume(cc_uint8 type, int volume) {
+	const struct Sound* snd;
+	struct AudioData data;
+	cc_result res;
+
+	if (type == SOUND_NONE || !Audio_SoundsVolume || volume <= 0) return;
+	snd = Soundboard_PickRandom(&digBoard, type);
+	if (!snd) return;
+
+	data.chunk      = snd->chunk;
+	data.channels   = snd->channels;
+	data.sampleRate = snd->sampleRate;
+	data.rate       = 100;
+	data.volume     = volume;
+
+	res = AudioPool_Play(&data);
+	if (res) Sounds_Fail(res);
+}
+
 void Audio_PlayDigSoundRate(cc_uint8 type, int rate) {
 	const struct Sound* snd;
 	struct AudioData data;
@@ -610,6 +631,25 @@ void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) {
 	data.channels   = snd->channels;
 	data.sampleRate = snd->sampleRate;
 	data.rate       = 100;
+	data.volume     = volume;
+
+	res = AudioPool_Play(&data);
+	if (res) Sounds_Fail(res);
+}
+
+void Audio_PlayStepSoundRate(cc_uint8 type, int rate, int volume) {
+	const struct Sound* snd;
+	struct AudioData data;
+	cc_result res;
+
+	if (type == SOUND_NONE || !Audio_SoundsVolume) return;
+	snd = Soundboard_PickRandom(&stepBoard, type);
+	if (!snd) return;
+
+	data.chunk      = snd->chunk;
+	data.channels   = snd->channels;
+	data.sampleRate = snd->sampleRate;
+	data.rate       = rate;
 	data.volume     = volume;
 
 	res = AudioPool_Play(&data);

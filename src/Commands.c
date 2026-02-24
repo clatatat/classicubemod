@@ -13,11 +13,13 @@
 #include "Funcs.h"
 #include "Block.h"
 #include "EnvRenderer.h"
+#include "EntityComponents.h"
 #include "Utils.h"
 #include "TexturePack.h"
 #include "Options.h"
 #include "Drawer2D.h"
 #include "Audio.h"
+#include "InputHandler.h"
 
 #define COMMANDS_PREFIX "/client"
 #define COMMANDS_PREFIX_SPACE "/client "
@@ -794,6 +796,81 @@ static struct ChatCommand BlockEditCommand = {
 
 
 /*########################################################################################################################*
+*------------------------------------------------------/cheat Command-----------------------------------------------------*
+*#########################################################################################################################*/
+static void CheatCommand_Execute(const cc_string* args, int argsCount) {
+	static const cc_string msgOn  = String_FromConst("&eCheats &aenabled &7(invincible)");
+	static const cc_string msgOff = String_FromConst("&eCheats &cdisabled");
+
+	Player_CheatsEnabled = !Player_CheatsEnabled;
+
+	if (Game_SurvivalMode) {
+		/* In survival, cheats toggle hacks access + invincibility */
+		Entities.CurPlayer->Hacks.Enabled = Player_CheatsEnabled;
+		HacksComp_Update(&Entities.CurPlayer->Hacks);
+	}
+
+	Chat_Add(Player_CheatsEnabled ? &msgOn : &msgOff);
+}
+
+static struct ChatCommand CheatCommand = {
+	"Cheat", CheatCommand_Execute,
+	COMMAND_FLAG_SINGLEPLAYER_ONLY,
+	{
+		"&a/client cheat",
+		"&eToggles cheats on or off.",
+		"&eSurvival: enables hacks, creative block menu, item menu, mob spawning.",
+		"&eCreative: enables item menu.",
+	}
+};
+
+
+/*########################################################################################################################*
+*------------------------------------------------------/time Command------------------------------------------------------*
+*#########################################################################################################################*/
+#define DN_TIME_DAY    0.0f
+#define DN_TIME_NIGHT  650.0f
+
+static void TimeCommand_Execute(const cc_string* args, int argsCount) {
+	static const cc_string dayStr   = String_FromConst("day");
+	static const cc_string nightStr = String_FromConst("night");
+
+	if (argsCount == 0) {
+		static const cc_string usage = String_FromConst("&eUsage: &a/client time [day/night]");
+		Chat_Add(&usage);
+		return;
+	}
+
+	if (!Game_DaylightCycle) {
+		static const cc_string msg = String_FromConst("&cDay/night cycle is disabled.");
+		Chat_Add(&msg);
+		return;
+	}
+
+	if (String_CaselessEquals(&args[0], &dayStr)) {
+		DayNightCycle_SetTimer(DN_TIME_DAY);
+		{ static const cc_string msg = String_FromConst("&eTime set to &aday"); Chat_Add(&msg); }
+	} else if (String_CaselessEquals(&args[0], &nightStr)) {
+		DayNightCycle_SetTimer(DN_TIME_NIGHT);
+		{ static const cc_string msg = String_FromConst("&eTime set to &cnight"); Chat_Add(&msg); }
+	} else {
+		static const cc_string msg = String_FromConst("&eUsage: &a/client time [day/night]");
+		Chat_Add(&msg);
+	}
+}
+
+static struct ChatCommand TimeCommand = {
+	"Time", TimeCommand_Execute,
+	COMMAND_FLAG_SINGLEPLAYER_ONLY,
+	{
+		"&a/client time [day/night]",
+		"&eSets the time of day.",
+		"&eRequires the day/night cycle to be enabled.",
+	}
+};
+
+
+/*########################################################################################################################*
 *------------------------------------------------------Commands component-------------------------------------------------*
 *#########################################################################################################################*/
 static void OnInit(void) {
@@ -810,6 +887,8 @@ static void OnInit(void) {
 	Commands_Register(&BlockEditCommand);
 	Commands_Register(&CuboidCommand);
 	Commands_Register(&ReplaceCommand);
+	Commands_Register(&CheatCommand);
+	Commands_Register(&TimeCommand);
 }
 
 static void OnFree(void) {

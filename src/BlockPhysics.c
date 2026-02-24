@@ -273,6 +273,7 @@ static void Physics_HandleLadder(int index, BlockID block) {
 	
 	/* No adjacent support block - break the ladder */
 	if (!hasSupport) {
+		Physics_DropBlock(x, y, z, BLOCK_LADDER);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 	}
@@ -311,6 +312,7 @@ static void Physics_HandleTorch(int index, BlockID block) {
 	
 	/* No support at all - break the torch */
 	if (!hasSupport) {
+		Physics_DropBlock(x, y, z, BLOCK_TORCH);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 	}
@@ -336,6 +338,7 @@ static void Physics_HandleSnow(int index, BlockID block) {
 	}
 	
 	/* No support - break the snow */
+	Physics_DropBlock(x, y, z, BLOCK_SNOW);
 	Game_UpdateBlock(x, y, z, BLOCK_AIR);
 	Physics_ActivateNeighbours(x, y, z, index);
 }
@@ -566,11 +569,16 @@ static cc_bool Redstone_IsLeverOn(BlockID block) {
 
 /* ---- Pressure plate helpers ---- */
 static cc_bool Redstone_IsPressurePlate(BlockID block) {
-	return block == BLOCK_PRESSURE_PLATE || block == BLOCK_PRESSURE_PLATE_PRESSED;
+	return block == BLOCK_PRESSURE_PLATE || block == BLOCK_PRESSURE_PLATE_PRESSED
+		|| block == BLOCK_STONE_PLATE || block == BLOCK_STONE_PLATE_PRESSED;
 }
 
 static cc_bool Redstone_IsPressurePlatePressed(BlockID block) {
-	return block == BLOCK_PRESSURE_PLATE_PRESSED;
+	return block == BLOCK_PRESSURE_PLATE_PRESSED || block == BLOCK_STONE_PLATE_PRESSED;
+}
+
+static cc_bool Redstone_IsStonePlate(BlockID block) {
+	return block == BLOCK_STONE_PLATE || block == BLOCK_STONE_PLATE_PRESSED;
 }
 
 /* Get the attach block position for a button using directional cache */
@@ -1002,7 +1010,8 @@ static void Redstone_TickPlateQueue(void) {
 			BlockID current = World_GetBlock(bx, by, bz);
 			
 			if (Redstone_IsPressurePlatePressed(current)) {
-				Game_UpdateBlock(bx, by, bz, BLOCK_PRESSURE_PLATE);
+				BlockID unpressed = (current == BLOCK_STONE_PLATE_PRESSED) ? BLOCK_STONE_PLATE : BLOCK_PRESSURE_PLATE;
+				Game_UpdateBlock(bx, by, bz, unpressed);
 				Audio_PlayDigSound(SOUND_BUTTON_OFF);
 				Redstone_PropagatePlatePower(bx, by, bz);
 				Redstone_EvalNearbyTorches(bx, by, bz);
@@ -1021,6 +1030,7 @@ static void Redstone_TickPlateQueue(void) {
    When no entity is on the plate, the timer counts down and releases. */
 static void Redstone_TickPressurePlates(void) {
 	int i, px, py, pz;
+	cc_bool isMobOrPlayer;
 
 	for (i = 0; i < ENTITIES_MAX_COUNT; i++) {
 		struct Entity* e = Entities.List[i];
@@ -1035,15 +1045,23 @@ static void Redstone_TickPressurePlates(void) {
 		
 		{
 			BlockID block = World_GetBlock(px, py, pz);
-			if (block == BLOCK_PRESSURE_PLATE) {
+			
+			/* Stone plates only respond to the player and mobs, not items/arrows */
+			if (Redstone_IsStonePlate(block)) {
+				isMobOrPlayer = (i == ENTITIES_SELF_ID) || Mob_IsMob(i);
+				if (!isMobOrPlayer) continue;
+			}
+			
+			if (block == BLOCK_PRESSURE_PLATE || block == BLOCK_STONE_PLATE) {
 				/* Press the plate */
-				Game_UpdateBlock(px, py, pz, BLOCK_PRESSURE_PLATE_PRESSED);
+				BlockID pressed = (block == BLOCK_STONE_PLATE) ? BLOCK_STONE_PLATE_PRESSED : BLOCK_PRESSURE_PLATE_PRESSED;
+				Game_UpdateBlock(px, py, pz, pressed);
 				Audio_PlayDigSound(SOUND_BUTTON_ON);
 				Redstone_PropagatePlatePower(px, py, pz);
 				Redstone_EvalNearbyTorches(px, py, pz);
 				/* Schedule release (timer will be reset each tick entity stays) */
 				Plate_ScheduleRelease(px, py, pz);
-			} else if (block == BLOCK_PRESSURE_PLATE_PRESSED) {
+			} else if (block == BLOCK_PRESSURE_PLATE_PRESSED || block == BLOCK_STONE_PLATE_PRESSED) {
 				/* Entity still on plate - reset release timer */
 				Plate_ScheduleRelease(px, py, pz);
 			}
@@ -1621,6 +1639,7 @@ static void Physics_HandleRedOreDust(int index, BlockID block) {
 	}
 	
 	/* No solid block below - break the red ore dust */
+	Physics_DropBlock(x, y, z, BLOCK_RED_ORE_DUST);
 	Game_UpdateBlock(x, y, z, BLOCK_AIR);
 	Physics_ActivateNeighbours(x, y, z, index);
 }
@@ -1642,6 +1661,7 @@ static void Physics_HandleLitRedOreDust(int index, BlockID block) {
 	}
 	
 	/* No solid block below - break the lit red ore dust */
+	Physics_DropBlock(x, y, z, BLOCK_RED_ORE_DUST);
 	Game_UpdateBlock(x, y, z, BLOCK_AIR);
 	Physics_ActivateNeighbours(x, y, z, index);
 }
@@ -1875,12 +1895,14 @@ static void Physics_HandleButton(int index, BlockID block) {
 	if (Redstone_GetButtonAttachBlock(x, y, z, &ax, &ay, &az)) {
 		if (!World_Contains(ax, ay, az) || Blocks.Draw[World_GetBlock(ax, ay, az)] != DRAW_OPAQUE) {
 			/* Support gone - delete button */
+			Physics_DropBlock(x, y, z, BLOCK_BUTTON);
 			Game_UpdateBlock(x, y, z, BLOCK_AIR);
 			Physics_ActivateNeighbours(x, y, z, index);
 			return;
 		}
 	} else {
 		/* Couldn't determine attach block - delete for safety */
+		Physics_DropBlock(x, y, z, BLOCK_BUTTON);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 		return;
@@ -1930,11 +1952,13 @@ static void Physics_HandleLever(int index, BlockID block) {
 	/* Check if lever still has support from attached block */
 	if (Redstone_GetButtonAttachBlock(x, y, z, &ax, &ay, &az)) {
 		if (!World_Contains(ax, ay, az) || Blocks.Draw[World_GetBlock(ax, ay, az)] != DRAW_OPAQUE) {
+			Physics_DropBlock(x, y, z, BLOCK_LEVER);
 			Game_UpdateBlock(x, y, z, BLOCK_AIR);
 			Physics_ActivateNeighbours(x, y, z, index);
 			return;
 		}
 	} else {
+		Physics_DropBlock(x, y, z, BLOCK_LEVER);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 		return;
@@ -1983,12 +2007,38 @@ static void Physics_HandlePlate(int index, BlockID block) {
 		BlockID below = World_GetBlock(x, y - 1, z);
 		if (Blocks.Draw[below] != DRAW_OPAQUE) {
 			Plate_CancelRelease(x, y, z);
+			Physics_DropBlock(x, y, z, BLOCK_PRESSURE_PLATE);
 			Game_UpdateBlock(x, y, z, BLOCK_AIR);
 			Physics_ActivateNeighbours(x, y, z, index);
 			return;
 		}
 	} else {
 		Plate_CancelRelease(x, y, z);
+		Physics_DropBlock(x, y, z, BLOCK_PRESSURE_PLATE);
+		Game_UpdateBlock(x, y, z, BLOCK_AIR);
+		Physics_ActivateNeighbours(x, y, z, index);
+		return;
+	}
+}
+
+/* Handle stone pressure plate activation (called when neighbor changes) - support check */
+static void Physics_HandleStonePlate(int index, BlockID block) {
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+	
+	/* Check if plate still has support from block below */
+	if (y > 0) {
+		BlockID below = World_GetBlock(x, y - 1, z);
+		if (Blocks.Draw[below] != DRAW_OPAQUE) {
+			Plate_CancelRelease(x, y, z);
+			Physics_DropBlock(x, y, z, BLOCK_STONE_PLATE);
+			Game_UpdateBlock(x, y, z, BLOCK_AIR);
+			Physics_ActivateNeighbours(x, y, z, index);
+			return;
+		}
+	} else {
+		Plate_CancelRelease(x, y, z);
+		Physics_DropBlock(x, y, z, BLOCK_STONE_PLATE);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 		return;
@@ -2222,12 +2272,14 @@ static void Physics_HandleRedstoneTorch(int index, BlockID block) {
 	/* If not, delete it (no re-rotation - attached torches are destroyed) */
 	if (Redstone_GetTorchAttachBlock(x, y, z, &ax, &ay, &az)) {
 		if (!World_Contains(ax, ay, az) || Blocks.Draw[World_GetBlock(ax, ay, az)] != DRAW_OPAQUE) {
+			Physics_DropBlock(x, y, z, BLOCK_RED_ORE_TORCH);
 			Game_UpdateBlock(x, y, z, BLOCK_AIR);
 			Physics_ActivateNeighbours(x, y, z, index);
 			return;
 		}
 	} else {
 		/* Couldn't determine attach block - delete for safety */
+		Physics_DropBlock(x, y, z, BLOCK_RED_ORE_TORCH);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
 		return;
@@ -2671,6 +2723,12 @@ void TNT_ExplodeRadius(int x, int y, int z, int power) {
 		strength = 1.0f - (dist / (Math_SqrtF(maxDistSq) + 0.01f));
 		if (strength < 0.0f) strength = 0.0f;
 		
+		/* Deal same damage to player as mobs take from explosions */
+		{
+			int damage = 5 + (int)(15.0f * strength);
+			Player_Damage(damage);
+		}
+		
 		player->Velocity.x += (ex / dist) * 2.0f * strength + (ex / dist) * 0.5f;
 		player->Velocity.y += 1.2f * strength + 0.4f;
 		player->Velocity.z += (ez / dist) * 2.0f * strength + (ez / dist) * 0.5f;
@@ -3035,6 +3093,16 @@ void Physics_Init(void) {
 	Physics.OnActivate[BLOCK_PRESSURE_PLATE_PRESSED]  = Physics_HandlePlate;
 	Physics.OnPlace[BLOCK_PRESSURE_PLATE_PRESSED]     = Physics_PlacePlatePressed;
 	Physics.OnDelete[BLOCK_PRESSURE_PLATE_PRESSED]    = Physics_DeletePlate;
+	
+	/* Stone pressure plate variants (unpressed) */
+	Physics.OnActivate[BLOCK_STONE_PLATE]  = Physics_HandleStonePlate;
+	Physics.OnPlace[BLOCK_STONE_PLATE]     = Physics_PlacePlate;
+	Physics.OnDelete[BLOCK_STONE_PLATE]    = Physics_DeletePlate;
+	
+	/* Stone pressure plate variants (pressed) */
+	Physics.OnActivate[BLOCK_STONE_PLATE_PRESSED]  = Physics_HandleStonePlate;
+	Physics.OnPlace[BLOCK_STONE_PLATE_PRESSED]     = Physics_PlacePlatePressed;
+	Physics.OnDelete[BLOCK_STONE_PLATE_PRESSED]    = Physics_DeletePlate;
 	
 	/* Iron door variants - register/unregister tracking on place/delete */
 	Physics.OnPlace[BLOCK_IRON_DOOR]                  = Physics_PlaceIronDoor;

@@ -80,11 +80,12 @@ enum BLOCKID {
 	BLOCK_SNOW = 67, /* Snow layer - 2 pixels tall */
 	BLOCK_ICE = 68, /* Ice block */
 	BLOCK_SNOW_BLOCK = 69, /* Full snow block */
+	BLOCK_STONE_PLATE = 70, /* Stone pressure plate (mob/player only, ignores items) */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,
 	/* Max block ID used in original classic plus CPE blocks. */
-	BLOCK_MAX_CPE = BLOCK_SNOW_BLOCK,
+	BLOCK_MAX_CPE = BLOCK_STONE_PLATE,
 	
 	/* Non-placeable blocks (auto-placed, not in inventory) */
 	BLOCK_DOOR_NS_TOP = 200, /* Door facing North/South - top half */
@@ -132,6 +133,8 @@ enum BLOCKID {
 
 	BLOCK_SHADOW_CEILING = 233, /* Invisible light-blocking ceiling for hell theme */
 	BLOCK_SNOWY_GRASS = 234, /* Grass with snow on top - auto-placed, not in inventory */
+
+	BLOCK_STONE_PLATE_PRESSED = 235, /* Pressed stone pressure plate */
 
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,

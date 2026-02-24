@@ -35,6 +35,7 @@
 #include "Errors.h"
 #include "SystemFonts.h"
 #include "EnvRenderer.h"
+#include "InputHandler.h"
 
 typedef void (*Button_GetText)(struct ButtonWidget* btn, cc_string* raw);
 typedef void (*Button_SetText)(struct ButtonWidget* btn, const cc_string* raw);
@@ -889,6 +890,8 @@ static void ClO_SetFPS(cc_bool v) {
 
 static cc_bool ClO_GetHacks(void) { return Entities.CurPlayer->Hacks.Enabled; }
 static void    ClO_SetHacks(cc_bool v) {
+	/* Block hacks toggle in survival unless cheats enabled */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) return;
 	Entities.CurPlayer->Hacks.Enabled = v;
 	Options_SetBool(OPT_HACKS_ENABLED, v);
 	HacksComp_Update(&Entities.CurPlayer->Hacks);
@@ -1072,6 +1075,15 @@ static void    GrO_SetSmooth(cc_bool v) {
 	MapRenderer_Refresh();
 }
 
+static cc_bool GrO_GetAdvLighting(void) { return Lighting_Mode == LIGHTING_MODE_ADVANCED; }
+static void    GrO_SetAdvLighting(cc_bool v) {
+	cc_string str;
+	cc_uint8 mode = v ? LIGHTING_MODE_ADVANCED : LIGHTING_MODE_CLASSIC;
+	str = String_FromReadonly(LightingMode_Names[mode]);
+	Options_Set(OPT_LIGHTING_MODE, &str);
+	Lighting_SetMode(mode, false);
+}
+
 static cc_bool GrO_GetSimpleFog(void) { return EnvRenderer_SimpleFog; }
 static void    GrO_SetSimpleFog(cc_bool v) {
 	EnvRenderer_SimpleFog = v;
@@ -1169,6 +1181,12 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			GrO_GetSmooth,     GrO_SetSmooth,
 			"&eSmoothes lighting, adds glow to blocks.\n" \
 			"&cMay reduce performance.");
+		MenuOptionsScreen_AddBool(s, "Advanced lighting",
+			GrO_GetAdvLighting, GrO_SetAdvLighting,
+			"&eMC Alpha-style light propagation.\n" \
+			"&fCaves get darker the deeper they go.\n" \
+			"&fTorches emit light with smooth falloff.\n" \
+			"&cUses more memory and CPU.");
 		MenuOptionsScreen_AddBool(s, "Occlusion cull",
 			GrO_GetOcclusion,  GrO_SetOcclusion,
 			"&eHides chunks behind solid chunks.\n" \
@@ -1706,6 +1724,17 @@ static void    GP_SetLightRestrictSpawning(cc_bool v) {
 	Options_SetBool(OPT_LIGHT_RESTRICT_SPAWN, v);
 }
 
+static cc_bool GP_GetDaylightCycle(void) { return Game_DaylightCycle; }
+static void    GP_SetDaylightCycle(cc_bool v) {
+	Game_DaylightCycle = v;
+	Options_SetBool(OPT_DAYLIGHT_CYCLE, v);
+	if (v) {
+		DayNightCycle_Enable();
+	} else {
+		DayNightCycle_Disable();
+	}
+}
+
 static void Menu_SwitchMobBehaviors(void* a, void* b) { MobBehaviorsScreen_Show(); }
 
 static const char* const MobLightSensitivity_Names[MOB_LIGHT_SENSITIVITY_COUNT] = {
@@ -1745,6 +1774,8 @@ static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			GP_GetPassiveSpawning, GP_SetPassiveSpawning, NULL);
 		MenuOptionsScreen_AddBool(s, "Enable survival mode",
 			GP_GetSurvivalMode,    GP_SetSurvivalMode, NULL);
+		MenuOptionsScreen_AddBool(s, "Enable daylight cycle",
+			GP_GetDaylightCycle,   GP_SetDaylightCycle, NULL);
 		MenuOptionsScreen_AddEnum(s, "Spawn rate",
 			MobSpawnRate_Names, MOB_SPAWN_RATE_COUNT,
 			GP_GetMobSpawnRate, GP_SetMobSpawnRate, NULL);

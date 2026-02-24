@@ -84,6 +84,7 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_ZOMBIE_SPEED "gameplay-zombiespeed"
 #define OPT_MOB_SPAWN_RATE "gameplay-mobspawnrate"
 #define OPT_LIGHT_RESTRICT_SPAWN "gameplay-lightrestrictspawn"
+#define OPT_DAYLIGHT_CYCLE "gameplay-daylightcycle"
 #define OPT_MOB_LIGHT_SENSITIVITY "gameplay-moblightsensitivity"
 #define OPT_MOB_HEALTH_MULTIPLIER "gameplay-mobhealthmultiplier"
 #define OPT_MOB_DAMAGE_MULTIPLIER "gameplay-mobdamagemultiplier"

@@ -14,7 +14,7 @@ struct IGameComponent;
 extern struct IGameComponent Lighting_Component;
 
 enum LightingMode {
-	LIGHTING_MODE_CLASSIC, LIGHTING_MODE_FANCY, LIGHTING_MODE_COUNT
+	LIGHTING_MODE_CLASSIC, LIGHTING_MODE_FANCY, LIGHTING_MODE_ADVANCED, LIGHTING_MODE_COUNT
 };
 extern const char* const LightingMode_Names[LIGHTING_MODE_COUNT];
 extern cc_uint8 Lighting_Mode;
@@ -76,6 +76,9 @@ CC_VAR extern struct _Lighting {
 
 void FancyLighting_SetActive(void);
 void FancyLighting_OnInit(void);
+
+void AdvancedLighting_SetActive(void);
+void AdvancedLighting_OnInit(void);
 
 /* Expose ClassicLighting functions for reuse in Fancy lighting */
 void ClassicLighting_Refresh(void);

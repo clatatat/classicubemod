@@ -73,6 +73,13 @@ static void Menu_RenderBounds(void) {
 	Then using wolfram alpha to solve the glblendfunc equation */
 	PackedCol topCol    = PackedCol_Make(24, 24, 24, 105);
 	PackedCol bottomCol = PackedCol_Make(51, 51, 98, 162);
+
+	/* Simple flat red tint when player is dead */
+	if (Player_Health <= 0 && Game_SurvivalMode) {
+		PackedCol red = PackedCol_Make(70, 0, 0, 200);
+		Gfx_Draw2DGradient(0, 0, Window_UI.Width, Window_UI.Height, red, red);
+		return;
+	}
 	Gfx_Draw2DGradient(0, 0, Window_UI.Width, Window_UI.Height, topCol, bottomCol);
 }
 
@@ -207,7 +214,14 @@ static void AddPrimaryButton(void* screen, struct ButtonWidget* btn, Widget_Left
 *#########################################################################################################################*/
 #ifndef CC_DISABLE_UI
 static void Menu_SwitchOptions(void* a, void* b)        { OptionsGroupScreen_Show(); }
-static void Menu_SwitchPause(void* a, void* b)          { Gui_ShowPauseMenu(); }
+static void Menu_SwitchPause(void* a, void* b)          {
+	if (Player_Health <= 0 && Game_SurvivalMode) {
+		Gui_Remove((struct Screen*)a);
+		DeathScreen_Show();
+	} else {
+		Gui_ShowPauseMenu();
+	}
+}
 static void Menu_SwitchClassicOptions(void* a, void* b) { ClassicOptionsScreen_Show(); }
 
 static void Menu_SwitchBindsClassic(void* a, void* b)      { ClassicBindingsScreen_Show(); }
@@ -1536,17 +1550,14 @@ static cc_result SaveLevelScreen_SaveMap(const cc_string* path) {
 
 	res = DoSaveMap(path, state);
 	Mem_Free(state);
-	if (res) return res;
-
-	World.LastSave = Game.Time;
-	Gui_ShowPauseMenu();
-	return 0;
+	return res;
 }
 
-static void SaveLevelScreen_Save(void* screen, void* widget) { 
+static void SaveLevelScreen_Save(void* screen, void* widget) {
 	struct SaveLevelScreen* s = (struct SaveLevelScreen*)screen;
 	struct ButtonWidget* btn  = (struct ButtonWidget*)widget;
 	cc_string path; char pathBuffer[FILENAME_SIZE];
+	cc_string dirPath; char dirPathBuffer[FILENAME_SIZE];
 	cc_string file = s->input.base.text;
 	cc_filepath str;
 	cc_result res;
@@ -1556,28 +1567,74 @@ static void SaveLevelScreen_Save(void* screen, void* widget) {
 		return;
 	}
 
-	String_InitArray(path, pathBuffer);
-	String_Format1(&path, "maps/%s.cw", &file);
-	String_Copy(&World.Name, &file);
+	/* Build directory path: maps/<name> */
+	String_InitArray(dirPath, dirPathBuffer);
+	String_Format1(&dirPath, "maps/%s", &file);
 
+	/* Check if level.cw exists for overwrite confirmation */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/level.cw", &file);
 	Platform_EncodePath(&str, &path);
 	if (File_Exists(&str) && !btn->optName) {
 		btn->optName = "";
 		SaveLevelScreen_UpdateSave(s);
 		return;
 	}
-		
+
 	SaveLevelScreen_RemoveOverwrites(s);
-	if ((res = SaveLevelScreen_SaveMap(&path))) return;
-	Chat_Add1("&eSaved map to: %s", &path);
+	String_Copy(&World.Name, &file);
+
+	/* Create save directory */
+	Platform_EncodePath(&str, &dirPath);
+	res = Directory_Create2(&str);
+	if (res && res != ReturnCode_DirectoryExists) {
+		Logger_IOWarn2(res, "creating save directory", &str);
+		return;
+	}
+
+	/* Save level.cw (restore daytime env colors first so .cw stores originals) */
+	DayNightCycle_RestoreOriginalColors();
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/level.cw", &file);
+	if ((res = SaveLevelScreen_SaveMap(&path))) {
+		DayNightCycle_ReapplyCurrentColors();
+		return;
+	}
+	DayNightCycle_ReapplyCurrentColors();
+
+	/* Save inventory.dat */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/inventory.dat", &file);
+	Inventory_SaveToFile(&path);
+
+	/* Save container.dat (furnaces, chests, etc.) */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/container.dat", &file);
+	Container_SaveToFile(&path);
+
+	/* Save entities.dat */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/entities.dat", &file);
+	Entities_SaveToFile(&path);
+
+	/* Save worldsettings.dat */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/worldsettings.dat", &file);
+	WorldSettings_SaveToFile(&path);
+
+	World.LastSave = Game.Time;
+	Chat_Add1("&eSaved map to: maps/%s", &file);
 	CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
+	Gui_ShowPauseMenu();
 }
 
 static void SaveLevelScreen_UploadCallback(const cc_string* path) {
 	cc_result res = SaveLevelScreen_SaveMap(path);
 	if (!res) {
+		World.LastSave = Game.Time;
 		Chat_Add1("&eSaved map to: %s", path);
 		CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
+		Gui_ShowPauseMenu();
 	}
 }
 
@@ -1966,6 +2023,8 @@ static void LoadLevel_UpdateDeleteBtn(struct FontDesc* font) {
 
 static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 	cc_string path; char pathBuffer[FILENAME_SIZE];
+	cc_string levelPath; char levelPathBuf[FILENAME_SIZE];
+	cc_filepath nativePath;
 	struct ListScreen* s = (struct ListScreen*)screen;
 	cc_result res;
 
@@ -1980,14 +2039,52 @@ static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 		return;
 	}
 
-	String_InitArray(path, pathBuffer);
-	String_Format1(&path, "maps/%s", &relPath);
-	res = Map_LoadFrom(&path);
+	/* Check if this is a directory-based save (has level.cw inside) */
+	String_InitArray(levelPath, levelPathBuf);
+	String_Format1(&levelPath, "maps/%s/level.cw", &relPath);
+	Platform_EncodePath(&nativePath, &levelPath);
 
-	/* FileNotFound error may be because user deleted maps from disc */
-	if (res != ReturnCode_FileNotFound) return;
-	Chat_AddRaw("&eReloading level list as it may be out of date");
-	ListScreen_Reload(s);
+	if (File_Exists(&nativePath)) {
+		/* Directory-based save: load level.cw */
+		res = Map_LoadFrom(&levelPath);
+		if (res == ReturnCode_FileNotFound) {
+			Chat_AddRaw("&eReloading level list as it may be out of date");
+			ListScreen_Reload(s);
+			return;
+		}
+
+		/* Restore the world name to the directory name (not "level") */
+		String_Copy(&World.Name, &relPath);
+
+		/* Load inventory.dat */
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s/inventory.dat", &relPath);
+		Inventory_LoadFromFile(&path);
+
+		/* Load container.dat (furnaces, chests, etc.) */
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s/container.dat", &relPath);
+		Container_LoadFromFile(&path);
+
+		/* Load entities.dat */
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s/entities.dat", &relPath);
+		Entities_LoadFromFile(&path);
+
+		/* Load worldsettings.dat (must be after entities/inventory to override health etc.) */
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s/worldsettings.dat", &relPath);
+		WorldSettings_LoadFromFile(&path);
+	} else {
+		/* Legacy bare .cw file */
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s", &relPath);
+		res = Map_LoadFrom(&path);
+		if (res == ReturnCode_FileNotFound) {
+			Chat_AddRaw("&eReloading level list as it may be out of date");
+			ListScreen_Reload(s);
+		}
+	}
 }
 
 static void LoadLevelScreen_DeleteClick(void* screen, void* widget) {
@@ -1998,14 +2095,34 @@ static void LoadLevelScreen_DeleteClick(void* screen, void* widget) {
 }
 
 static void LoadLevelScreen_FilterFiles(const cc_string* path, void* obj, int isDirectory) {
-	struct MapImporter* imp = MapImporter_Find(path);
-	cc_string relPath = *path;
+	cc_string relPath;
 
 	if (isDirectory) {
-		Directory_Enum(path, obj, LoadLevelScreen_FilterFiles);
-	} else if (imp) {
-		Utils_UNSAFE_TrimFirstDirectory(&relPath);
-		StringsBuffer_Add((struct StringsBuffer*)obj, &relPath);
+		/* Check if this directory has a level.cw inside (directory-based save) */
+		cc_string levelPath; char levelPathBuf[FILENAME_SIZE];
+		cc_filepath nativePath;
+
+		String_InitArray(levelPath, levelPathBuf);
+		String_Format1(&levelPath, "%s/level.cw", path);
+		Platform_EncodePath(&nativePath, &levelPath);
+
+		if (File_Exists(&nativePath)) {
+			/* Add as a loadable level — trim "maps/" prefix */
+			relPath = *path;
+			Utils_UNSAFE_TrimFirstDirectory(&relPath);
+			StringsBuffer_Add((struct StringsBuffer*)obj, &relPath);
+		} else {
+			/* Not a level dir, recurse into it (legacy behavior) */
+			Directory_Enum(path, obj, LoadLevelScreen_FilterFiles);
+		}
+	} else {
+		/* Legacy: support bare .cw files in maps/ */
+		struct MapImporter* imp = MapImporter_Find(path);
+		if (imp) {
+			relPath = *path;
+			Utils_UNSAFE_TrimFirstDirectory(&relPath);
+			StringsBuffer_Add((struct StringsBuffer*)obj, &relPath);
+		}
 	}
 }
 
@@ -2106,23 +2223,46 @@ static struct DeleteLevelOverlay {
 	struct Widget* __widgets[4 + 2];
 } DeleteLevelOverlay_Instance;
 
+static void DeleteLevel_DeleteDirContents(const cc_string* path, void* obj, int isDirectory) {
+	cc_filepath nativePath;
+	Platform_EncodePath(&nativePath, path);
+
+	if (isDirectory) {
+		Directory_Enum(path, NULL, DeleteLevel_DeleteDirContents);
+		Directory_Remove(&nativePath);
+	} else {
+		File_Delete(&nativePath);
+	}
+}
+
 static void DeleteLevelOverlay_Yes(void* screen, void* b) {
 	struct DeleteLevelOverlay* s = (struct DeleteLevelOverlay*)screen;
 	cc_string path; char pathBuffer[FILENAME_SIZE];
+	cc_string levelPath; char levelPathBuf[FILENAME_SIZE];
 	cc_filepath nativePath;
 	cc_result res;
 
+	/* Check if this is a directory-based save */
+	String_InitArray(levelPath, levelPathBuf);
+	String_Format1(&levelPath, "maps/%s/level.cw", &LoadLevel_deletePath);
+	Platform_EncodePath(&nativePath, &levelPath);
+
 	String_InitArray(path, pathBuffer);
 	String_Format1(&path, "maps/%s", &LoadLevel_deletePath);
-	Platform_EncodePath(&nativePath, &path);
 
-	res = File_Delete(&nativePath);
-	if (res) {
-		Logger_SimpleWarn(res, "deleting level");
+	if (File_Exists(&nativePath)) {
+		/* Delete all files in the directory, then the directory itself */
+		Directory_Enum(&path, NULL, DeleteLevel_DeleteDirContents);
+		Platform_EncodePath(&nativePath, &path);
+		Directory_Remove(&nativePath);
 	} else {
-		Chat_AddRaw("&eLevel deleted successfully");
+		/* Legacy single file delete */
+		Platform_EncodePath(&nativePath, &path);
+		res = File_Delete(&nativePath);
+		if (res) Logger_SimpleWarn(res, "deleting level");
 	}
 
+	Chat_AddRaw("&eLevel deleted successfully");
 	Gui_Remove((struct Screen*)s);
 	ListScreen_Reload(&ListScreen);
 }

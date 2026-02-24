@@ -195,7 +195,7 @@ static PackedCol HeldBlockRenderer_GetCol(struct Entity* entity) {
 
 void HeldBlockRenderer_ClickAnim(cc_bool digging) {
 	/* TODO: timing still not quite right, rotate2 still not quite right */
-	HeldBlockRenderer_ResetAnim(true, digging ? 0.35 : 0.25);
+	HeldBlockRenderer_ResetAnim(true, digging ? 0.233f : 0.25);
 	held_swinging  = false;
 	held_breaking  = digging;
 	held_animating = true;

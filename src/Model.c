@@ -12,6 +12,7 @@
 #include "Block.h"
 #include "Stream.h"
 #include "Options.h"
+#include "InputHandler.h"
 
 struct _ModelsData Models;
 /* NOTE: None of the built in models use more than 12 parts at once, but custom models can use up to 64 parts. */
@@ -2075,8 +2076,20 @@ static void SpiderBModel_Register(void) {
 *--------------------------------------------------------ZombieModel------------------------------------------------------*
 *#########################################################################################################################*/
 static void ZombieModel_Draw(struct Entity* e) {
-	e->Anim.LeftArmX  = 90.0f * MATH_DEG2RAD;
-	e->Anim.RightArmX = 90.0f * MATH_DEG2RAD;
+	/* Base pose: arms outstretched at 90 degrees */
+	float armAngle = 90.0f * MATH_DEG2RAD;
+	/* Attack animation: briefly tilt arms up to 135 degrees (45 more) */
+	{
+		float attackAnim = Mob_GetAttackAnim(Mob_CurrentRenderingId);
+		if (attackAnim > 0.0f) {
+			float progress = attackAnim / 0.3f; /* 0..1 over MOB_ATTACK_ANIM_DURATION */
+			if (progress > 1.0f) progress = 1.0f;
+			/* Swing up then back: use sin curve for smooth motion */
+			armAngle = (90.0f + 45.0f * Math_SinF(progress * MATH_PI)) * MATH_DEG2RAD;
+		}
+	}
+	e->Anim.LeftArmX  = armAngle;
+	e->Anim.RightArmX = armAngle;
 	HumanModel_DrawCore(e, &human_set, false);
 }
 static void ZombieModel_DrawArm(struct Entity* e) {
