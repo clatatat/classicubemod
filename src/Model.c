@@ -148,6 +148,8 @@ void Model_SetupState(struct Model* model, struct Entity* e) {
 	Models.Active  = model;
 }
 
+cc_bool Models_UseWhiteTex;
+
 void Model_ApplyTexture(struct Entity* e) {
 	struct Model* model = Models.Active;
 	struct ModelTex* data;
@@ -163,7 +165,7 @@ void Model_ApplyTexture(struct Entity* e) {
 		Models.skinType = data->skinType;
 	}
 
-	Gfx_BindTexture(tex);
+	Gfx_BindTexture(Models_UseWhiteTex ? 0 : tex);
 	_64x64 = Models.skinType != SKIN_64x32;
 
 	Models.uScale = e->uScale * 0.015625f;
@@ -1919,6 +1921,17 @@ static void SkeletonModel_MakeParts(void) {
 }
 
 static void SkeletonModel_Draw(struct Entity* e) {
+	/* Base pose: arms outstretched at 90 degrees */
+	float armAngle = 90.0f * MATH_DEG2RAD;
+	/* Attack animation: briefly tilt arms up to 135 degrees (45 more) */
+	{
+		float attackAnim = Mob_GetAttackAnim(Mob_CurrentRenderingId);
+		if (attackAnim > 0.0f) {
+			float progress = attackAnim / 0.3f; /* 0..1 over MOB_ATTACK_ANIM_DURATION */
+			if (progress > 1.0f) progress = 1.0f;
+			armAngle = (90.0f + 45.0f * Math_SinF(progress * MATH_PI)) * MATH_DEG2RAD;
+		}
+	}
 	Model_ApplyTexture(e);
 	Model_LockVB(e, SKELETON_MAX_VERTICES);
 
@@ -1926,8 +1939,8 @@ static void SkeletonModel_Draw(struct Entity* e) {
 	Model_DrawPart(&skeleton_torso);
 	Model_DrawRotate(e->Anim.LeftLegX,  0, 0,                      &skeleton_leftLeg,  false);
 	Model_DrawRotate(e->Anim.RightLegX, 0, 0,                      &skeleton_rightLeg, false);
-	Model_DrawRotate(90.0f * MATH_DEG2RAD,   0, e->Anim.LeftArmZ,  &skeleton_leftArm,  false);
-	Model_DrawRotate(90.0f * MATH_DEG2RAD,   0, e->Anim.RightArmZ, &skeleton_rightArm, false);
+	Model_DrawRotate(armAngle,   0, e->Anim.LeftArmZ,  &skeleton_leftArm,  false);
+	Model_DrawRotate(armAngle,   0, e->Anim.RightArmZ, &skeleton_rightArm, false);
 
 	Model_UnlockVB();
 	Gfx_DrawVb_IndexedTris(SKELETON_MAX_VERTICES);

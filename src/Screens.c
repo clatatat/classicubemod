@@ -556,7 +556,7 @@ static void HUDScreen_Render(void* screen, float delta) {
 		}
 
 		/* Render health hearts (survival mode only) */
-		if (heartsCount > 0 && Gui.IconsTex && !Gui.HideHotbar) {
+		if (heartsCount > 0 && Gui.IconsTex && !Gui.HideHotbar && !SurvInv_IsScreenOpen()) {
 			Gfx_BindTexture(Gui.IconsTex);
 			Gfx_BindDynamicVb(s->vb);
 			Gfx_DrawVb_IndexedTris_Range(heartsCount * 4,

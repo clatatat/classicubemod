@@ -134,6 +134,8 @@ CC_API void Model_SetupState(struct Model* model, struct Entity* entity);
 /* Applies the skin texture of the given entity to the model. */
 /* Uses model's default texture if the entity doesn't have a custom skin. */
 CC_API void Model_ApplyTexture(struct Entity* entity);
+/* When true, Model_ApplyTexture binds a white texture instead of the entity's skin */
+extern cc_bool Models_UseWhiteTex;
 
 /* Flushes buffered vertices to the GPU. */
 CC_API void Model_UpdateVB(void);

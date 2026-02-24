@@ -34,6 +34,7 @@
 #include "Graphics.h"
 #include "Stream.h"
 #include "Generator.h"
+#include "Model.h"
 
 /* Forward declarations for dropped item functions */
 static int DropItem_FindFreeSlot(void);
@@ -1699,6 +1700,8 @@ static void InputHandler_PlaceBlock(void) {
 static void InputHandler_PickBlock(void) {
 	IVec3 pos;
 	BlockID cur;
+	/* In survival mode, pick block is disabled unless cheats are on */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) return;
 	pos = Game_SelectedPos.pos;
 	if (!World_Contains(pos.x, pos.y, pos.z)) return;
 
@@ -2515,6 +2518,7 @@ static float    mobLavaDamageTimer[MAX_NET_PLAYERS];    /* accumulates time in l
 static float    mobCactusDamageTimer[MAX_NET_PLAYERS];  /* accumulates time touching cactus for cactus damage */
 static cc_uint8 mobCreeperVariant[MAX_NET_PLAYERS];     /* creeper variant type (only valid when mobModelIdx == MOB_IDX_CREEPER) */
 static cc_bool  mobSheepSheared[MAX_NET_PLAYERS];       /* true = sheep has been sheared (no wool layer) */
+static GfxResourceID mob_whiteTex;                      /* 1x1 solid white texture for creeper flash */
 
 /* Melee attack system */
 #define MOB_MELEE_DAMAGE        3     /* base melee damage for all enemies */
@@ -3241,6 +3245,19 @@ static PackedCol MobEntity_GetCol(struct Entity* e) {
 		b = b * 2 / 5;
 		col = PackedCol_Make(r, g, b, 255);
 	}
+
+	/* Creeper fuse flash: alternate between entirely white and normal texture */
+	if (id < MAX_NET_PLAYERS && mobModelIdx[id] == MOB_IDX_CREEPER
+		&& mobCreeperFuse[id] >= 0.0f) {
+		float elapsed = CREEPER_ATTACK_FUSE_TIME - mobCreeperFuse[id];
+		float fuseTime = CREEPER_ATTACK_FUSE_TIME;
+		/* Integrated flash count: slow flashes early, fast near detonation */
+		float flashCount = 3.0f * elapsed + 4.0f * elapsed * elapsed / fuseTime;
+		if (((int)flashCount) % 2 == 0) {
+			col = PACKEDCOL_WHITE;
+		}
+	}
+
 	return col;
 }
 
@@ -3303,7 +3320,31 @@ static void MobEntity_RenderModel(struct Entity* e, float delta, float t) {
 
 	/* Now call original NetPlayer RenderModel (lerp + render) - will get our angles */
 	Mob_CurrentRenderingId = id;
-	origNetPlayerVTABLE->RenderModel(e, delta, t);
+
+	/* Creeper fuse: expand horizontally + flash white during fuse */
+	{
+		Vec3 savedScale = e->ModelScale;
+		if (id < MAX_NET_PLAYERS && mobModelIdx[id] == MOB_IDX_CREEPER
+			&& mobCreeperFuse[id] >= 0.0f) {
+			float fuseProgress = 1.0f - (mobCreeperFuse[id] / CREEPER_ATTACK_FUSE_TIME);
+			float hScale = 1.0f + fuseProgress * 0.15f; /* up to 15% wider */
+			e->ModelScale.x *= hScale;
+			e->ModelScale.z *= hScale;
+
+			/* Flash: use engine's built-in white texture during "on" phase */
+			{
+				float elapsed = CREEPER_ATTACK_FUSE_TIME - mobCreeperFuse[id];
+				float flashCount = 3.0f * elapsed + 4.0f * elapsed * elapsed / CREEPER_ATTACK_FUSE_TIME;
+				if (((int)flashCount) % 2 == 0) {
+					Models_UseWhiteTex = true;
+				}
+			}
+		}
+		origNetPlayerVTABLE->RenderModel(e, delta, t);
+		e->ModelScale      = savedScale;
+		Models_UseWhiteTex = false;
+	}
+
 	Mob_CurrentRenderingId = -1;
 }
 
@@ -3806,12 +3847,13 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				int bx = (int)Math_Floor(e->Position.x);
 				int by = (int)Math_Floor(e->Position.y);
 				int bz = (int)Math_Floor(e->Position.z);
-				if (Game_CreeperVariants && mobCreeperVariant[id] == CREEPER_VAR_NUKE) {
-					TNT_ExplodeRadius(bx, by, bz, CREEPER_NUKE_POWER);
-					Mob_PlaySound(SOUND_EXPLODE_BIG, e->Position);
-				} else {
-					TNT_Explode(bx, by, bz);
-				}
+				cc_bool isNuke = Game_CreeperVariants && mobCreeperVariant[id] == CREEPER_VAR_NUKE;
+				Vec3 explodePos;
+				explodePos.x = (float)bx + 0.5f;
+				explodePos.y = (float)by + 0.5f;
+				explodePos.z = (float)bz + 0.5f;
+
+				/* Remove creeper BEFORE explosion so it doesn't take self-damage or drop loot */
 				Entities_Remove(id);
 				mobType[id]        = MOB_TYPE_NONE;
 				mobHasTarget[id]   = false;
@@ -3821,6 +3863,13 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				mobHurtFlash[id]   = 0.0f;
 				mobIsAggro[id]     = false;
 				mobCreeperFuse[id] = -1.0f;
+
+				if (isNuke) {
+					TNT_ExplodeRadius(bx, by, bz, CREEPER_NUKE_POWER);
+					Mob_PlaySound(SOUND_EXPLODE_BIG, explodePos);
+				} else {
+					TNT_Explode(bx, by, bz);
+				}
 				return;
 			}
 		}
@@ -4078,6 +4127,13 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 					Mob_MoveTowards(e, id, playerPos, MOB_SPEED * MOB_HOSTILE_SPEED_FACTOR, delta);
 					mobIsMoving[id] = true;
 				}
+			} else if (mobModelIdx[id] == MOB_IDX_SKELETON && !Game_SkeletonShoot) {
+				/* Skeleton with arrows off: chase like zombie */
+				{
+					float zombieSpeedFactor = (Game_ZombieSpeed + 1) * 0.25f;
+					Mob_MoveTowards(e, id, playerPos, MOB_SPEED * zombieSpeedFactor, delta);
+					mobIsMoving[id] = true;
+				}
 			} else if (mobModelIdx[id] == MOB_IDX_SKELETON && Game_SkeletonShoot) {
 				/* Skeleton: shoot arrows, backpedal if too close, maintain distance */
 				mobSkeletonShootTimer[id] -= delta;
@@ -4152,10 +4208,23 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 					}
 				}
 
-				/* Spider leap contact damage: deal 1.5x melee on contact while airborne */
-				if (!e->OnGround && distSq < SPIDER_LEAP_CONTACT_SQ) {
+				/* Spider leap contact damage: deal 1.5x melee on contact while airborne (once per leap) */
+				if (!e->OnGround && distSq < SPIDER_LEAP_CONTACT_SQ && mobMeleeTimer[id] <= 0.0f) {
 					int leapDmg = Mob_GetDamageWithMultiplier((int)(MOB_MELEE_DAMAGE * SPIDER_LEAP_DAMAGE_MULT));
 					Player_Damage(leapDmg);
+					mobMeleeTimer[id] = MOB_MELEE_COOLDOWN; /* prevent normal melee from also firing */
+					/* Same knockback as normal melee attack */
+					{
+						struct Entity* pe = &Entities.CurPlayer->Base;
+						float kbDx = pe->Position.x - e->Position.x;
+						float kbDz = pe->Position.z - e->Position.z;
+						float kbDist = Math_SqrtF(kbDx * kbDx + kbDz * kbDz);
+						if (kbDist > 0.001f) {
+							pe->Velocity.x += (kbDx / kbDist) * 0.4f;
+							pe->Velocity.z += (kbDz / kbDist) * 0.4f;
+							pe->Velocity.y += 0.24f;
+						}
+					}
 				}
 			} else if (mobModelIdx[id] == MOB_IDX_ZOMBIE) {
 				/* Zombie: chase at configurable speed */
@@ -4179,6 +4248,10 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				if (mobModelIdx[id] == MOB_IDX_ZOMBIE) {
 					canMelee = true;
 					mobAttackAnimTimer[id] = MOB_ATTACK_ANIM_DURATION;
+				} else if (mobModelIdx[id] == MOB_IDX_SKELETON && !Game_SkeletonShoot) {
+					/* Skeleton with arrows off: melee like zombie */
+					canMelee = true;
+					mobAttackAnimTimer[id] = MOB_ATTACK_ANIM_DURATION;
 				} else if (mobModelIdx[id] == MOB_IDX_SPIDER) {
 					canMelee = true;
 				} else if (mobModelIdx[id] == MOB_IDX_CREEPER) {
@@ -4195,6 +4268,18 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 				if (canMelee) {
 					Player_Damage(meleeDmg);
 					mobMeleeTimer[id] = MOB_MELEE_COOLDOWN;
+					/* Knockback player away from mob (~65% of player-to-mob knockback) */
+					{
+						struct Entity* pe = &Entities.CurPlayer->Base;
+						float kbDx = pe->Position.x - e->Position.x;
+						float kbDz = pe->Position.z - e->Position.z;
+						float kbDist = Math_SqrtF(kbDx * kbDx + kbDz * kbDz);
+						if (kbDist > 0.001f) {
+							pe->Velocity.x += (kbDx / kbDist) * 0.4f;
+							pe->Velocity.z += (kbDz / kbDist) * 0.4f;
+							pe->Velocity.y += 0.24f;
+						}
+					}
 				}
 			}
 		} else {
@@ -5020,6 +5105,14 @@ void Mob_SpawnAt(int id, int modelIdx, Vec3 pos) {
 	if (!mob_rng_inited) {
 		Random_SeedFromCurrentTime(&mob_rng);
 		mob_rng_inited = true;
+	}
+
+	/* Create 1x1 solid white texture for creeper flash effect (once) */
+	if (!mob_whiteTex) {
+		BitmapCol whitePixel = BITMAPCOLOR_WHITE;
+		struct Bitmap bmp;
+		Bitmap_Init(bmp, 1, 1, &whitePixel);
+		mob_whiteTex = Gfx_CreateTexture(&bmp, 0, false);
 	}
 
 	if (id < 0 || id >= MAX_NET_PLAYERS) return;
