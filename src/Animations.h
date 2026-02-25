@@ -10,5 +10,8 @@ CC_BEGIN_HEADER
 struct IGameComponent;
 extern struct IGameComponent Animations_Component;
 
+/* The decoded animations.png bitmap (used for fire overlay, etc.) */
+extern struct Bitmap anims_bmp;
+
 CC_END_HEADER
 #endif

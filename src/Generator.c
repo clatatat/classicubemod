@@ -10,10 +10,12 @@
 #include "Window.h"
 #include "Options.h"
 #include "String_.h"
+#include "InputHandler.h"
 
 const struct MapGenerator* gen_active;
 BlockRaw* Gen_Blocks;
 int Gen_Theme;
+cc_uint8 Gen_ActiveTimeMode;
 
 const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 	/* GEN_THEME_NORMAL (0) */
@@ -26,7 +28,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
 		BLOCK_STONE, BLOCK_GRAVEL,                         /* stoneBlock, underwaterBlock */
 		1.0f, 1.0f, 1, 1, 1,                              /* heightScale, caveFreqScale, treePatchMul, flowerPatchMul, mushroomPatchMul */
-		false, false, true, true, false, true, false, false, false, false, false,
+		GEN_TIME_CYCLE, false, true, true, false, true, false, false, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_HELL (1) */
@@ -42,7 +45,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		1.0f, 1.0f, 1, 1, 1,
-		true, false, false, false, false, true, true, true, false, false, false,
+		GEN_TIME_NIGHT, false, false, false, false, true, true, true, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge lava", "Flooding lava"
 	},
 	/* GEN_THEME_PARADISE (2) */
@@ -55,7 +59,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0, 0, 0, 0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		0.5f, 1.0f, 1, 3, 1,                              /* flat terrain, 3x flowers */
-		false, false, true, true, false, true, false, false, true, false, false,
+		GEN_TIME_CYCLE, false, true, true, false, true, false, false, true, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_WOODS (3) */
@@ -68,7 +73,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0, 0, 0, 0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		1.0f, 1.0f, 8, 1, 1,                              /* 8x trees */
-		false, false, true, true, false, true, false, false, false, false, false,
+		GEN_TIME_CYCLE, false, true, true, false, true, false, false, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_DESERT (4) */
@@ -83,8 +89,9 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		PackedCol_Make(0xE0, 0xC8, 0x90, 0xFF),            /* cloudsCol - light golden */
 		0,
 		BLOCK_STONE, BLOCK_GRAVEL,
-		0.5f, 1.0f, 1, 1, 1,                              /* flat terrain */
-		false, false, true, true, 1, false, false, false, false, true, false,
+		0.5f, 1.0f, 0, 1, 1,                              /* flat terrain, 0 trees (oases only) */
+		GEN_TIME_CYCLE, false, true, true, 1, false, false, false, false, true, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting cacti", "Filling edge sand", "Flooding water"
 	},
 	/* GEN_THEME_WINTER (5) */
@@ -100,7 +107,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		1.0f, 1.0f, 1, 1, 1,
-		false, true, true, true, false, false, false, false, false, false, false,
+		GEN_TIME_CYCLE, true, true, true, false, false, false, false, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_MOON (6) */
@@ -116,7 +124,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		0.5f, 1.0f, 0, 1, 1,
-		false, false, true, false, false, false, false, false, false, false, false,
+		GEN_TIME_CYCLE, false, true, false, false, false, false, false, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_JUNGLE (7) */
@@ -129,7 +138,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0, 0, 0, 0,                                        /* sky, fog, clouds, shadow (defaults) */
 		BLOCK_STONE, BLOCK_GRAVEL,
 		1.0f, 1.0f, 4, 4, 1,                              /* 4x trees, 4x flowers */
-		false, false, true, true, false, true, false, false, false, false, true,
+		GEN_TIME_CYCLE, false, true, true, false, true, false, false, false, false, true,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 	/* GEN_THEME_PLAINS (8) */
@@ -142,7 +152,8 @@ const struct GenThemeData Gen_Themes[GEN_THEME_COUNT - 1] = {
 		0, 0, 0, 0,
 		BLOCK_STONE, BLOCK_GRAVEL,
 		0.5f, 1.0f, 0, 0, 1,
-		false, false, true, false, false, false, false, false, false, false, false,
+		GEN_TIME_CYCLE, false, true, false, false, false, false, false, false, false, false,
+		0, 0,                                              /* nightSkyCol, nightFogCol (defaults) */
 		"Planting trees", "Flooding edge water", "Flooding water"
 	},
 };
@@ -185,6 +196,20 @@ void GenTheme_ApplyEnvironment(void) {
 	if (t->edgeBlock)  Env_SetEdgeBlock(t->edgeBlock);
 	if (t->sidesBlock) Env_SetSidesBlock(t->sidesBlock);
 	Env_SetEdgeHeightOffset(t->edgeHeightOffset);
+
+	/* Set runtime time mode from theme */
+	Gen_ActiveTimeMode = t->timeMode;
+
+	/* Re-enable day/night cycle now that theme colors are applied.
+	   OnNewMapLoaded may have already enabled it with default (wrong) colors,
+	   so re-capture the correct theme colors as daytime originals. */
+	if (t->timeMode == GEN_TIME_NIGHT) {
+		DayNightCycle_Enable();   /* captures correct theme colors */
+	} else if (t->timeMode == GEN_TIME_CYCLE && Game_DaylightCycle) {
+		DayNightCycle_Enable();   /* re-capture correct theme colors */
+	} else if (t->timeMode == GEN_TIME_DAY) {
+		DayNightCycle_Disable();
+	}
 }
 
 volatile float Gen_CurrentProgress;
@@ -331,8 +356,6 @@ static void FlatgrassGen_Generate(void) {
 		}
 		FlatgrassGen_MapSet(World.Height / 2, World.Height / 2, BLOCK_SNOW);
 	}
-
-	if (t->hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done = true;
 }
@@ -1260,8 +1283,6 @@ static void NotchyGen_Generate(void) {
 	Mem_Free(heightmap);
 	heightmap = NULL;
 
-	if (Gen_GetTheme()->hasShadowCeiling) Gen_PlaceShadowCeiling();
-
 	gen_done  = true;
 }
 
@@ -1719,8 +1740,6 @@ static void FloatingGen_Generate(void) {
 
 	Mem_Free(heightmap);   heightmap   = NULL;
 	Mem_Free(floatCutoff); floatCutoff = NULL;
-
-	if (Gen_GetTheme()->hasShadowCeiling) Gen_PlaceShadowCeiling();
 
 	gen_done = true;
 }
@@ -2532,6 +2551,8 @@ static void CT_SaveWithPrefix(const char* p) {
 	CT_Key(k, p, "fog-col");    CT_SaveColor(k, t->fogCol);
 	CT_Key(k, p, "clouds-col"); CT_SaveColor(k, t->cloudsCol);
 	CT_Key(k, p, "shadow-col"); CT_SaveColor(k, t->shadowCol);
+	CT_Key(k, p, "night-sky-col"); CT_SaveColor(k, t->nightSkyCol);
+	CT_Key(k, p, "night-fog-col"); CT_SaveColor(k, t->nightFogCol);
 
 	/* Generation multipliers */
 	CT_Key(k, p, "height-scale");       CT_SaveFloat(k, t->heightScale);
@@ -2541,7 +2562,7 @@ static void CT_SaveWithPrefix(const char* p) {
 	CT_Key(k, p, "mushroom-patch-mul"); Options_SetInt(k, t->mushroomPatchMul);
 
 	/* Feature flags */
-	CT_Key(k, p, "shadow-ceiling");    Options_SetBool(k, t->hasShadowCeiling);
+	CT_Key(k, p, "time-mode");         Options_SetInt(k, t->timeMode);
 	CT_Key(k, p, "snow-layer");        Options_SetBool(k, t->hasSnowLayer);
 	CT_Key(k, p, "dirt-to-grass");     Options_SetBool(k, t->dirtToGrass);
 	CT_Key(k, p, "cave-gardens");      Options_SetBool(k, t->hasCaveGardens);
@@ -2589,6 +2610,8 @@ static void CT_LoadWithPrefix(const char* p) {
 	CT_Key(k, p, "fog-col");    t->fogCol    = CT_LoadColor(k, ENV_DEFAULT_FOG_COLOR);
 	CT_Key(k, p, "clouds-col"); t->cloudsCol = CT_LoadColor(k, ENV_DEFAULT_CLOUDS_COLOR);
 	CT_Key(k, p, "shadow-col"); t->shadowCol = CT_LoadColor(k, ENV_DEFAULT_SHADOW_COLOR);
+	CT_Key(k, p, "night-sky-col"); t->nightSkyCol = CT_LoadColor(k, 0);
+	CT_Key(k, p, "night-fog-col"); t->nightFogCol = CT_LoadColor(k, 0);
 
 	/* Generation multipliers */
 	CT_Key(k, p, "height-scale");       t->heightScale      = Options_GetFloat(k, 0.1f, 5.0f, 1.0f);
@@ -2598,7 +2621,7 @@ static void CT_LoadWithPrefix(const char* p) {
 	CT_Key(k, p, "mushroom-patch-mul"); t->mushroomPatchMul = Options_GetInt(k, 0, 20, 1);
 
 	/* Feature flags */
-	CT_Key(k, p, "shadow-ceiling");    t->hasShadowCeiling = Options_GetBool(k, false);
+	CT_Key(k, p, "time-mode");         t->timeMode         = Options_GetInt(k, 0, 2, GEN_TIME_CYCLE);
 	CT_Key(k, p, "snow-layer");        t->hasSnowLayer     = Options_GetBool(k, false);
 	CT_Key(k, p, "dirt-to-grass");     t->dirtToGrass      = Options_GetBool(k, true);
 	CT_Key(k, p, "cave-gardens");      t->hasCaveGardens   = Options_GetBool(k, true);

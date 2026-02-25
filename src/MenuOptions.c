@@ -1967,6 +1967,14 @@ static PackedCol CT_GetClouds(void)  { return Gen_CustomTheme.cloudsCol; }
 static void      CT_SetClouds(PackedCol v) { Gen_CustomTheme.cloudsCol = v; CustomTheme_Save(); }
 static PackedCol CT_GetShadow(void)  { return Gen_CustomTheme.shadowCol; }
 static void      CT_SetShadow(PackedCol v) { Gen_CustomTheme.shadowCol = v; CustomTheme_Save(); }
+static PackedCol CT_GetNightSky(void)  { return Gen_CustomTheme.nightSkyCol; }
+static void      CT_SetNightSky(PackedCol v) { Gen_CustomTheme.nightSkyCol = v; CustomTheme_Save(); }
+static PackedCol CT_GetNightFog(void)  { return Gen_CustomTheme.nightFogCol; }
+static void      CT_SetNightFog(PackedCol v) { Gen_CustomTheme.nightFogCol = v; CustomTheme_Save(); }
+
+/* Default night colors used when nightSkyCol/nightFogCol are 0 */
+#define CT_DEFAULT_NIGHT_SKY PackedCol_Make(5,   5,   8,   255)
+#define CT_DEFAULT_NIGHT_FOG PackedCol_Make(8,   8,   12,  255)
 
 static void CTColors_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
@@ -1983,6 +1991,12 @@ static void CTColors_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddHex(s, "Shadow color", ENV_DEFAULT_SHADOW_COLOR,
 			CT_GetShadow, CT_SetShadow,
 			"Shadow color (set to default to\nuse engine default)");
+		MenuOptionsScreen_AddHex(s, "Night sky color", CT_DEFAULT_NIGHT_SKY,
+			CT_GetNightSky, CT_SetNightSky,
+			"Sky color at night\n(set to default for standard dark)");
+		MenuOptionsScreen_AddHex(s, "Night fog color", CT_DEFAULT_NIGHT_FOG,
+			CT_GetNightFog, CT_SetNightFog,
+			"Fog color at night\n(set to default for standard dark)");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchCustomTheme);
 }
@@ -2043,8 +2057,10 @@ static void CTVegetation_Show(void) {
 
 
 /*----- Features sub-screen -----*/
-static cc_bool CT_GetShadowCeil(void)    { return Gen_CustomTheme.hasShadowCeiling; }
-static void    CT_SetShadowCeil(cc_bool v) { Gen_CustomTheme.hasShadowCeiling = v; CustomTheme_Save(); }
+static const char* const CT_TimeModeNames[] = { "Cycle", "Day", "Night" };
+#define CT_TIME_MODE_COUNT 3
+static int  CT_GetTimeMode(void)    { return Gen_CustomTheme.timeMode; }
+static void CT_SetTimeMode(int v)   { Gen_CustomTheme.timeMode = (cc_uint8)v; CustomTheme_Save(); }
 static cc_bool CT_GetSnowLayer(void)    { return Gen_CustomTheme.hasSnowLayer; }
 static void    CT_SetSnowLayer(cc_bool v) { Gen_CustomTheme.hasSnowLayer = v; CustomTheme_Save(); }
 static cc_bool CT_GetDirtToGrass(void)    { return Gen_CustomTheme.dirtToGrass; }
@@ -2061,9 +2077,9 @@ static void    CT_SetRaiseWater(cc_bool v) { Gen_CustomTheme.raiseWaterLevel = v
 static void CTFeatures_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
-		MenuOptionsScreen_AddBool(s, "Shadow ceiling",
-			CT_GetShadowCeil, CT_SetShadowCeil,
-			"Light-blocking ceiling at top\n(hell-style darkness)");
+		MenuOptionsScreen_AddEnum(s, "Time",
+			CT_TimeModeNames, CT_TIME_MODE_COUNT, CT_GetTimeMode, CT_SetTimeMode,
+			"Cycle: normal day/night cycle\nDay: always daytime\nNight: always nighttime");
 		MenuOptionsScreen_AddBool(s, "Snow layer",
 			CT_GetSnowLayer, CT_SetSnowLayer,
 			"Place snow on surfaces\nand tree leaves");
@@ -2352,7 +2368,7 @@ static void CTGroup_InitWidgets(struct MenuOptionsScreen* s) {
 			"Configure tree, flower, mushroom\ndensity and plant types");
 		MenuOptionsScreen_AddButton(s, "Features...",
 			Menu_SwitchCTFeatures, NULL, NULL,
-			"Toggle shadow ceiling, snow,\ncave gardens, and more");
+			"Time mode, snow, cave gardens,\nand more");
 		MenuOptionsScreen_AddButton(s, "Ores...",
 			Menu_SwitchCTOres, NULL, NULL,
 			"Configure ore types and\ngeneration frequency");

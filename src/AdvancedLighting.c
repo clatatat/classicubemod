@@ -250,38 +250,12 @@ static cc_bool Adv_IsLit_Fast(int x, int y, int z) {
 /*########################################################################################################################*
 *------------------------------------------------Sky light propagation----------------------------------------------------*
 *#########################################################################################################################*/
-static void Adv_PropagateSkyLight(void) {
-	int x, y, z, h, d, nh, nx, ny, nz, nIdx, minY, maxY;
+/* BFS drain helper: propagates queued sky light entries */
+static void Adv_DrainSkyBFS(void) {
+	int d, nx, ny, nz, nIdx;
 	struct AdvLightNode entry, cur;
 	BlockID nb;
 
-	/* Phase 1: Set sky light = 15 for all blocks above the heightmap */
-	for (z = 0; z < World.Length; z++) {
-		for (x = 0; x < World.Width; x++) {
-			h = ClassicLighting_GetLightHeight(x, z);
-			for (y = h + 1; y < World.Height; y++) {
-				adv_skylight[World_Pack(x, y, z)] = ADV_MAX_LEVEL;
-			}
-		}
-	}
-
-	/* Phase 1.5: Seed blocks AT the heightmap that are light-passable (e.g. water).
-	   The heightmap marks blocks that have BlocksLight=true, but water/leaves etc.
-	   are still transparent in our system. Seed them from the sky above. */
-	for (z = 0; z < World.Length; z++) {
-		for (x = 0; x < World.Width; x++) {
-			h = ClassicLighting_GetLightHeight(x, z);
-			if (h < 0 || h >= World.Height) continue;
-			nb = World_GetBlock(x, h, z);
-			if (Adv_CanLightPass(nb)) {
-				entry.x = x; entry.y = h; entry.z = z;
-				entry.level = ADV_MAX_LEVEL - 1;
-				Queue_Enqueue(&adv_queue, &entry);
-			}
-		}
-	}
-
-	/* Also flush those seeds through BFS before Phase 2 */
 	while (adv_queue.count > 0) {
 		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
 		nIdx = World_Pack(cur.x, cur.y, cur.z);
@@ -309,10 +283,51 @@ static void Adv_PropagateSkyLight(void) {
 			Queue_Enqueue(&adv_queue, &entry);
 		}
 	}
+}
 
-	/* Phase 2: Seed BFS from sky-adjacent underground transparent blocks.
-	   For each pair of adjacent columns with different heights, the taller
-	   column has underground blocks that border sky blocks in the shorter column. */
+static void Adv_PropagateSkyLight(void) {
+	int x, y, z, h, d, nh, nx, nz, nIdx, minY, maxY;
+	struct AdvLightNode entry;
+	BlockID nb;
+	int seedCount;
+
+	/* Phase 1: Set sky light = 15 for all blocks above the heightmap */
+	for (z = 0; z < World.Length; z++) {
+		for (x = 0; x < World.Width; x++) {
+			h = ClassicLighting_GetLightHeight(x, z);
+			/* GetLightHeight returns -10 for all-transparent columns, so clamp to 0 */
+			y = h + 1;
+			if (y < 0) y = 0;
+			for (; y < World.Height; y++) {
+				adv_skylight[World_Pack(x, y, z)] = ADV_MAX_LEVEL;
+			}
+		}
+	}
+
+	/* Phase 1.5: Seed blocks AT the heightmap that are light-passable (e.g. water).
+	   The heightmap marks blocks that have BlocksLight=true, but water/leaves etc.
+	   are still transparent in our system. Seed them from the sky above. */
+	for (z = 0; z < World.Length; z++) {
+		for (x = 0; x < World.Width; x++) {
+			h = ClassicLighting_GetLightHeight(x, z);
+			if (h < 0 || h >= World.Height) continue;
+			nb = World_GetBlock(x, h, z);
+			if (Adv_CanLightPass(nb)) {
+				entry.x = x; entry.y = h; entry.z = z;
+				entry.level = ADV_MAX_LEVEL - 1;
+				Queue_Enqueue(&adv_queue, &entry);
+			}
+		}
+	}
+
+	/* Flush Phase 1.5 seeds */
+	Adv_DrainSkyBFS();
+
+	/* Phase 2+3 combined: Seed underground transparent blocks adjacent to sky,
+	   draining BFS periodically to keep peak queue size bounded.
+	   Without batching, floating island worlds seed millions of entries before
+	   any get consumed, causing the queue to exhaust available memory. */
+	seedCount = 0;
 	for (z = 0; z < World.Length; z++) {
 		for (x = 0; x < World.Width; x++) {
 			h = ClassicLighting_GetLightHeight(x, z);
@@ -338,46 +353,26 @@ static void Adv_PropagateSkyLight(void) {
 					if (Adv_CanLightPass(nb)) {
 						nIdx = World_Pack(nx, y, nz);
 						if (adv_skylight[nIdx] < ADV_MAX_LEVEL - 1) {
+							adv_skylight[nIdx] = ADV_MAX_LEVEL - 1; /* mark immediately to prevent duplicate seeds */
 							entry.x = nx; entry.y = y; entry.z = nz;
 							entry.level = ADV_MAX_LEVEL - 1;
 							Queue_Enqueue(&adv_queue, &entry);
+							seedCount++;
 						}
 					}
 				}
 			}
+
+			/* Drain BFS periodically to keep queue memory bounded */
+			if (seedCount >= 50000) {
+				Adv_DrainSkyBFS();
+				seedCount = 0;
+			}
 		}
 	}
 
-	/* Phase 3: BFS - spread sky light through transparent underground blocks */
-	while (adv_queue.count > 0) {
-		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
-		nIdx = World_Pack(cur.x, cur.y, cur.z);
-
-		if (adv_skylight[nIdx] >= cur.level) continue;
-		if (cur.level == 0) continue;
-
-		adv_skylight[nIdx] = cur.level;
-
-		if (cur.level <= 1) continue;
-
-		for (d = 0; d < 6; d++) {
-			nx = cur.x + adv_dirs[d][0];
-			ny = cur.y + adv_dirs[d][1];
-			nz = cur.z + adv_dirs[d][2];
-
-			if (!World_Contains(nx, ny, nz)) continue;
-
-			nIdx = World_Pack(nx, ny, nz);
-			if (adv_skylight[nIdx] >= cur.level - 1) continue;
-
-			nb = World_GetBlock(nx, ny, nz);
-			if (!Adv_CanLightPass(nb)) continue;
-
-			entry.x = nx; entry.y = ny; entry.z = nz;
-			entry.level = cur.level - 1;
-			Queue_Enqueue(&adv_queue, &entry);
-		}
-	}
+	/* Final drain for any remaining seeds */
+	Adv_DrainSkyBFS();
 }
 
 

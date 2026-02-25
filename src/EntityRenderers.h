@@ -12,6 +12,8 @@ struct Entity;
 
 /* Draws shadows under entities, depending on Entities.ShadowsMode */
 void EntityShadows_Render(void);
+/* Renders fire animation overlay on burning mobs */
+void EntityFire_Render(void);
 
 /* Deletes the texture containing the entity's nametag */
 void EntityNames_Delete(struct Entity* e);

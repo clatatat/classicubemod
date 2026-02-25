@@ -718,6 +718,50 @@ static void LocalPlayer_SetLocation(struct Entity* e, struct LocationUpdate* upd
 	LocalInterpComp_SetLocation(&p->Interp, update, e);
 }
 
+/* Check if there is any solid ground below the player's AABB at the given position */
+static cc_bool LocalPlayer_HasGroundBelow(struct Entity* e, Vec3 pos) {
+	struct AABB bb;
+	int minX, maxX, minZ, maxZ, feetY, x, z;
+	BlockID block;
+
+	AABB_Make(&bb, &pos, &e->Size);
+	feetY = Math_Floor(pos.y - 0.05f);
+	minX  = Math_Floor(bb.Min.x + 0.01f);
+	maxX  = Math_Floor(bb.Max.x - 0.01f);
+	minZ  = Math_Floor(bb.Min.z + 0.01f);
+	maxZ  = Math_Floor(bb.Max.z - 0.01f);
+
+	for (x = minX; x <= maxX; x++) {
+		for (z = minZ; z <= maxZ; z++) {
+			block = World_SafeGetBlock(x, feetY, z);
+			if (Blocks.Collide[block] >= COLLIDE_SOLID) return true;
+		}
+	}
+	return false;
+}
+
+/* Prevent crouching player from walking off block edges (per-axis clamping) */
+static void LocalPlayer_ClampToEdge(struct LocalPlayer* p, Vec3 oldPos) {
+	struct Entity* e = &p->Base;
+	Vec3 testPos;
+
+	/* Test X axis: would moving X only go off edge? */
+	testPos = oldPos;
+	testPos.x = e->Position.x;
+	if (!LocalPlayer_HasGroundBelow(e, testPos)) {
+		e->Position.x = oldPos.x;
+		e->Velocity.x = 0.0f;
+	}
+
+	/* Test Z axis: would moving Z only go off edge? */
+	testPos = oldPos;
+	testPos.z = e->Position.z;
+	if (!LocalPlayer_HasGroundBelow(e, testPos)) {
+		e->Position.z = oldPos.z;
+		e->Velocity.z = 0.0f;
+	}
+}
+
 static void LocalPlayer_Tick(struct Entity* e, float delta) {
 	struct LocalPlayer* p = (struct LocalPlayer*)e;
 	struct HacksComp* hacks = &p->Hacks;
@@ -742,7 +786,22 @@ static void LocalPlayer_Tick(struct Entity* e, float delta) {
 
 	PhysicsComp_UpdateVelocityState(&p->Physics);
 	headingVelocity = Vec3_RotateY3(xMoving, 0, zMoving, e->Yaw * MATH_DEG2RAD);
-	PhysicsComp_PhysicsTick(&p->Physics, headingVelocity);
+
+	/* Crouch: reduce movement speed to 30% */
+	if (p->Crouching && !hacks->Floating) {
+		headingVelocity.x *= 0.3f;
+		headingVelocity.z *= 0.3f;
+	}
+
+	{
+		Vec3 preCrouchPos = e->Position;
+		PhysicsComp_PhysicsTick(&p->Physics, headingVelocity);
+
+		/* Crouch edge prevention: prevent walking off block edges */
+		if (p->Crouching && wasOnGround && !hacks->Floating && e->OnGround) {
+			LocalPlayer_ClampToEdge(p, preCrouchPos);
+		}
+	}
 
 	/* Fixes high jump, when holding down a movement key, jump, fly, then let go of fly key */
 	if (p->Hacks.Floating) e->Velocity.y = 0.0f;
@@ -1010,9 +1069,21 @@ static cc_bool LocalPlayer_TriggerHalfSpeed(int key, struct InputDevice* device)
 }
 
 static cc_bool LocalPlayer_TriggerSpeed(int key, struct InputDevice* device) {
-	struct HacksComp* hacks = &LocalPlayer_Instances[device->mappedIndex].Hacks;
+	struct LocalPlayer* p = &LocalPlayer_Instances[device->mappedIndex];
+	struct HacksComp* hacks = &p->Hacks;
 	cc_bool touch = device->type == INPUT_DEVICE_TOUCH;
 	if (Gui.InputGrab) return false;
+
+	/* In survival mode without cheats, shift = crouch */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) {
+		p->Crouching = (!touch || !p->Crouching);
+		if (p->Crouching) {
+			p->Base.Size.y = 1.5f * p->Base.ModelScale.y;
+		} else {
+			Entity_UpdateModelBounds(&p->Base);
+		}
+		return true;
+	}
 
 	hacks->Speeding = (!touch || !hacks->Speeding) && hacks->Enabled;
 	return true;
@@ -1024,8 +1095,16 @@ static void LocalPlayer_ReleaseHalfSpeed(int key, struct InputDevice* device) {
 }
 
 static void LocalPlayer_ReleaseSpeed(int key, struct InputDevice* device) {
-	struct HacksComp* hacks = &LocalPlayer_Instances[device->mappedIndex].Hacks;
-	if (device->type != INPUT_DEVICE_TOUCH) hacks->Speeding = false;
+	struct LocalPlayer* p = &LocalPlayer_Instances[device->mappedIndex];
+	struct HacksComp* hacks = &p->Hacks;
+
+	if (device->type != INPUT_DEVICE_TOUCH) {
+		hacks->Speeding = false;
+		if (p->Crouching) {
+			p->Crouching = false;
+			Entity_UpdateModelBounds(&p->Base);
+		}
+	}
 }
 
 

@@ -1031,7 +1031,7 @@ static void DumpStack(void) {
 	}
 }
 
-static BOOL WINAPI DumpModule(const char* name, ULONG_PTR base, ULONG size, void* userCtx) {
+static BOOL WINAPI DumpModule(const char* name, ULONG base, ULONG size, void* userCtx) {
 	cc_string str; char strBuffer[256];
 	cc_uintptr beg, end;
 
@@ -1049,7 +1049,7 @@ static void DumpMisc(void) {
 
 	if (!_EnumerateLoadedModules) return;
 	Logger_Log(&modules);
-	_EnumerateLoadedModules(curProcess, DumpModule, NULL);
+	_EnumerateLoadedModules(curProcess, (PENUMLOADED_MODULES_CALLBACK)DumpModule, NULL);
 }
 
 #elif defined CC_BUILD_LINUX || defined CC_BUILD_SOLARIS || defined CC_BUILD_ANDROID

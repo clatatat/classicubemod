@@ -596,6 +596,7 @@ static void Render3DFrame(float delta, float t) {
 	EnvRenderer_RenderMapSides();
 
 	EntityShadows_Render();
+	EntityFire_Render();
 	if (Game_SelectedPos.valid && !Game_HideGui) {
 		SelOutlineRenderer_Render(&Game_SelectedPos, true);
 	}

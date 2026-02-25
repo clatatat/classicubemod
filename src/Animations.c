@@ -187,7 +187,7 @@ struct AnimationData {
 	cc_uint16 frameDelay;     /* Delay between each frame */
 };
 
-static struct Bitmap anims_bmp;
+struct Bitmap anims_bmp;
 static struct AnimationData anims_list[ATLAS1D_MAX_ATLASES];
 static int anims_count;
 static cc_bool anims_validated, useLavaAnim, useWaterAnim, alwaysLavaAnim, alwaysWaterAnim;

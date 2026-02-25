@@ -3235,14 +3235,14 @@ static PackedCol MobEntity_GetCol(struct Entity* e) {
 		col = PackedCol_Make(r, g, b, 255);
 	}
 
-	/* Darken mob when burning in sunlight (light sensitivity) */
-	if (id < MAX_NET_PLAYERS && mobSunDamageTimer[id] > 0.0f) {
+	/* Tint mob orange when burning in sunlight (light sensitivity) */
+	if (id < MAX_NET_PLAYERS && (mobSunDamageTimer[id] > 0.0f || mobLavaDamageTimer[id] > 0.0f)) {
 		r = PackedCol_R(col);
 		g = PackedCol_G(col);
 		b = PackedCol_B(col);
-		r = r * 2 / 5;
-		g = g * 2 / 5;
-		b = b * 2 / 5;
+		r = r + (255 - r) / 3;
+		g = g * 2 / 3;
+		b = b / 3;
 		col = PackedCol_Make(r, g, b, 255);
 	}
 
@@ -4490,6 +4490,11 @@ cc_bool Mob_IsMob(int id) {
 
 cc_bool Mob_IsCreeper(int id) {
 	return Mob_IsMob(id) && mobModelIdx[id] == MOB_IDX_CREEPER;
+}
+
+cc_bool Mob_IsBurning(int id) {
+	if (!Mob_IsMob(id)) return false;
+	return mobSunDamageTimer[id] > 0.0f || mobLavaDamageTimer[id] > 0.0f;
 }
 
 int Mob_CurrentRenderingId = -1;
@@ -5775,19 +5780,27 @@ static PackedCol DayNight_LerpColor(PackedCol a, PackedCol b, float t) {
 }
 
 static cc_bool DayNightCycle_IsNight(void) {
+	if (Gen_ActiveTimeMode == GEN_TIME_NIGHT) return dn_active;
 	return dn_active && dn_timer >= DN_DAY_END && dn_timer < DN_CYCLE_END;
 }
 
 /* Stricter check: only true when nearly or fully dark (for hostile spawning) */
 static cc_bool DayNightCycle_IsDark(void) {
+	/* Always-night worlds are always dark */
+	float sunsetThreshold, sunriseStopAt;
+	if (Gen_ActiveTimeMode == GEN_TIME_NIGHT) return dn_active;
 	/* Start spawning when sunset is 90% complete, stop when sunrise is 90% complete */
-	float sunsetThreshold = DN_DAY_END + DN_TRANSITION_DURATION * 0.9f;
-	float sunriseStopAt   = DN_NIGHT_END + DN_TRANSITION_DURATION * 0.1f;
+	sunsetThreshold = DN_DAY_END + DN_TRANSITION_DURATION * 0.9f;
+	sunriseStopAt   = DN_NIGHT_END + DN_TRANSITION_DURATION * 0.1f;
 	return dn_active && dn_timer >= sunsetThreshold && dn_timer < sunriseStopAt;
 }
 
 static void DayNight_ApplyColors(float t) {
 	/* t: 0.0 = full day, 1.0 = full night */
+	const struct GenThemeData* theme = Gen_GetTheme();
+	/* Use per-theme night colors if set, otherwise use defaults */
+	PackedCol nightSkyTarget    = theme->nightSkyCol ? theme->nightSkyCol : DN_NIGHT_SKY_COL;
+	PackedCol nightFogTarget    = theme->nightFogCol ? theme->nightFogCol : DN_NIGHT_FOG_COL;
 	/* Night sun target: slightly darker than shadow color (~80% of original shadow brightness) */
 	PackedCol nightSunTarget = PackedCol_Make(
 		PackedCol_R(dn_origShadowCol) * 4 / 5,
@@ -5797,8 +5810,8 @@ static void DayNight_ApplyColors(float t) {
 	PackedCol nightShadowTarget = nightSunTarget;
 	PackedCol sunCol    = DayNight_LerpColor(dn_origSunCol,    nightSunTarget,      t);
 	PackedCol shadowCol = DayNight_LerpColor(dn_origShadowCol, nightShadowTarget,   t);
-	PackedCol skyCol    = DayNight_LerpColor(dn_origSkyCol,    DN_NIGHT_SKY_COL,    t);
-	PackedCol fogCol    = DayNight_LerpColor(dn_origFogCol,    DN_NIGHT_FOG_COL,    t);
+	PackedCol skyCol    = DayNight_LerpColor(dn_origSkyCol,    nightSkyTarget,      t);
+	PackedCol fogCol    = DayNight_LerpColor(dn_origFogCol,    nightFogTarget,      t);
 	PackedCol cloudsCol = DayNight_LerpColor(dn_origCloudsCol, DN_NIGHT_CLOUDS_COL, t);
 
 	/* Only update sun/shadow colors if changed (triggers expensive chunk rebuild) */
@@ -5819,6 +5832,12 @@ static void DayNight_ApplyColors(float t) {
 static void DayNightCycle_Tick(struct ScheduledTask* task) {
 	float t;
 	if (!dn_active) return;
+
+	/* For always-night worlds, stay frozen at full night */
+	if (Gen_ActiveTimeMode == GEN_TIME_NIGHT) {
+		DayNight_ApplyColors(1.0f);
+		return;
+	}
 
 	dn_timer += (float)task->interval;
 
@@ -5960,7 +5979,7 @@ static void OnInit(void) {
  *   [12]    Game_SurvivalMode (1 byte, bool)
  *   [13]    Game_DaylightCycle (1 byte, bool)
  *   [14]    Player_CheatsEnabled (1 byte, bool)
- *   [15]    reserved (1 byte)
+ *   [15]    Gen_ActiveTimeMode (1 byte, 0=Cycle 1=Day 2=Night)
  */
 #define WORLDSETTINGS_VERSION 1
 #define WORLDSETTINGS_SIZE    16
@@ -5982,7 +6001,7 @@ void WorldSettings_SaveToFile(const cc_string* path) {
 	buf[12] = Game_SurvivalMode ? 1 : 0;
 	buf[13] = Game_DaylightCycle ? 1 : 0;
 	buf[14] = Player_CheatsEnabled ? 1 : 0;
-	buf[15] = 0;
+	buf[15] = Gen_ActiveTimeMode;
 
 	Stream_Write(&stream, buf, WORLDSETTINGS_SIZE);
 	stream.Close(&stream);
@@ -6019,6 +6038,21 @@ void WorldSettings_LoadFromFile(const cc_string* path) {
 	Game_SurvivalMode = buf[12];
 	Game_DaylightCycle = buf[13];
 	Player_CheatsEnabled = buf[14];
+
+	/* Restore time mode and reconfigure day/night cycle */
+	Gen_ActiveTimeMode = buf[15];
+	if (Gen_ActiveTimeMode == GEN_TIME_NIGHT) {
+		/* Always-night world: ensure cycle is active and frozen at night */
+		if (!dn_active) DayNightCycle_Enable();
+		DayNight_ApplyColors(1.0f);
+	} else if (Gen_ActiveTimeMode == GEN_TIME_CYCLE && Game_DaylightCycle) {
+		/* Normal cycle: should already be active from OnNewMapLoaded */
+		if (!dn_active) DayNightCycle_Enable();
+		if (savedTimer >= 0.0f) DayNightCycle_SetTimer(savedTimer);
+	} else {
+		/* Day mode or cycle disabled: turn off any active cycle */
+		DayNightCycle_Disable();
+	}
 
 	/* Re-apply survival mode hacks restriction */
 	if (Game_SurvivalMode && !Player_CheatsEnabled) {
@@ -6228,6 +6262,7 @@ static void OnNewMap(void) {
 	mobSpawnTimer = 0.0f;
 	BlockBreaking_Reset();
 	dn_active = false;
+	Gen_ActiveTimeMode = GEN_TIME_CYCLE;
 	/* Reset player damage state */
 	playerLavaDamageTimer   = 0.0f;
 	playerCactusDamageTimer = 0.0f;
@@ -6237,8 +6272,12 @@ static void OnNewMap(void) {
 }
 
 static void OnNewMapLoaded(void) {
-	/* Auto-start day/night cycle if enabled and not in hell/cave theme */
-	if (Game_DaylightCycle && !Gen_GetTheme()->hasShadowCeiling) {
+	/* Auto-start day/night cycle based on time mode.
+	   For generated maps, GenTheme_ApplyEnvironment will re-call DayNightCycle_Enable
+	   after setting correct theme colors, so capturing defaults here is OK. */
+	if (Gen_ActiveTimeMode == GEN_TIME_NIGHT) {
+		DayNightCycle_Enable();
+	} else if (Gen_ActiveTimeMode == GEN_TIME_CYCLE && Game_DaylightCycle) {
 		DayNightCycle_Enable();
 	}
 }

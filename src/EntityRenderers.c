@@ -12,6 +12,9 @@
 #include "Particle.h"
 #include "Drawer2D.h"
 #include "Server.h"
+#include "InputHandler.h"
+#include "TexturePack.h"
+#include "Animations.h"
 
 /*########################################################################################################################*
 *------------------------------------------------------Entity Shadow------------------------------------------------------*
@@ -459,6 +462,130 @@ static void EntityNames_ChatFontChanged(void* obj) {
 
 
 /*########################################################################################################################*
+*------------------------------------------------Entity fire overlay------------------------------------------------------*
+*#########################################################################################################################*/
+static GfxResourceID fire_tex;
+static GfxResourceID fire_VB;
+static int fire_frameCount;
+
+#define FIRE_FRAME_SIZE 16
+#define FIRE_FRAME_DELAY 0.05  /* seconds per frame (~20 fps) */
+#define FIRE_MAX_TILES 6
+#define FIRE_MAX_VERTS (FIRE_MAX_TILES * 4)
+
+static void EntityFire_MakeTexture(void) {
+	if (!anims_bmp.scan0) return;
+	/* animations.png is a HORIZONTAL strip: 512x16, so 32 frames of 16x16 */
+	fire_frameCount = anims_bmp.width / FIRE_FRAME_SIZE;
+	if (fire_frameCount < 1) fire_frameCount = 1;
+
+	fire_tex = Gfx_CreateTexture(&anims_bmp, TEXTURE_FLAG_MANAGED, false);
+}
+
+/* Emit tiled billboard quads that only rotate around Y axis (like dropped items) */
+static int EntityFire_DrawQuad(struct Entity* e, struct VertexTextured* v, int curFrame) {
+	struct Matrix* view;
+	float halfW, tileH, rX, rZ, fX, fZ, len;
+	float frameU, u1, u2;
+	float baseX, baseY, baseZ, y0, y1;
+	PackedCol col = PackedCol_Make(255, 255, 255, 200);
+	int numTiles, i, count = 0;
+
+	halfW = e->Size.x * 0.5f + 0.15f;
+	tileH = halfW * 2.0f; /* keep 1:1 aspect ratio with the 16x16 frame */
+
+	/* Horizontal-only billboard: project camera right vector onto XZ plane */
+	view = &Gfx.View;
+	rX = view->row1.x;
+	rZ = view->row3.x;
+	len = Math_SqrtF(rX * rX + rZ * rZ);
+	if (len > 0.0001f) { rX /= len; rZ /= len; }
+
+	/* Forward direction on XZ plane (perpendicular to right, pointing towards camera) */
+	fX = -rZ;
+	fZ =  rX;
+
+	/* UV: horizontal frame selection in horizontal strip (full V range) */
+	frameU = 1.0f / fire_frameCount;
+	u1 = curFrame * frameU;
+	u2 = u1 + frameU;
+
+	/* Offset base position slightly towards the camera so fire renders in front of the mob */
+	baseX = e->Position.x + fX * 0.2f;
+	baseY = e->Position.y;
+	baseZ = e->Position.z + fZ * 0.2f;
+
+	numTiles = Math_Ceil(e->Size.y / tileH);
+	if (numTiles < 1) numTiles = 1;
+	if (numTiles > FIRE_MAX_TILES) numTiles = FIRE_MAX_TILES;
+
+	for (i = 0; i < numTiles; i++) {
+		y0 = baseY + i * tileH;
+		y1 = y0 + tileH;
+
+		v->x = baseX - rX * halfW; v->y = y0; v->z = baseZ - rZ * halfW;
+		v->Col = col; v->U = u1; v->V = 1.0f; v++;
+
+		v->x = baseX - rX * halfW; v->y = y1; v->z = baseZ - rZ * halfW;
+		v->Col = col; v->U = u1; v->V = 0.0f; v++;
+
+		v->x = baseX + rX * halfW; v->y = y1; v->z = baseZ + rZ * halfW;
+		v->Col = col; v->U = u2; v->V = 0.0f; v++;
+
+		v->x = baseX + rX * halfW; v->y = y0; v->z = baseZ + rZ * halfW;
+		v->Col = col; v->U = u2; v->V = 1.0f; v++;
+
+		count += 4;
+	}
+
+	return count;
+}
+
+void EntityFire_Render(void) {
+	struct VertexTextured vertices[FIRE_MAX_VERTS];
+	struct VertexTextured* ptr;
+	struct Entity* e;
+	int i, count, curFrame;
+
+	if (!fire_tex) {
+		if (!anims_bmp.scan0) return;
+		EntityFire_MakeTexture();
+		if (!fire_tex) return;
+	}
+	if (!fire_VB)
+		fire_VB = Gfx_CreateDynamicVb(VERTEX_FORMAT_TEXTURED, FIRE_MAX_VERTS);
+
+	/* Compute current animation frame from global time */
+	curFrame = (int)(Game.Time / FIRE_FRAME_DELAY) % fire_frameCount;
+
+	Gfx_SetAlphaTest(true);
+	Gfx_SetAlphaBlending(true);
+	Gfx_SetDepthWrite(false);
+	Gfx_BindTexture(fire_tex);
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
+
+	for (i = 0; i < ENTITIES_MAX_COUNT; i++) 
+	{
+		e = Entities.List[i];
+		if (!e || !e->ShouldRender) continue;
+		if (!Mob_IsBurning(i)) continue;
+
+		ptr = vertices;
+		count = EntityFire_DrawQuad(e, ptr, curFrame);
+
+		if (count > 0) {
+			Gfx_SetDynamicVbData(fire_VB, vertices, count);
+			Gfx_DrawVb_IndexedTris(count);
+		}
+	}
+
+	Gfx_SetAlphaTest(false);
+	Gfx_SetAlphaBlending(false);
+	Gfx_SetDepthWrite(true);
+}
+
+
+/*########################################################################################################################*
 *-----------------------------------------------Entity renderers component------------------------------------------------*
 *#########################################################################################################################*/
 static void EntityRenderers_ContextLost(void* obj) {
@@ -467,11 +594,19 @@ static void EntityRenderers_ContextLost(void* obj) {
 	
 	Gfx_DeleteDynamicVb(&names_VB);
 	DeleteAllNameTextures();
+
+	Gfx_DeleteTexture(&fire_tex);
+	Gfx_DeleteDynamicVb(&fire_VB);
+}
+
+static void EntityRenderers_PackChanged(void* obj) {
+	Gfx_DeleteTexture(&fire_tex);
 }
 
 static void EntityRenderers_Init(void) {
-	Event_Register_(&GfxEvents.ContextLost,  NULL, EntityRenderers_ContextLost);
-	Event_Register_(&ChatEvents.FontChanged, NULL, EntityNames_ChatFontChanged);
+	Event_Register_(&GfxEvents.ContextLost,     NULL, EntityRenderers_ContextLost);
+	Event_Register_(&ChatEvents.FontChanged,     NULL, EntityNames_ChatFontChanged);
+	Event_Register_(&TextureEvents.PackChanged,  NULL, EntityRenderers_PackChanged);
 }
 
 static void EntityRenderers_Free(void) {

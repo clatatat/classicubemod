@@ -20,6 +20,7 @@ void Mob_DamageMob(int id, int damage, cc_bool fromPlayer);
 void Mob_RemoveAllMobs(void);
 cc_bool Mob_IsMob(int id);
 cc_bool Mob_IsCreeper(int id);
+cc_bool Mob_IsBurning(int id);
 void Mob_TriggerCreeperChainExplosion(int id);
 
 /* Zombie attack animation state (for Model.c) */

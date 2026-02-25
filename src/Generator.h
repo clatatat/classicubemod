@@ -51,6 +51,14 @@ extern Vec3 Gen_SpawnOverride;
 #define GEN_THEME_COUNT    10
 extern int Gen_Theme;
 
+/* Theme time mode */
+#define GEN_TIME_CYCLE  0  /* Normal day/night cycle */
+#define GEN_TIME_DAY    1  /* Always daytime */
+#define GEN_TIME_NIGHT  2  /* Always nighttime */
+
+/* Runtime time mode for current world (set from theme at gen, persisted per world) */
+extern cc_uint8 Gen_ActiveTimeMode;
+
 /* Centralized theme properties for world generation */
 struct GenThemeData {
 	/* Terrain blocks */
@@ -87,7 +95,7 @@ struct GenThemeData {
 	int   mushroomPatchMul;   /* mushroom density multiplier (default: 1) */
 
 	/* Feature flags */
-	cc_bool hasShadowCeiling;
+	cc_uint8 timeMode;         /* GEN_TIME_CYCLE, GEN_TIME_DAY, or GEN_TIME_NIGHT */
 	cc_bool hasSnowLayer;
 	cc_bool dirtToGrass;       /* dirt physics converts to grass when lit */
 	cc_bool hasCaveGardens;
@@ -98,6 +106,10 @@ struct GenThemeData {
 	cc_bool raiseWaterLevel;   /* raise water by Height/8 (paradise) */
 	cc_bool hasOases;          /* generate oasis patches (desert) */
 	cc_bool hasJungleTrees;    /* generate large 2x2 trunk jungle trees */
+
+	/* Night override colors (0 = use default dark night colors) */
+	PackedCol nightSkyCol;
+	PackedCol nightFogCol;
 
 	/* Status messages */
 	const char* treePlantMsg;

@@ -31,7 +31,12 @@ static void Queue_Resize(struct Queue* queue) {
 	}
 	capacity = queue->capacity * 2;
 	if (capacity < 32) capacity = 32;
-	entries = (cc_uint8*)Mem_Alloc(capacity, queue->structSize, "Generic queue");
+	entries = (cc_uint8*)Mem_TryAlloc(capacity, queue->structSize);
+	if (!entries) {
+		Chat_AddRaw("&cOut of memory for queue, clearing");
+		Queue_Clear(queue);
+		return;
+	}
 
 	/* Elements must be readjusted to avoid index wrapping issues */
 	headToEndSize = (queue->capacity - queue->head) * queue->structSize;
@@ -56,6 +61,9 @@ static void Queue_Resize(struct Queue* queue) {
 void Queue_Enqueue(struct Queue* queue, void* item) {
 	if (queue->count == queue->capacity)
 		Queue_Resize(queue);
+
+	/* Queue was cleared due to OOM during resize - silently drop entry */
+	if (!queue->entries) return;
 
 	//queue->entries[queue->tail] = item;
 	Mem_Copy(queue->entries + queue->tail * queue->structSize, item, queue->structSize);
