@@ -930,14 +930,35 @@ static float PhysicsComp_GetBaseSpeed(struct PhysicsComp* comp) {
 
 #define LIQUID_GRAVITY 0.02f
 #define ROPE_GRAVITY   0.034f
+
+static cc_bool physComp_wasInWater;
+static RNGState physComp_rng;
+static cc_bool physComp_rngSeeded;
+
 void PhysicsComp_PhysicsTick(struct PhysicsComp* comp, Vec3 vel) {
 	struct Entity* entity   = comp->Entity;
 	struct HacksComp* hacks = comp->Hacks;
 	float baseSpeed, verSpeed, horSpeed;
 	float factor, gravity;
 	cc_bool womSpeedBoost;
+	cc_bool inWater;
+
+	if (!physComp_rngSeeded) {
+		Random_SeedFromCurrentTime(&physComp_rng);
+		physComp_rngSeeded = true;
+	}
 
 	if (hacks->Noclip) entity->OnGround = false;
+
+	/* Water splash detection: play splash.wav when entering water */
+	inWater = Entity_TouchesAnyWater(entity);
+	if (inWater && !physComp_wasInWater) {
+		int splashRate = 80 + Random_Next(&physComp_rng, 41); /* 80-120 */
+		int splashVol  = (int)(Audio_SoundsVolume * 0.50f);
+		Audio_PlayDigSoundRateVolume(SOUND_SPLASH, splashRate, splashVol);
+	}
+	physComp_wasInWater = inWater;
+
 	baseSpeed = PhysicsComp_GetBaseSpeed(comp);
 	verSpeed  = baseSpeed * (PhysicsComp_GetSpeed(hacks, 8.0f, hacks->CanSpeed) / 5.0f);
 	horSpeed  = baseSpeed * PhysicsComp_GetSpeed(hacks,  8.0f / 5.0f, true) * hacks->BaseHorSpeed;
@@ -1136,6 +1157,9 @@ static cc_bool SoundComp_ShouldPlay(struct LocalPlayer* p, Vec3 soundPos) {
 
 void SoundComp_Tick(struct LocalPlayer* p, cc_bool wasOnGround) {
 	Vec3 soundPos = p->Base.next.pos;
+
+	/* Crouching suppresses footstep sounds */
+	if (p->Crouching) return;
 
 	SoundComp_GetSound(p);
 	if (!sounds_anyNonAir) soundPos = Vec3_BigPos();

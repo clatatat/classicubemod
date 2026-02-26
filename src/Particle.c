@@ -9,6 +9,7 @@
 #include "Funcs.h"
 #include "Game.h"
 #include "Event.h"
+#include "Audio.h"
 
 #ifdef CC_BUILD_TINYMEM
 	#define PARTICLES_MAX 10
@@ -590,7 +591,7 @@ static void SmokeParticle_Render(struct Particle* p, float t, struct VertexTextu
 	Vec3_Lerp(&pos, &p->lastPos, &p->nextPos, t);
 	size.x = p->size * 0.015625f; size.y = size.x;
 
-	Particle_DoRender(&size, &pos, &smoke_rec, PACKEDCOL_WHITE, vertices);
+	Particle_DoRender(&size, &pos, &smoke_rec, p->color, vertices);
 }
 
 static void Smoke_Render(float t) {
@@ -662,6 +663,7 @@ void Particles_SmokeEffect(float x, float y, float z, float radius) {
 
 		p->lifetime = 0.8f + Random_Float(&rnd) * 0.7f; /* 0.8-1.5 seconds */
 		p->size = 10.0f + Random_Float(&rnd) * 14.0f; /* varied sizes */
+		p->color = PACKEDCOL_WHITE; /* white smoke for explosions */
 	}
 }
 
@@ -712,7 +714,40 @@ static void OnContextLost(void* obj) {
 	Gfx_DeleteTexture(&particles_TexId);
 }
 
+/* Gentle smoke puff when fire is smothered (broken) */
+static void Particles_SmotherEffect(float x, float y, float z) {
+	struct Particle* p;
+	int i;
+	float dx, dz;
+
+	for (i = 0; i < 12; i++) {
+		if (smoke_count >= SMOKE_PARTICLES_MAX) Smoke_RemoveAt(0);
+		p = &smoke_Particles[smoke_count++];
+
+		dx = (Random_Float(&rnd) - 0.5f) * 0.4f;
+		dz = (Random_Float(&rnd) - 0.5f) * 0.4f;
+
+		p->lastPos.x = x + (Random_Float(&rnd) - 0.5f) * 0.4f;
+		p->lastPos.y = y + Random_Float(&rnd) * 0.2f;
+		p->lastPos.z = z + (Random_Float(&rnd) - 0.5f) * 0.4f;
+		p->nextPos = p->lastPos;
+
+		p->velocity.x = dx;
+		p->velocity.y = 0.3f + Random_Float(&rnd) * 0.4f; /* gentle rise */
+		p->velocity.z = dz;
+
+		p->lifetime = 0.4f + Random_Float(&rnd) * 0.4f;
+		p->size = 6.0f + Random_Float(&rnd) * 6.0f;
+		p->color = PackedCol_Make(30, 30, 30, 255); /* black smoke for fire */
+	}
+}
+
 static void OnBreakBlockEffect_Handler(void* obj, IVec3 coords, BlockID old, BlockID now) {
+	if (old == BLOCK_FIRE) {
+		Particles_SmotherEffect(coords.x + 0.5f, coords.y + 0.5f, coords.z + 0.5f);
+		Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (int)(Random_Float(&rnd) * 41.0f));
+		return;
+	}
 	Particles_BreakBlockEffect(coords, old, now);
 }
 

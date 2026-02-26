@@ -21,6 +21,7 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 #define Builder_PackChunk(xx, yy, zz) (((yy) + 1) * EXTCHUNK_SIZE_2 + ((zz) + 1) * EXTCHUNK_SIZE + ((xx) + 1))
 
 #define IsLeverBlock(b) ((b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON)
+#define IsCropBlock(b)  ((b) >= BLOCK_WHEAT_0 && (b) <= BLOCK_WHEAT_7)
 
 static BlockID* Builder_Chunk;
 static cc_uint8* Builder_Counts;
@@ -95,6 +96,12 @@ static void AddSpriteVertices(BlockID block) {
 	int i = Atlas1D_Index(Block_Tex(block, FACE_XMAX));
 	struct Builder1DPart* part = &Builder_Parts[i];
 	part->sCount += 4 * 4;
+}
+
+static void AddCropSpriteVertices(BlockID block) {
+	int i = Atlas1D_Index(Block_Tex(block, FACE_XMAX));
+	struct Builder1DPart* part = &Builder_Parts[i];
+	part->sCount += 8 * 4;
 }
 
 static void AddVertices(BlockID block, Face face) {
@@ -182,7 +189,10 @@ static void PrepareChunk(int x1, int y1, int z1) {
 
 				/* Sprites can't be stretched, nor can then be they hidden by other blocks. */
 				/* Note sprites are drawn using DrawSprite and not with any of the DrawXFace. */
-				if (Blocks.Draw[b] == DRAW_SPRITE) { AddSpriteVertices(b); continue; }
+				if (Blocks.Draw[b] == DRAW_SPRITE) {
+					if (IsCropBlock(b)) { AddCropSpriteVertices(b); } else { AddSpriteVertices(b); }
+					continue;
+				}
 				
 				/* Lever blocks (DRAW_TRANSPARENT) also need sprite verts for handle */
 				if (IsLeverBlock(b)) {
@@ -756,6 +766,94 @@ static void Builder_DrawLeverHandle(int x, int y, int z) {
 	part->sOffset += 4;
 }
 
+/* Draws a crop sprite using the Minecraft Alpha hash (#) pattern:          */
+/*  4 flat planes (each double-sided = 8 quads), offset 1/16 block lower.  */
+/*  Planes at X +/- 0.25 spanning full Z, and Z +/- 0.25 spanning full X.  */
+static void Builder_DrawCropSprite(int x, int y, int z) {
+	struct Builder1DPart* part;
+	struct VertexTextured* v;
+	cc_bool bright;
+	PackedCol color;
+	TextureLoc loc;
+	float v1, v2;
+	float X, Y, Z;
+	float y1, y2, px1, px2, pz1, pz2;
+	int step;
+
+	X = (float)x; Y = (float)y; Z = (float)z;
+	y1  = Y - 1.0f/16.0f;          /* sit 1px lower onto farmland surface */
+	y2  = Y + 1.0f - 1.0f/16.0f;
+	px1 = X + 4.0f/16.0f;          /* X = x + 0.25 */
+	px2 = X + 12.0f/16.0f;         /* X = x + 0.75 */
+	pz1 = Z + 4.0f/16.0f;          /* Z = z + 0.25 */
+	pz2 = Z + 12.0f/16.0f;         /* Z = z + 0.75 */
+
+	loc = Block_Tex(Builder_Block, FACE_XMAX);
+	v1  = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
+	v2  = v1 + Atlas1D.InvTileSize * UV2_Scale;
+
+	bright = Blocks.Brightness[Builder_Block];
+	part   = &Builder_Parts[Atlas1D_Index(loc)];
+	color  = bright ? PACKEDCOL_WHITE : Lighting.Color_Sprite_Fast(x, y, z);
+	Block_Tint(color, Builder_Block);
+
+	step = part->sCount >> 2;
+
+	/* ---- Bucket 0: Plane 1 (X=px1, spanning Z) front + back ---- */
+	v = &Builder_Vertices[part->sOffset];
+	/* front */
+	v->x = px1; v->y = y1; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = px1; v->y = y2; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = px1; v->y = y2; v->z = Z+1.0f;  v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = px1; v->y = y1; v->z = Z+1.0f;  v->Col = color; v->U = s_u1; v->V = v2; v++;
+	/* back */
+	v->x = px1; v->y = y1; v->z = Z+1.0f;  v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = px1; v->y = y2; v->z = Z+1.0f;  v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = px1; v->y = y2; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = px1; v->y = y1; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+	/* ---- Bucket 1: Plane 2 (X=px2, spanning Z) front + back ---- */
+	v = &Builder_Vertices[part->sOffset + step];
+	/* front */
+	v->x = px2; v->y = y1; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = px2; v->y = y2; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = px2; v->y = y2; v->z = Z+1.0f;  v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = px2; v->y = y1; v->z = Z+1.0f;  v->Col = color; v->U = s_u1; v->V = v2; v++;
+	/* back */
+	v->x = px2; v->y = y1; v->z = Z+1.0f;  v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = px2; v->y = y2; v->z = Z+1.0f;  v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = px2; v->y = y2; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = px2; v->y = y1; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+	/* ---- Bucket 2: Plane 3 (Z=pz1, spanning X) front + back ---- */
+	v = &Builder_Vertices[part->sOffset + 2 * step];
+	/* front */
+	v->x = X;       v->y = y1; v->z = pz1; v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = X;       v->y = y2; v->z = pz1; v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = X+1.0f;  v->y = y2; v->z = pz1; v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = X+1.0f;  v->y = y1; v->z = pz1; v->Col = color; v->U = s_u1; v->V = v2; v++;
+	/* back */
+	v->x = X+1.0f;  v->y = y1; v->z = pz1; v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = X+1.0f;  v->y = y2; v->z = pz1; v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = X;       v->y = y2; v->z = pz1; v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = X;       v->y = y1; v->z = pz1; v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+	/* ---- Bucket 3: Plane 4 (Z=pz2, spanning X) front + back ---- */
+	v = &Builder_Vertices[part->sOffset + 3 * step];
+	/* front */
+	v->x = X;       v->y = y1; v->z = pz2; v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = X;       v->y = y2; v->z = pz2; v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = X+1.0f;  v->y = y2; v->z = pz2; v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = X+1.0f;  v->y = y1; v->z = pz2; v->Col = color; v->U = s_u1; v->V = v2; v++;
+	/* back */
+	v->x = X+1.0f;  v->y = y1; v->z = pz2; v->Col = color; v->U = s_u2; v->V = v2; v++;
+	v->x = X+1.0f;  v->y = y2; v->z = pz2; v->Col = color; v->U = s_u2; v->V = v1; v++;
+	v->x = X;       v->y = y2; v->z = pz2; v->Col = color; v->U = s_u1; v->V = v1; v++;
+	v->x = X;       v->y = y1; v->z = pz2; v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+	part->sOffset += 8;
+}
+
 static void Builder_DrawSprite(int x, int y, int z) {
 	struct Builder1DPart* part;
 	struct VertexTextured* v;
@@ -768,10 +866,45 @@ static void Builder_DrawSprite(int x, int y, int z) {
 	float X, Y, Z;
 	float valX, valY, valZ;
 	float x1,y1,z1, x2,y2,z2;
+	cc_bool ceilingFire = false;
 	
 	X  = (float)x; Y = (float)y; Z = (float)z;
 	x1 = X + 2.50f/16.0f; y1 = Y;        z1 = Z + 2.50f/16.0f;
 	x2 = X + 13.5f/16.0f; y2 = Y + 1.0f; z2 = Z + 13.5f/16.0f;
+
+	/* Fire orientation: wall-flat, ceiling-flat, ground sprite, or hidden */
+	if (Builder_Block == BLOCK_FIRE) {
+		BlockID below = (y > 0) ? World_GetBlock(x, y - 1, z) : BLOCK_AIR;
+		BlockID above = World_Contains(x, y + 1, z) ? World_GetBlock(x, y + 1, z) : BLOCK_AIR;
+		cc_bool solidBelow = Blocks.Collide[below] == COLLIDE_SOLID;
+		cc_bool solidAbove = Blocks.Collide[above] == COLLIDE_SOLID;
+		BlockID adjS = World_Contains(x, y, z + 1) ? World_GetBlock(x, y, z + 1) : BLOCK_AIR;
+		BlockID adjN = World_Contains(x, y, z - 1) ? World_GetBlock(x, y, z - 1) : BLOCK_AIR;
+		BlockID adjE = World_Contains(x + 1, y, z) ? World_GetBlock(x + 1, y, z) : BLOCK_AIR;
+		BlockID adjW = World_Contains(x - 1, y, z) ? World_GetBlock(x - 1, y, z) : BLOCK_AIR;
+		cc_bool wallS = Blocks.Collide[adjS] == COLLIDE_SOLID;
+		cc_bool wallN = Blocks.Collide[adjN] == COLLIDE_SOLID;
+		cc_bool wallE = Blocks.Collide[adjE] == COLLIDE_SOLID;
+		cc_bool wallW = Blocks.Collide[adjW] == COLLIDE_SOLID;
+
+		if (solidBelow) {
+			/* Ground fire: default crossed sprite, keep x1/z1/x2/z2 as-is */
+		} else if (wallS) {
+			x1 = X; x2 = X + 1; z1 = z2 = Z + 15.0f/16.0f;
+		} else if (wallN) {
+			x1 = X; x2 = X + 1; z1 = z2 = Z + 1.0f/16.0f;
+		} else if (wallE) {
+			x1 = x2 = X + 15.0f/16.0f; z1 = Z; z2 = Z + 1;
+		} else if (wallW) {
+			x1 = x2 = X + 1.0f/16.0f; z1 = Z; z2 = Z + 1;
+		} else if (solidAbove) {
+			/* Ceiling fire: handled separately below with custom horizontal quads */
+			ceilingFire = true;
+		} else {
+			/* No adjacent blocks at all: hide by collapsing to degenerate point */
+			x1 = x2 = X; y1 = y2 = Y; z1 = z2 = Z;
+		}
+	}
 
 	loc = Block_Tex(Builder_Block, FACE_XMAX);
 	v1  = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
@@ -793,6 +926,43 @@ static void Builder_DrawSprite(int x, int y, int z) {
 	part   = &Builder_Parts[Atlas1D_Index(loc)];
 	color  = bright ? PACKEDCOL_WHITE : Lighting.Color_Sprite_Fast(x, y, z);
 	Block_Tint(color, Builder_Block);
+
+	/* Ceiling fire: custom horizontal quads (crossed sprite can't make flat planes) */
+	if (ceilingFire) {
+		float h = Y + 15.0f/16.0f;
+		float dg = (float)x; /* degenerate point for unused quads */
+
+		/* Horizontal quad visible from below */
+		v = &Builder_Vertices[part->sOffset];
+		v->x = X;       v->y = h; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v2; v++;
+		v->x = X;       v->y = h; v->z = Z + 1.0f; v->Col = color; v->U = s_u2; v->V = v1; v++;
+		v->x = X + 1.0f; v->y = h; v->z = Z + 1.0f; v->Col = color; v->U = s_u1; v->V = v1; v++;
+		v->x = X + 1.0f; v->y = h; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+		/* Horizontal quad visible from above (reversed winding) */
+		v -= 4; v += part->sCount >> 2;
+		v->x = X + 1.0f; v->y = h; v->z = Z;       v->Col = color; v->U = s_u2; v->V = v2; v++;
+		v->x = X + 1.0f; v->y = h; v->z = Z + 1.0f; v->Col = color; v->U = s_u2; v->V = v1; v++;
+		v->x = X;       v->y = h; v->z = Z + 1.0f; v->Col = color; v->U = s_u1; v->V = v1; v++;
+		v->x = X;       v->y = h; v->z = Z;       v->Col = color; v->U = s_u1; v->V = v2; v++;
+
+		/* Degenerate quad 3 */
+		v -= 4; v += part->sCount >> 2;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+
+		/* Degenerate quad 4 */
+		v -= 4; v += part->sCount >> 2;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+		v->x = dg; v->y = Y; v->z = dg; v->Col = color; v->U = 0; v->V = 0; v++;
+
+		part->sOffset += 4;
+		return;
+	}
 
 	/* Draw Z axis */
 	v = &Builder_Vertices[part->sOffset];
@@ -941,6 +1111,7 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
 		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
+		if (IsCropBlock(Builder_Block))     { Builder_DrawCropSprite(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 
@@ -1516,6 +1687,7 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
 		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
+		if (IsCropBlock(Builder_Block))     { Builder_DrawCropSprite(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 
@@ -1888,6 +2060,7 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 
 	if (Blocks.Draw[Builder_Block] == DRAW_SPRITE) {
 		if (IsAnyTorchBlock(Builder_Block)) { Builder_DrawTorch(x, y, z); return; }
+		if (IsCropBlock(Builder_Block))     { Builder_DrawCropSprite(x, y, z); return; }
 		Builder_DrawSprite(x, y, z); return;
 	}
 

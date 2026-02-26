@@ -69,6 +69,18 @@ static const struct SimpleBlockDef double_chest_def = {"Double Chest", 26, 27, 2
 static const struct SimpleBlockDef shadow_ceiling_def = {"Shadow Ceiling", 0, 0, 0, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_GAS, COLLIDE_SOLID, SOUND_NONE, SOUND_NONE};
 static const struct SimpleBlockDef snowy_grass_def = {"Snowy Grass", 116, 118, 2, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS, SOUND_SNOW};
 static const struct SimpleBlockDef stone_plate_pressed_def = {"Stone Pressure Plate Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
+static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
+static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
+static const struct SimpleBlockDef wheat_stage_defs[8] = {
+	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 2", 134, 134, 134, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 3", 135, 135, 135, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 4", 136, 136, 136, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 5", 137, 137, 137, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 6", 138, 138, 138, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 7", 139, 139, 139, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+	{"Wheat Stage 8", 140, 140, 140, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
+};
 
 /* Properties for all built-in blocks (Classic and CPE blocks) */
 static const struct SimpleBlockDef core_blockDefs[] = {
@@ -152,6 +164,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Ice",             117,117,117, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_ICE, SOUND_GLASS, SOUND_STONE  },
 { "Snow Block",      116,116,116, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_SNOW,  SOUND_SNOW   },
 { "Stone Pressure Plate", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },
+{ "Fire",             31, 31, 31, 16, FOG_NONE ,   0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_NONE,   SOUND_NONE   },
 
 /*NAME                TOP SID BOT HEI FOG_COLOR  DENS  BRIGHT    BLOCKS GRAV DRAW_MODE    COLLIDE_MODE   DIG_SOUND     STEP_SOUND   */
 /*                    TEX ES  TOM GHT            ITY   NESS      LIGHT  ITY                                                         */
@@ -1270,6 +1283,12 @@ void Block_ResetProps(BlockID block) {
 		def = &snowy_grass_def;
 	} else if (block == BLOCK_STONE_PLATE_PRESSED) {
 		def = &stone_plate_pressed_def;
+	} else if (block == BLOCK_FARMLAND_DRY) {
+		def = &farmland_dry_def;
+	} else if (block == BLOCK_FARMLAND_WET) {
+		def = &farmland_wet_def;
+	} else if (block >= BLOCK_WHEAT_0 && block <= BLOCK_WHEAT_7) {
+		def = &wheat_stage_defs[block - BLOCK_WHEAT_0];
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1317,6 +1336,15 @@ void Block_ResetProps(BlockID block) {
 
 	Block_SetDrawType(block, def->draw);
 	Block_CalcRenderBounds(block);
+
+	/* Farmland: full block collision hitbox but render as 15/16 height */
+	if (block == BLOCK_FARMLAND_DRY || block == BLOCK_FARMLAND_WET) {
+		Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.MaxBB[block], 1, 1, 1);
+		Vec3_Set(Blocks.RenderMinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.RenderMaxBB[block], 1, 15.0f/16.0f, 1);
+	}
+
 	Block_CalcLightOffset(block);
 
 	Block_Tex(block, FACE_YMAX) = def->topTexture;
@@ -1841,6 +1869,13 @@ static void OnReset(void) {
 
 	/* Remove snowy grass from inventory (auto-placed when snow is on top of grass) */
 	Inventory_Remove(BLOCK_SNOWY_GRASS);
+
+	/* Remove farmland from inventory (created by hoeing dirt/grass) */
+	Inventory_Remove(BLOCK_FARMLAND_DRY);
+	Inventory_Remove(BLOCK_FARMLAND_WET);
+
+	/* Remove wheat stages from inventory (grown on farmland) */
+	{ int i; for (i = BLOCK_WHEAT_0; i <= BLOCK_WHEAT_7; i++) Inventory_Remove(i); }
 
 	DirectionalCache_Clear();
 }

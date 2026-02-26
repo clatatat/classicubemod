@@ -51,6 +51,7 @@ void Audio_SetSounds(int volume);
 void Audio_PlayDigSound(cc_uint8 type);
 void Audio_PlayDigSoundVolume(cc_uint8 type, int volume);
 void Audio_PlayDigSoundRate(cc_uint8 type, int rate);
+void Audio_PlayDigSoundRateVolume(cc_uint8 type, int rate, int volume);
 void Audio_PlayStepSound(cc_uint8 type);
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume);
 void Audio_PlayStepSoundRate(cc_uint8 type, int rate, int volume);
@@ -134,6 +135,11 @@ enum SoundType {
 	SOUND_SHEEP,
 	SOUND_EXPLODE_BIG,
 	SOUND_PICKUP,
+	SOUND_SPLASH,
+	SOUND_IGNITE,
+	SOUND_FIRE_AMBIENT,
+	SOUND_CLICK,
+	SOUND_FIZZ,
 	SOUND_COUNT
 };
 extern const char* const Sound_Names[SOUND_COUNT];

@@ -40,7 +40,9 @@ const char* const ItemNames[ITEM_COUNT] = {
 	"Bow", "Arrow", "Stick", "Flint & Steel", "Flint",
 	"Coal", "Iron Ingot", "Gold Ingot", "Diamond",
 	"Bowl", "Mushroom Stew", "Raw Pork", "Cooked Pork",
-	"Sulphur", "Feather", "String"
+	"Sulphur", "Feather", "String",
+	"Wood Hoe", "Stone Hoe", "Iron Hoe", "Diamond Hoe", "Gold Hoe",
+	"Seeds", "Wheat", "Bread"
 };
 
 const int ItemTextures[ITEM_COUNT] = {
@@ -58,7 +60,9 @@ const int ItemTextures[ITEM_COUNT] = {
 	21, 37, 53, 5, 6,         /* 41-45: Bow, Arrow, Stick, Flint&Steel, Flint */
 	7, 23, 39, 55,            /* 46-49: Coal, Iron Ingot, Gold Ingot, Diamond */
 	71, 72, 87, 88,           /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
-	40, 24, 8                 /* 54-56: Sulphur, Feather, String */
+	40, 24, 8,                /* 54-56: Sulphur, Feather, String */
+	128, 129, 130, 131, 132,  /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
+	9, 25, 41                 /* 62-64: Seeds, Wheat, Bread */
 };
 
 const int ItemDamage[ITEM_COUNT] = {
@@ -76,7 +80,9 @@ const int ItemDamage[ITEM_COUNT] = {
 	1, 2, 2, 1, 1,           /* 41-45: Bow, Arrow, Stick, Flint&Steel, Flint */
 	1, 1, 1, 1,              /* 46-49: Coal, Iron Ingot, Gold Ingot, Diamond */
 	1, 1, 1, 1,              /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
-	1, 1, 1                  /* 54-56: Sulphur, Feather, String */
+	1, 1, 1,                 /* 54-56: Sulphur, Feather, String */
+	2, 4, 6, 8, 2,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
+	1, 1, 1                  /* 62-64: Seeds, Wheat, Bread */
 };
 
 int Item_MaxStackSize(int itemId) {
@@ -92,12 +98,14 @@ int Item_MaxStackSize(int itemId) {
 	if (itemId >= 21 && itemId <= 24) return 1; /* Iron tools */
 	if (itemId >= 29 && itemId <= 32) return 1; /* Diamond tools */
 	if (itemId >= 37 && itemId <= 40) return 1; /* Gold tools */
+	if (itemId >= 57 && itemId <= 61) return 1; /* Hoes */
 	if (itemId == ITEM_BOW)        return 1;
 	if (itemId == ITEM_FLINT_STEEL) return 1;
 	/* Food: not stackable */
 	if (itemId == 51) return 1; /* Mushroom Stew */
 	if (itemId == 52) return 1; /* Raw Pork */
 	if (itemId == 53) return 1; /* Cooked Pork */
+	if (itemId == ITEM_BREAD) return 1;
 	/* Everything else stacks to 64 */
 	return MAX_STACK_SIZE;
 }
@@ -363,6 +371,14 @@ static int Craft_SlotTag(const struct SurvInvSlot* s) {
 #define AXE_R_RECIPE(mat, itemOut) \
 	{ 2, 3, { mat, mat, CI(ITEM_STICK), mat, CI(ITEM_STICK), 0, 0,0,0 }, BLOCK_AIR, itemOut, 1 }
 
+/* Hoe left: MM / _S / _S (2x3) */
+#define HOE_L_RECIPE(mat, itemOut) \
+	{ 2, 3, { mat, mat, 0, CI(ITEM_STICK), 0, CI(ITEM_STICK), 0,0,0 }, BLOCK_AIR, itemOut, 1 }
+
+/* Hoe right (mirrored): MM / S_ / S_ (2x3) */
+#define HOE_R_RECIPE(mat, itemOut) \
+	{ 2, 3, { mat, mat, CI(ITEM_STICK), 0, CI(ITEM_STICK), 0, 0,0,0 }, BLOCK_AIR, itemOut, 1 }
+
 /* ---- Armor recipe helper macros ---- */
 /* Helmet: MMM / M_M (3x2) */
 #define HELMET_RECIPE(mat, itemOut) \
@@ -404,6 +420,8 @@ static const struct CraftRecipe craftRecipes[] = {
 	PICKAXE_RECIPE(CB(BLOCK_WOOD), ITEM_WOOD_PICKAXE),
 	AXE_L_RECIPE(CB(BLOCK_WOOD), ITEM_WOOD_AXE),
 	AXE_R_RECIPE(CB(BLOCK_WOOD), ITEM_WOOD_AXE),
+	HOE_L_RECIPE(CB(BLOCK_WOOD), ITEM_WOOD_HOE),
+	HOE_R_RECIPE(CB(BLOCK_WOOD), ITEM_WOOD_HOE),
 
 	/* Stone tools (material = BLOCK_COBBLE as block) */
 	SWORD_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_SWORD),
@@ -411,6 +429,8 @@ static const struct CraftRecipe craftRecipes[] = {
 	PICKAXE_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_PICKAXE),
 	AXE_L_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_AXE),
 	AXE_R_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_AXE),
+	HOE_L_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_HOE),
+	HOE_R_RECIPE(CB(BLOCK_COBBLE), ITEM_STONE_HOE),
 
 	/* Iron tools (material = ITEM_IRON_INGOT as item) */
 	SWORD_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_SWORD),
@@ -418,6 +438,8 @@ static const struct CraftRecipe craftRecipes[] = {
 	PICKAXE_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_PICKAXE),
 	AXE_L_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_AXE),
 	AXE_R_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_AXE),
+	HOE_L_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_HOE),
+	HOE_R_RECIPE(CI(ITEM_IRON_INGOT), ITEM_IRON_HOE),
 
 	/* Diamond tools (material = ITEM_DIAMOND as item) */
 	SWORD_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_SWORD),
@@ -425,6 +447,8 @@ static const struct CraftRecipe craftRecipes[] = {
 	PICKAXE_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_PICKAXE),
 	AXE_L_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_AXE),
 	AXE_R_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_AXE),
+	HOE_L_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_HOE),
+	HOE_R_RECIPE(CI(ITEM_DIAMOND_ITEM), ITEM_DIAMOND_HOE),
 
 	/* Gold tools (material = ITEM_GOLD_INGOT as item) */
 	SWORD_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_SWORD),
@@ -432,6 +456,8 @@ static const struct CraftRecipe craftRecipes[] = {
 	PICKAXE_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_PICKAXE),
 	AXE_L_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_AXE),
 	AXE_R_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_AXE),
+	HOE_L_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_HOE),
+	HOE_R_RECIPE(CI(ITEM_GOLD_INGOT), ITEM_GOLD_HOE),
 
 	/* ===== Other 3x3 recipes ===== */
 	/* Bow: String Stick _ / String _ Stick / String Stick _ (3x3) */
@@ -473,6 +499,11 @@ static const struct CraftRecipe craftRecipes[] = {
 	{ 3, 3, { CI(ITEM_STICK), 0,              CI(ITEM_STICK),
 	           CI(ITEM_STICK), CI(ITEM_STICK), CI(ITEM_STICK),
 	           CI(ITEM_STICK), 0,              CI(ITEM_STICK) }, BLOCK_LADDER, ITEM_NONE, 1 },
+
+	/* TNT: Checkerboard of Sulphur and Sand (3x3) */
+	{ 3, 3, { CI(ITEM_SULPHUR), CB(BLOCK_SAND), CI(ITEM_SULPHUR),
+	           CB(BLOCK_SAND), CI(ITEM_SULPHUR), CB(BLOCK_SAND),
+	           CI(ITEM_SULPHUR), CB(BLOCK_SAND), CI(ITEM_SULPHUR) }, BLOCK_TNT, ITEM_NONE, 1 },
 
 	/* ===== Armor recipes (5 material tiers) ===== */
 	/* Cloth armor (material = BLOCK_WHITE / wool) */
@@ -519,6 +550,13 @@ static const struct CraftRecipe craftRecipes[] = {
 	           CI(ITEM_DIAMOND_ITEM), CI(ITEM_DIAMOND_ITEM), CI(ITEM_DIAMOND_ITEM),
 	           CI(ITEM_DIAMOND_ITEM), CI(ITEM_DIAMOND_ITEM), CI(ITEM_DIAMOND_ITEM) }, BLOCK_DIAMOND_BLOCK, ITEM_NONE, 1 },
 
+	/* Bowl: 3 Planks in V shape (3x2) -> 4 Bowls */
+	{ 3, 2, { CB(BLOCK_WOOD), 0, CB(BLOCK_WOOD),
+	           0, CB(BLOCK_WOOD), 0, 0,0,0 }, BLOCK_AIR, ITEM_BOWL, 4 },
+
+	/* Bread: 3 Wheat in a row (3x1) */
+	{ 3, 1, { CI(ITEM_WHEAT), CI(ITEM_WHEAT), CI(ITEM_WHEAT), 0,0,0,0,0,0 }, BLOCK_AIR, ITEM_BREAD, 1 },
+
 	/* ===== De-crafting recipes (block -> 9 items, 1x1) ===== */
 	/* Iron Block -> 9 Iron Ingots */
 	{ 1, 1, { CB(BLOCK_IRON), 0,0,0,0,0,0,0,0 }, BLOCK_AIR, ITEM_IRON_INGOT, 9 },
@@ -528,6 +566,58 @@ static const struct CraftRecipe craftRecipes[] = {
 	{ 1, 1, { CB(BLOCK_DIAMOND_BLOCK), 0,0,0,0,0,0,0,0 }, BLOCK_AIR, ITEM_DIAMOND_ITEM, 9 },
 };
 #define CRAFT_RECIPE_COUNT (int)(sizeof(craftRecipes) / sizeof(craftRecipes[0]))
+
+/* ===== Shapeless recipes ===== */
+struct ShapelessRecipe {
+	int ingredients[9]; /* tagged ingredients (terminated by CRAFT_EMPTY) */
+	int count;          /* number of ingredients */
+	BlockID outBlock;
+	int outItem;
+	int outCount;
+};
+
+static const struct ShapelessRecipe shapelessRecipes[] = {
+	/* Flint & Steel: Iron Ingot + Flint in any arrangement */
+	{ { CI(ITEM_IRON_INGOT), CI(ITEM_FLINT) }, 2, BLOCK_AIR, ITEM_FLINT_STEEL, 1 },
+	/* Mushroom Stew: Bowl + Brown Mushroom + Red Mushroom in any arrangement */
+	{ { CI(ITEM_BOWL), CB(BLOCK_BROWN_SHROOM), CB(BLOCK_RED_SHROOM) }, 3, BLOCK_AIR, ITEM_MUSHROOM_STEW, 1 },
+};
+#define SHAPELESS_RECIPE_COUNT (int)(sizeof(shapelessRecipes) / sizeof(shapelessRecipes[0]))
+
+/* Check if grid contents match a shapeless recipe (ingredients in any position).
+   Returns shapeless recipe index or -1. */
+static int Craft_FindShapelessMatch(int gridW, int gridH, const int* grid) {
+	int totalSlots = gridW * gridH;
+	int r, i, j, filledCount;
+
+	for (r = 0; r < SHAPELESS_RECIPE_COUNT; r++) {
+		const struct ShapelessRecipe* recipe = &shapelessRecipes[r];
+		cc_bool used[9] = { false };
+		cc_bool match = true;
+
+		/* Count filled grid slots */
+		filledCount = 0;
+		for (i = 0; i < totalSlots; i++) {
+			if (grid[i] != CRAFT_EMPTY) filledCount++;
+		}
+		if (filledCount != recipe->count) continue;
+
+		/* Try to match each ingredient to a grid slot */
+		for (i = 0; i < recipe->count && match; i++) {
+			cc_bool found = false;
+			for (j = 0; j < totalSlots; j++) {
+				if (!used[j] && grid[j] == recipe->ingredients[i]) {
+					used[j] = true;
+					found = true;
+					break;
+				}
+			}
+			if (!found) match = false;
+		}
+		if (match) return r;
+	}
+	return -1;
+}
 
 /* Try to match a recipe against a grid. Returns recipe index or -1.
    If found, *outOX and *outOY are set to the offset where recipe matched. */
@@ -569,6 +659,17 @@ static int Craft_FindMatch(int gridW, int gridH, const int* grid, int* outOX, in
 			}
 		}
 	}
+
+	/* No shaped match — try shapeless recipes.
+	   Encode as -(shapelessIdx + 2) so -1 still means "no match" */
+	{
+		int si = Craft_FindShapelessMatch(gridW, gridH, grid);
+		if (si >= 0) {
+			*outOX = 0;
+			*outOY = 0;
+			return -(si + 2);
+		}
+	}
 	return -1;
 }
 
@@ -580,10 +681,16 @@ static void Craft_BuildGrid(const struct SurvInvSlot* slots, int count, int* gri
 	}
 }
 
-/* Set output slot from a recipe match */
+/* Set output slot from a recipe match.
+   recipeIdx encodes: >= 0 for shaped, < -1 for shapeless (index = -recipeIdx - 2) */
 static void Craft_SetOutput(struct SurvInvSlot* output, int recipeIdx) {
 	if (recipeIdx >= 0) {
 		const struct CraftRecipe* r = &craftRecipes[recipeIdx];
+		output->block  = r->outBlock;
+		output->itemId = r->outItem;
+		output->count  = r->outCount;
+	} else if (recipeIdx <= -2) {
+		const struct ShapelessRecipe* r = &shapelessRecipes[-recipeIdx - 2];
 		output->block  = r->outBlock;
 		output->itemId = r->outItem;
 		output->count  = r->outCount;
@@ -594,24 +701,37 @@ static void Craft_SetOutput(struct SurvInvSlot* output, int recipeIdx) {
 	}
 }
 
-/* Consume materials from grid after taking output */
+/* Consume materials from grid after taking output.
+   recipeIdx encodes: >= 0 for shaped, < -1 for shapeless */
 static void Craft_ConsumeInputs(struct SurvInvSlot* slots, int gridW, int gridH,
 								int recipeIdx, int ox, int oy) {
-	const struct CraftRecipe* r;
-	int rx, ry, gi;
+	if (recipeIdx >= 0) {
+		const struct CraftRecipe* r = &craftRecipes[recipeIdx];
+		int rx, ry, gi;
 
-	if (recipeIdx < 0) return;
-	r = &craftRecipes[recipeIdx];
-
-	for (ry = 0; ry < r->height; ry++) {
-		for (rx = 0; rx < r->width; rx++) {
-			if (r->pattern[ry * r->width + rx] == CRAFT_EMPTY) continue;
-			gi = (oy + ry) * gridW + (ox + rx);
-			slots[gi].count--;
-			if (slots[gi].count <= 0) {
-				slots[gi].block  = BLOCK_AIR;
-				slots[gi].itemId = ITEM_NONE;
-				slots[gi].count  = 0;
+		for (ry = 0; ry < r->height; ry++) {
+			for (rx = 0; rx < r->width; rx++) {
+				if (r->pattern[ry * r->width + rx] == CRAFT_EMPTY) continue;
+				gi = (oy + ry) * gridW + (ox + rx);
+				slots[gi].count--;
+				if (slots[gi].count <= 0) {
+					slots[gi].block  = BLOCK_AIR;
+					slots[gi].itemId = ITEM_NONE;
+					slots[gi].count  = 0;
+				}
+			}
+		}
+	} else if (recipeIdx <= -2) {
+		/* Shapeless: consume one of each non-empty slot */
+		int totalSlots = gridW * gridH;
+		int i;
+		for (i = 0; i < totalSlots; i++) {
+			if (slots[i].count <= 0) continue;
+			slots[i].count--;
+			if (slots[i].count <= 0) {
+				slots[i].block  = BLOCK_AIR;
+				slots[i].itemId = ITEM_NONE;
+				slots[i].count  = 0;
 			}
 		}
 	}
@@ -675,19 +795,20 @@ static float Furnace_GetFuelTime(struct SurvInvSlot* fuel) {
 	if (fuel->block != BLOCK_AIR && fuel->itemId == ITEM_NONE) {
 		if (fuel->block == BLOCK_WOOD)  return 15.0f;  /* Planks */
 		if (fuel->block == BLOCK_LOG)   return 15.0f;  /* Log */
-		if (fuel->block == BLOCK_WHITE) return 5.0f;   /* Wool */
+		if (fuel->block >= BLOCK_RED && fuel->block <= BLOCK_WHITE) return 7.5f; /* Wool (half planks) */
 		return 0.0f;
 	}
 
 	/* Item-based fuels */
 	if (fuel->itemId != ITEM_NONE) {
 		if (fuel->itemId == ITEM_COAL)   return 80.0f;
-		if (fuel->itemId == ITEM_STICK)  return 5.0f;
+		if (fuel->itemId == ITEM_STICK)  return 7.5f;  /* Half planks */
 		/* Wooden tools */
-		if (fuel->itemId == ITEM_WOOD_SWORD)   return 10.0f;
-		if (fuel->itemId == ITEM_WOOD_SHOVEL)  return 10.0f;
-		if (fuel->itemId == ITEM_WOOD_PICKAXE) return 10.0f;
-		if (fuel->itemId == ITEM_WOOD_AXE)     return 10.0f;
+		if (fuel->itemId == ITEM_WOOD_SWORD)   return 15.0f; /* Same as planks */
+		if (fuel->itemId == ITEM_WOOD_SHOVEL)  return 15.0f;
+		if (fuel->itemId == ITEM_WOOD_PICKAXE) return 15.0f;
+		if (fuel->itemId == ITEM_WOOD_AXE)     return 15.0f;
+		if (fuel->itemId == ITEM_BOWL)         return 7.5f;  /* Same as sticks */
 		return 0.0f;
 	}
 	return 0.0f;
@@ -744,7 +865,15 @@ static cc_bool Furnace_CanOutputTo(struct SurvInvSlot* output, int recipeIdx) {
 		if (output->itemId != r->outItem || output->block != BLOCK_AIR)
 			return false;
 	}
-	return output->count + r->outCount <= MAX_STACK_SIZE;
+	/* Respect per-item/block max stack size */
+	{
+		int maxStack;
+		if (r->outIsBlock)
+			maxStack = Block_MaxStackSize(r->outBlock);
+		else
+			maxStack = Item_MaxStackSize(r->outItem);
+		return output->count + r->outCount <= maxStack;
+	}
 }
 
 static void Furnace_RefreshBlockAt(int x, int y, int z) {

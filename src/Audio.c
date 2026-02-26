@@ -32,6 +32,11 @@ const char* const Sound_Names[SOUND_COUNT] = {
 	"sheep",
 	"explodebig",
 	"pickup",
+	"splash",
+	"ignite",
+	"fire",
+	"click",
+	"fizz",
 };
 
 #ifdef CC_BIG_ENDIAN
@@ -62,6 +67,7 @@ static void Sounds_Start(void) {
 void Audio_PlayDigSound(cc_uint8 type)  { }
 void Audio_PlayDigSoundVolume(cc_uint8 type, int volume) { }
 void Audio_PlayDigSoundRate(cc_uint8 type, int rate) { }
+void Audio_PlayDigSoundRateVolume(cc_uint8 type, int rate, int volume) { }
 void Audio_PlayStepSound(cc_uint8 type) { }
 void Audio_PlayStepSoundVolume(cc_uint8 type, int volume) { }
 void Audio_PlayStepSoundRate(cc_uint8 type, int rate, int volume) { }
@@ -443,6 +449,48 @@ static void ProcessPickupSound(const cc_string* file, struct Stream* stream) {
 	} else { group->count++; }
 }
 
+static void ProcessExtraSounds(const cc_string* file, struct Stream* stream) {
+	static const cc_string splash_name = String_FromConst("splash");
+	static const cc_string ignite_name = String_FromConst("ignite");
+	static const cc_string fire_name   = String_FromConst("fire");
+	static const cc_string click_name  = String_FromConst("click");
+	static const cc_string fizz_name   = String_FromConst("fizz");
+	struct SoundGroup* group = NULL;
+	struct Sound* snd;
+	cc_string name = *file;
+	cc_result res;
+	int dotIndex;
+	Utils_UNSAFE_TrimFirstDirectory(&name);
+
+	dotIndex = String_LastIndexOf(&name, '.');
+	if (dotIndex >= 0) name.length = dotIndex;
+
+	if (String_CaselessEquals(&name, &splash_name)) {
+		group = &digBoard.groups[SOUND_SPLASH];
+	} else if (String_CaselessEquals(&name, &ignite_name)) {
+		group = &digBoard.groups[SOUND_IGNITE];
+	} else if (String_CaselessEquals(&name, &fire_name)) {
+		group = &digBoard.groups[SOUND_FIRE_AMBIENT];
+	} else if (String_CaselessEquals(&name, &click_name)) {
+		group = &digBoard.groups[SOUND_CLICK];
+	} else if (String_CaselessEquals(&name, &fizz_name)) {
+		group = &digBoard.groups[SOUND_FIZZ];
+	}
+
+	if (!group) return;
+	if (group->count == Array_Elems(group->sounds)) return;
+
+	snd = &group->sounds[group->count];
+	res = Sound_ReadWaveData(stream, snd);
+
+	if (res) {
+		Logger_SysWarn2(res, "decoding", file);
+		Audio_FreeChunks(&snd->chunk, 1);
+		snd->chunk.data = NULL;
+		snd->chunk.size = 0;
+	} else { group->count++; }
+}
+
 static void ProcessMobSounds(const cc_string* file, struct Stream* stream) {
 	static const cc_string skeletonhurt_pfx  = String_FromConst("skeletonhurt");
 	static const cc_string skeletondeath_name = String_FromConst("skeletondeath");
@@ -526,6 +574,8 @@ static cc_result ProcessZipEntry(const cc_string* path, struct Stream* stream, s
 	ProcessMobSounds(path, stream);
 	/* Load pickup sound (pickup.wav) */
 	ProcessPickupSound(path, stream);
+	/* Load extra sounds (splash, ignite, fire, click, fizz) */
+	ProcessExtraSounds(path, stream);
 	return 0;
 }
 
@@ -611,6 +661,25 @@ void Audio_PlayDigSoundRate(cc_uint8 type, int rate) {
 	data.sampleRate = snd->sampleRate;
 	data.rate       = rate;
 	data.volume     = Audio_SoundsVolume;
+
+	res = AudioPool_Play(&data);
+	if (res) Sounds_Fail(res);
+}
+
+void Audio_PlayDigSoundRateVolume(cc_uint8 type, int rate, int volume) {
+	const struct Sound* snd;
+	struct AudioData data;
+	cc_result res;
+
+	if (type == SOUND_NONE || !Audio_SoundsVolume || volume <= 0) return;
+	snd = Soundboard_PickRandom(&digBoard, type);
+	if (!snd) return;
+
+	data.chunk      = snd->chunk;
+	data.channels   = snd->channels;
+	data.sampleRate = snd->sampleRate;
+	data.rate       = rate;
+	data.volume     = volume;
 
 	res = AudioPool_Play(&data);
 	if (res) Sounds_Fail(res);

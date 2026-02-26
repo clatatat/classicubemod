@@ -445,9 +445,8 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 	tex.height = heartSize;
 
 	for (i = 0; i < 10; i++) {
-		/* Round down: odd health shows as empty (not half) to avoid misleading the player */
-		int displayHealth = health & ~1; /* clear lowest bit to round down to even */
-		int hp = displayHealth - i * 2;
+		/* Calculate health state for this heart position */
+		int hp = health - i * 2;
 		int tileIndex;
 
 		if (hp >= 2) {
@@ -460,8 +459,7 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 
 		/* During flash, blink affected hearts between pink and normal/empty */
 		if (flashing) {
-			int displayPrev = prevHealth & ~1; /* round down prev too */
-			int prevHp = displayPrev - i * 2;
+			int prevHp = prevHealth - i * 2;
 			cc_bool affected = (prevHp >= 2 && hp < 2) || (prevHp == 1 && hp <= 0);
 			if (affected) {
 				if (flashOn) {
@@ -3581,10 +3579,15 @@ static int Furnace_HitTest(struct FurnaceScreen* s, int mx, int my) {
 	return -1;
 }
 
-/* Check if a slot/item is valid fuel (currently only coal) */
+/* Check if a slot/item is valid fuel */
 static cc_bool Furnace_IsFuel(BlockID block, int itemId) {
 	if (itemId == ITEM_COAL) return true;
+	if (itemId == ITEM_STICK) return true;
+	if (itemId == ITEM_BOWL) return true;
+	if (itemId == ITEM_WOOD_SWORD || itemId == ITEM_WOOD_SHOVEL ||
+	    itemId == ITEM_WOOD_PICKAXE || itemId == ITEM_WOOD_AXE) return true;
 	if (block == BLOCK_LOG || block == BLOCK_WOOD) return true;
+	if (block >= BLOCK_RED && block <= BLOCK_WHITE) return true; /* Wool */
 	return false;
 }
 

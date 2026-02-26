@@ -19,6 +19,7 @@ struct Particle {
 	float lifetime;
 	Vec3 lastPos, nextPos;
 	float size;
+	PackedCol color;
 };
 
 struct CustomParticleEffect {

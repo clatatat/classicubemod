@@ -81,11 +81,12 @@ enum BLOCKID {
 	BLOCK_ICE = 68, /* Ice block */
 	BLOCK_SNOW_BLOCK = 69, /* Full snow block */
 	BLOCK_STONE_PLATE = 70, /* Stone pressure plate (mob/player only, ignores items) */
+	BLOCK_FIRE = 71, /* Fire block - animated sprite, spreads to flammable blocks */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,
 	/* Max block ID used in original classic plus CPE blocks. */
-	BLOCK_MAX_CPE = BLOCK_STONE_PLATE,
+	BLOCK_MAX_CPE = BLOCK_FIRE,
 	
 	/* Non-placeable blocks (auto-placed, not in inventory) */
 	BLOCK_DOOR_NS_TOP = 200, /* Door facing North/South - top half */
@@ -135,6 +136,19 @@ enum BLOCKID {
 	BLOCK_SNOWY_GRASS = 234, /* Grass with snow on top - auto-placed, not in inventory */
 
 	BLOCK_STONE_PLATE_PRESSED = 235, /* Pressed stone pressure plate */
+
+	BLOCK_FARMLAND_DRY = 236, /* Dry farmland - created by hoeing dirt/grass */
+	BLOCK_FARMLAND_WET = 237, /* Wet farmland - dry farmland hydrated by nearby water */
+
+	/* Wheat crop growth stages (8 stages, placed by using seeds on farmland) */
+	BLOCK_WHEAT_0 = 238, /* Stage 1 - just planted */
+	BLOCK_WHEAT_1 = 239,
+	BLOCK_WHEAT_2 = 240,
+	BLOCK_WHEAT_3 = 241,
+	BLOCK_WHEAT_4 = 242,
+	BLOCK_WHEAT_5 = 243,
+	BLOCK_WHEAT_6 = 244,
+	BLOCK_WHEAT_7 = 245, /* Stage 8 - fully grown, drops wheat */
 
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,

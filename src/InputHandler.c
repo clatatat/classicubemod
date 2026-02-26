@@ -582,6 +582,8 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block == BLOCK_STONE_PLATE) return 0.0f;
 	if (block == BLOCK_STONE_PLATE_PRESSED) return 0.0f;
 	if (block == BLOCK_LADDER)       return 0.0f;
+	if (block == BLOCK_SAPLING)      return 0.0f;
+	if (block == BLOCK_FIRE)         return 0.0f;
 	/* Redstone torches (all variants) */
 	if (block >= BLOCK_RED_TORCH_ON_S && block <= BLOCK_RED_TORCH_OFF_W) return 0.0f;
 	if (block == BLOCK_RED_TORCH_UNMOUNTED)     return 0.0f;
@@ -591,6 +593,8 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block == BLOCK_ROSE)         return 0.0f;
 	if (block == BLOCK_BROWN_SHROOM) return 0.0f;
 	if (block == BLOCK_RED_SHROOM)   return 0.0f;
+	/* Wheat crops */
+	if (block >= BLOCK_WHEAT_0 && block <= BLOCK_WHEAT_7) return 0.0f;
 
 	if (block == BLOCK_OBSIDIAN)     return 50.0f;
 	if (block == BLOCK_IRON)         return 5.0f;
@@ -755,6 +759,7 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 
 	/* In survival mode, drop the broken block */
 	if (Game_SurvivalMode && old != BLOCK_BEDROCK && old != BLOCK_AIR &&
+		old != BLOCK_FIRE &&
 		Blocks.Draw[old] != DRAW_GAS) {
 		Vec3 dropPos;
 		int toolType, toolTier, slot;
@@ -993,7 +998,7 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					}
 				}
 			}
-			/* Normal block drop - map door variants to their craftable form */
+			/* Normal block drop - map special blocks to their drop form */
 			{
 				BlockID dropBlock = old;
 				if (IsWoodDoor(old)) {
@@ -1004,15 +1009,61 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					dropBlock = BLOCK_PRESSURE_PLATE;
 				} else if (old == BLOCK_STONE_PLATE_PRESSED) {
 					dropBlock = BLOCK_STONE_PLATE;
+				} else if (old == BLOCK_FARMLAND_DRY || old == BLOCK_FARMLAND_WET) {
+					dropBlock = BLOCK_DIRT;
+				} else if (old >= BLOCK_WHEAT_0 && old <= BLOCK_WHEAT_7) {
+					/* Wheat crops: drop seeds and wheat based on growth stage */
+					dropBlock = BLOCK_AIR; /* suppress normal block drop */
+					if (!mob_rng_inited) {
+						Random_SeedFromCurrentTime(&mob_rng);
+						mob_rng_inited = true;
+					}
+					{
+						int stage = old - BLOCK_WHEAT_0;
+						int seedCount, wheatCount, di;
+						if (stage == 7) {
+							/* Fully grown: 1 wheat + 0-3 seeds */
+							wheatCount = 1;
+							seedCount = Random_Next(&mob_rng, 4);
+						} else if (stage >= 4) {
+							/* Mid growth: 0-2 seeds, no wheat */
+							wheatCount = 0;
+							seedCount = Random_Next(&mob_rng, 3);
+						} else {
+							/* Early growth: 0-1 seeds, no wheat */
+							wheatCount = 0;
+							seedCount = Random_Next(&mob_rng, 2);
+						}
+						for (di = 0; di < wheatCount; di++) {
+							int ws = DropItem_FindFreeSlot();
+							if (ws == -1) ws = DropItem_EvictOldest();
+							if (ws != -1) {
+								DropItem_Spawn(ws, dropPos, BLOCK_AIR, true, ITEM_WHEAT);
+								droppedItemPickupDelay[ws] = 0.0f;
+								DropItem_ApplyRandomMomentum(ws);
+							}
+						}
+						for (di = 0; di < seedCount; di++) {
+							int ss = DropItem_FindFreeSlot();
+							if (ss == -1) ss = DropItem_EvictOldest();
+							if (ss != -1) {
+								DropItem_Spawn(ss, dropPos, BLOCK_AIR, true, ITEM_SEEDS);
+								droppedItemPickupDelay[ss] = 0.0f;
+								DropItem_ApplyRandomMomentum(ss);
+							}
+						}
+					}
 				} else if (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R) {
 					dropBlock = BLOCK_CHEST;
 				}
-				slot = DropItem_FindFreeSlot();
-				if (slot == -1) slot = DropItem_EvictOldest();
-				if (slot != -1) {
-					DropItem_Spawn(slot, dropPos, dropBlock, false, 0);
-					droppedItemPickupDelay[slot] = 0.0f;
-					DropItem_ApplyRandomMomentum(slot);
+				if (dropBlock != BLOCK_AIR) {
+					slot = DropItem_FindFreeSlot();
+					if (slot == -1) slot = DropItem_EvictOldest();
+					if (slot != -1) {
+						DropItem_Spawn(slot, dropPos, dropBlock, false, 0);
+						droppedItemPickupDelay[slot] = 0.0f;
+						DropItem_ApplyRandomMomentum(slot);
+					}
 				}
 			}
 		}
@@ -1026,7 +1077,8 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 			above == BLOCK_SAPLING || above == BLOCK_RED_ORE_DUST ||
 			above == BLOCK_LIT_RED_ORE_DUST ||
 			above == BLOCK_PRESSURE_PLATE || above == BLOCK_PRESSURE_PLATE_PRESSED ||
-			above == BLOCK_STONE_PLATE || above == BLOCK_STONE_PLATE_PRESSED) {
+			above == BLOCK_STONE_PLATE || above == BLOCK_STONE_PLATE_PRESSED ||
+			(above >= BLOCK_WHEAT_0 && above <= BLOCK_WHEAT_7)) {
 			IVec3 abovePos;
 			abovePos.x = pos.x; abovePos.y = pos.y + 1; abovePos.z = pos.z;
 			BreakBlockNow(abovePos, above);
@@ -1157,12 +1209,84 @@ static void InputHandler_PlaceBlock(void) {
 			return;
 		}
 
-		/* If clicking on TNT with empty hand, light the fuse */
-		if (targetBlock == BLOCK_TNT && Inventory_SelectedBlock == BLOCK_AIR) {
+		/* If clicking on TNT with empty hand or flint and steel, light the fuse */
+		if (targetBlock == BLOCK_TNT && (Inventory_SelectedBlock == BLOCK_AIR || Hotbar_SelectedItem == ITEM_FLINT_STEEL)) {
 			TNT_ScheduleFuse(targetPos.x, targetPos.y, targetPos.z);
 			return;
 		}
-		
+
+		/* If clicking on grass or dirt with a hoe, convert to dry farmland */
+		if ((targetBlock == BLOCK_GRASS || targetBlock == BLOCK_DIRT || targetBlock == BLOCK_SNOWY_GRASS) &&
+		    Hotbar_SelectedItem >= ITEM_WOOD_HOE && Hotbar_SelectedItem <= ITEM_GOLD_HOE) {
+			Game_ChangeBlock(targetPos.x, targetPos.y, targetPos.z, BLOCK_FARMLAND_DRY);
+			Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock, BLOCK_FARMLAND_DRY);
+			Audio_PlayDigSound(SOUND_GRAVEL);
+			/* 40% chance to drop seeds when hoeing grass */
+			if (targetBlock == BLOCK_GRASS || targetBlock == BLOCK_SNOWY_GRASS) {
+				if (!mob_rng_inited) {
+					Random_SeedFromCurrentTime(&mob_rng);
+					mob_rng_inited = true;
+				}
+				if (Random_Next(&mob_rng, 5) < 2) {
+					Vec3 seedPos;
+					int seedSlot;
+					seedPos.x = (float)targetPos.x + 0.5f;
+					seedPos.y = (float)targetPos.y + 0.3f;
+					seedPos.z = (float)targetPos.z + 0.5f;
+					seedSlot = DropItem_FindFreeSlot();
+					if (seedSlot == -1) seedSlot = DropItem_EvictOldest();
+					if (seedSlot != -1) {
+						DropItem_Spawn(seedSlot, seedPos, BLOCK_AIR, true, ITEM_SEEDS);
+						droppedItemPickupDelay[seedSlot] = 0.0f;
+						DropItem_ApplyRandomMomentum(seedSlot);
+					}
+				}
+			}
+			return;
+		}
+
+		/* If clicking on farmland with a shovel, convert back to dirt */
+		if ((targetBlock == BLOCK_FARMLAND_DRY || targetBlock == BLOCK_FARMLAND_WET) &&
+		    (Hotbar_SelectedItem == ITEM_WOOD_SHOVEL || Hotbar_SelectedItem == ITEM_STONE_SHOVEL ||
+		     Hotbar_SelectedItem == ITEM_IRON_SHOVEL || Hotbar_SelectedItem == ITEM_DIAMOND_SHOVEL ||
+		     Hotbar_SelectedItem == ITEM_GOLD_SHOVEL)) {
+			/* If wheat is on top, break it first */
+			if (targetPos.y + 1 < World.Height) {
+				BlockID cropAbove = World_GetBlock(targetPos.x, targetPos.y + 1, targetPos.z);
+				if (cropAbove >= BLOCK_WHEAT_0 && cropAbove <= BLOCK_WHEAT_7) {
+					IVec3 cropPos;
+					cropPos.x = targetPos.x; cropPos.y = targetPos.y + 1; cropPos.z = targetPos.z;
+					BreakBlockNow(cropPos, cropAbove);
+				}
+			}
+			Game_ChangeBlock(targetPos.x, targetPos.y, targetPos.z, BLOCK_DIRT);
+			Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock, BLOCK_DIRT);
+			Audio_PlayDigSound(SOUND_GRAVEL);
+			return;
+		}
+
+		/* If clicking on farmland with seeds, plant wheat */
+		if ((targetBlock == BLOCK_FARMLAND_DRY || targetBlock == BLOCK_FARMLAND_WET) &&
+		    Hotbar_SelectedItem == ITEM_SEEDS && targetPos.y + 1 < World.Height) {
+			BlockID aboveFarm = World_GetBlock(targetPos.x, targetPos.y + 1, targetPos.z);
+			if (aboveFarm == BLOCK_AIR) {
+				Game_ChangeBlock(targetPos.x, targetPos.y + 1, targetPos.z, BLOCK_WHEAT_0);
+				Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock, targetBlock);
+				Audio_PlayDigSound(SOUND_GRASS);
+				/* Consume one seed from the held stack */
+				if (Game_SurvivalMode) {
+					int cnt = Hotbar_SelectedCount - 1;
+					Hotbar_SetCount(Inventory.SelectedIndex, cnt);
+					if (cnt <= 0) {
+						Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+						Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+						Hotbar_SetCount(Inventory.SelectedIndex, 0);
+					}
+				}
+				return;
+			}
+		}
+
 		/* If clicking on a door, swap its type (NS ↔ EW to open/close) */
 		if (targetBlock == BLOCK_DOOR_NS_BOTTOM || targetBlock == BLOCK_DOOR_NS_TOP ||
 		    targetBlock == BLOCK_DOOR_EW_BOTTOM || targetBlock == BLOCK_DOOR_EW_TOP) {
@@ -1206,6 +1330,20 @@ static void InputHandler_PlaceBlock(void) {
 		}
 	}
 	
+	/* Flint and steel: place fire at the target location */
+	if (Hotbar_SelectedItem == ITEM_FLINT_STEEL) {
+		pos = Game_SelectedPos.translatedPos;
+		if (!Game_SelectedPos.valid || !World_Contains(pos.x, pos.y, pos.z)) return;
+
+		old = World_GetBlock(pos.x, pos.y, pos.z);
+		if (Game_CanPick(old)) return; /* Can't replace a solid block */
+
+		Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_FIRE);
+		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_FIRE);
+		{ int ignVol = (int)(Audio_SoundsVolume * 1.5f); if (ignVol > 100) ignVol = 100; Audio_PlayDigSoundRateVolume(SOUND_IGNITE, 100, ignVol); }
+		return;
+	}
+
 	pos = Game_SelectedPos.translatedPos;
 	if (!Game_SelectedPos.valid || !World_Contains(pos.x, pos.y, pos.z)) return;
 
@@ -1939,6 +2077,39 @@ static cc_bool BindTriggered_PlaceBlock(int key, struct InputDevice* device) {
 		return true;
 	}
 
+	/* Eat mushroom stew: heal 5 HP, leave behind the bowl */
+	if (Hotbar_SelectedItem == ITEM_MUSHROOM_STEW) {
+		if (Player_Health < PLAYER_MAX_HEALTH) {
+			int idx = Inventory.SelectedIndex;
+			/* Replace stew with bowl */
+			Hotbar_SetItem(idx, ITEM_BOWL);
+			Hotbar_SetCount(idx, 1);
+			Inventory_Set(idx, BLOCK_AIR);
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+			Player_Health += 5;
+			if (Player_Health > PLAYER_MAX_HEALTH) Player_Health = PLAYER_MAX_HEALTH;
+		}
+		return true;
+	}
+
+	/* Eat bread: heal 5 HP, consume one */
+	if (Hotbar_SelectedItem == ITEM_BREAD) {
+		if (Player_Health < PLAYER_MAX_HEALTH) {
+			int idx = Inventory.SelectedIndex;
+			int cnt = Hotbar_GetCount(idx);
+			if (cnt > 1) {
+				Hotbar_SetCount(idx, cnt - 1);
+			} else {
+				Hotbar_SetItem(idx, ITEM_NONE);
+				Hotbar_SetCount(idx, 0);
+			}
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+			Player_Health += 5;
+			if (Player_Health > PLAYER_MAX_HEALTH) Player_Health = PLAYER_MAX_HEALTH;
+		}
+		return true;
+	}
+
 	MouseStatePress(MOUSE_RIGHT);
 	InputHandler_PlaceBlock();
 	return true;
@@ -2226,7 +2397,7 @@ void SurvInv_AddItem(BlockID block, int itemId, int count) {
 	}
 
 	if (remaining < count) {
-		Audio_PlayDigSoundRate(SOUND_PICKUP, 75);
+		Audio_PlayDigSoundRate(SOUND_PICKUP, 80 + Random_Next(&mob_rng, 41));
 		if (hotbarChanged) Event_RaiseVoid(&UserEvents.HeldBlockChanged);
 	}
 }
@@ -2516,8 +2687,13 @@ static cc_bool  mobIsBrownSpider[MAX_NET_PLAYERS];      /* true = brown spider v
 static float    mobSunDamageTimer[MAX_NET_PLAYERS];     /* accumulates time in sunlight for light sensitivity */
 static float    mobLavaDamageTimer[MAX_NET_PLAYERS];    /* accumulates time in lava for lava damage */
 static float    mobCactusDamageTimer[MAX_NET_PLAYERS];  /* accumulates time touching cactus for cactus damage */
+static float    mobFireDamageTimer[MAX_NET_PLAYERS];    /* accumulates time in fire for fire damage */
+static float    mobOnFireTimer[MAX_NET_PLAYERS];         /* lingering fire countdown after leaving source */
 static cc_uint8 mobCreeperVariant[MAX_NET_PLAYERS];     /* creeper variant type (only valid when mobModelIdx == MOB_IDX_CREEPER) */
 static cc_bool  mobSheepSheared[MAX_NET_PLAYERS];       /* true = sheep has been sheared (no wool layer) */
+static float    mobSheepWoolTimer[MAX_NET_PLAYERS];     /* seconds until sheared sheep regains wool */
+#define SHEEP_WOOL_REGROW_MIN 120.0f  /* minimum 2 minutes */
+#define SHEEP_WOOL_REGROW_MAX 300.0f  /* maximum 5 minutes */
 static GfxResourceID mob_whiteTex;                      /* 1x1 solid white texture for creeper flash */
 
 /* Melee attack system */
@@ -2555,6 +2731,8 @@ static cc_bool  arrowIsPlayerArrow[MAX_ARROWS]; /* true if shot by the player (h
 /* Player damage state (survival mode) */
 static float playerLavaDamageTimer;   /* accumulates time in lava */
 static float playerCactusDamageTimer; /* accumulates time touching cactus */
+static float playerFireDamageTimer;   /* accumulates time in fire */
+static float playerOnFireTimer;       /* lingering fire countdown after leaving source */
 static float playerFallStartY;        /* Y position when player started falling */
 static cc_bool playerWasOnGround;     /* whether player was on ground last tick */
 static float playerInvulnTimer;       /* invulnerability frames after taking damage */
@@ -2768,7 +2946,7 @@ static void DropItem_TryPickup(int slot) {
 
 		if (remaining < pickupCount) {
 			/* Picked up at least some items */
-			Audio_PlayDigSoundRate(SOUND_PICKUP, 50 + Random_Next(&mob_rng, 101));
+			Audio_PlayDigSoundRate(SOUND_PICKUP, 80 + Random_Next(&mob_rng, 41));
 			if (remaining <= 0) {
 				Entities_Remove(droppedItemEntityId[slot]);
 				droppedItemActive[slot] = false;
@@ -2830,7 +3008,7 @@ static void DropItem_TryPickup(int slot) {
 
 		if (remaining < pickupCount) {
 			/* Picked up at least some blocks */
-			Audio_PlayDigSoundRate(SOUND_PICKUP, 50 + Random_Next(&mob_rng, 101));
+			Audio_PlayDigSoundRate(SOUND_PICKUP, 80 + Random_Next(&mob_rng, 41));
 			if (remaining <= 0) {
 				Entities_Remove(droppedItemEntityId[slot]);
 				droppedItemActive[slot] = false;
@@ -3073,6 +3251,18 @@ static cc_bool Mob_IsInLava(struct Entity* e) {
 	if (!World_Contains(bx, by, bz)) return false;
 	b = World_GetBlock(bx, by, bz);
 	return b == BLOCK_LAVA || b == BLOCK_STILL_LAVA;
+}
+
+static cc_bool Mob_IsInFire(struct Entity* e) {
+	int bx = (int)Math_Floor(e->Position.x);
+	int by = (int)Math_Floor(e->Position.y);
+	int bz = (int)Math_Floor(e->Position.z);
+	/* Check both feet and head level so wall/ceiling fire also burns */
+	if (World_Contains(bx, by, bz) && World_GetBlock(bx, by, bz) == BLOCK_FIRE)
+		return true;
+	if (World_Contains(bx, by + 1, bz) && World_GetBlock(bx, by + 1, bz) == BLOCK_FIRE)
+		return true;
+	return false;
 }
 
 static cc_bool Mob_IsTouchingCactus(struct Entity* e) {
@@ -3758,6 +3948,7 @@ static void PlayerDamage_ScheduledTick(struct ScheduledTask* task) {
 			playerLavaDamageTimer -= 0.5f;
 			Player_Damage(5);
 		}
+		playerOnFireTimer = 3.0f; /* set lingering fire */
 	} else {
 		playerLavaDamageTimer = 0.0f;
 	}
@@ -3771,6 +3962,36 @@ static void PlayerDamage_ScheduledTick(struct ScheduledTask* task) {
 		}
 	} else {
 		playerCactusDamageTimer = 0.0f;
+	}
+
+	/* Fire damage: 1 damage per half second */
+	if (Mob_IsInFire(player)) {
+		playerFireDamageTimer += delta;
+		if (playerFireDamageTimer >= 0.5f) {
+			playerFireDamageTimer -= 0.5f;
+			Player_Damage(1);
+		}
+		playerOnFireTimer = 3.0f; /* set lingering fire */
+	} else if (playerOnFireTimer <= 0.0f) {
+		playerFireDamageTimer = 0.0f;
+	}
+
+	/* Lingering fire: burn for 3 seconds after leaving fire/lava source */
+	if (playerOnFireTimer > 0.0f && !Mob_IsInLava(player) && !Mob_IsInFire(player)) {
+		if (Mob_IsInWater(player)) {
+			playerOnFireTimer = 0.0f; /* water extinguishes */
+		} else {
+			playerOnFireTimer -= delta;
+			playerFireDamageTimer += delta;
+			if (playerFireDamageTimer >= 0.5f) {
+				playerFireDamageTimer -= 0.5f;
+				Player_Damage(1);
+			}
+			if (playerOnFireTimer <= 0.0f) {
+				playerOnFireTimer = 0.0f;
+				playerFireDamageTimer = 0.0f;
+			}
+		}
 	}
 }
 
@@ -3901,6 +4122,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 					mobSunDamageTimer[id] -= 1.0f;
 					Mob_DamageMob(id, 2, false);
 				}
+				mobOnFireTimer[id] = 3.0f; /* set lingering fire */
 			} else {
 				mobSunDamageTimer[id] = 0.0f;
 			}
@@ -3914,6 +4136,7 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 			mobLavaDamageTimer[id] -= 0.5f;
 			Mob_DamageMob(id, 5, false);
 		}
+		mobOnFireTimer[id] = 3.0f; /* set lingering fire */
 	} else {
 		mobLavaDamageTimer[id] = 0.0f;
 	}
@@ -3927,6 +4150,50 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		}
 	} else {
 		mobCactusDamageTimer[id] = 0.0f;
+	}
+
+	/* Fire damage: 1 damage per half second */
+	if (Mob_IsInFire(e)) {
+		mobFireDamageTimer[id] += delta;
+		if (mobFireDamageTimer[id] >= 0.5f) {
+			mobFireDamageTimer[id] -= 0.5f;
+			Mob_DamageMob(id, 1, false);
+		}
+		mobOnFireTimer[id] = 3.0f; /* set lingering fire */
+	} else if (mobOnFireTimer[id] <= 0.0f) {
+		mobFireDamageTimer[id] = 0.0f;
+	}
+
+	/* Lingering fire: burn for 3 seconds after leaving fire/lava/sun source */
+	if (mobOnFireTimer[id] > 0.0f && !Mob_IsInLava(e) && !Mob_IsInFire(e)) {
+		if (Mob_IsInWater(e)) {
+			mobOnFireTimer[id] = 0.0f; /* water extinguishes */
+		} else {
+			mobOnFireTimer[id] -= delta;
+			mobFireDamageTimer[id] += delta;
+			if (mobFireDamageTimer[id] >= 0.5f) {
+				mobFireDamageTimer[id] -= 0.5f;
+				Mob_DamageMob(id, 1, false);
+			}
+			if (mobOnFireTimer[id] <= 0.0f) {
+				mobOnFireTimer[id] = 0.0f;
+				mobFireDamageTimer[id] = 0.0f;
+			}
+		}
+	}
+
+	/* Sheep wool regrowth: sheared sheep slowly regain wool over time */
+	if (mobModelIdx[id] == MOB_IDX_SHEEP && mobSheepSheared[id]) {
+		mobSheepWoolTimer[id] -= delta;
+		if (mobSheepWoolTimer[id] <= 0.0f) {
+			mobSheepSheared[id] = false;
+			mobSheepWoolTimer[id] = 0.0f;
+			/* Restore wool model */
+			{
+				cc_string woolModel = String_FromReadonly("sheep");
+				Entity_SetModel(e, &woolModel);
+			}
+		}
 	}
 
 	/* Push mob out of solid blocks (prevents getting stuck in walls) */
@@ -4077,9 +4344,12 @@ static void MobEntity_Tick(struct Entity* e, float delta) {
 		if (!mobIsAggro[id] && distSq < MOB_AGGRO_RANGE_SQ) {
 			/* Only aggro if mob has line of sight to the player */
 			Vec3 mobEye, plrCenter;
+			cc_bool playerCrouching = Entities.CurPlayer->Crouching;
+			/* Crouching reduces aggro range to 10 blocks unless mob has direct LOS */
+			cc_bool inCrouchRange = !playerCrouching || distSq < (10.0f * 10.0f);
 			mobEye = e->Position; mobEye.y += e->Size.y * 0.8f;
 			plrCenter = playerPos; plrCenter.y += 1.0f;
-			if (Mob_HasLineOfSight(mobEye, plrCenter)) {
+			if (Mob_HasLineOfSight(mobEye, plrCenter) && inCrouchRange) {
 				mobIsAggro[id] = true;
 			}
 		} else if (mobIsAggro[id] && distSq > MOB_DEAGGRO_RANGE_SQ) {
@@ -4493,8 +4763,13 @@ cc_bool Mob_IsCreeper(int id) {
 }
 
 cc_bool Mob_IsBurning(int id) {
-	if (!Mob_IsMob(id)) return false;
-	return mobSunDamageTimer[id] > 0.0f || mobLavaDamageTimer[id] > 0.0f;
+	if (!Mob_IsMob(id)) {
+		/* Check if this is the player entity (ID 255) */
+		if (id == ENTITIES_SELF_ID)
+			return playerOnFireTimer > 0.0f || playerLavaDamageTimer > 0.0f || playerFireDamageTimer > 0.0f;
+		return false;
+	}
+	return mobSunDamageTimer[id] > 0.0f || mobLavaDamageTimer[id] > 0.0f || mobFireDamageTimer[id] > 0.0f || mobOnFireTimer[id] > 0.0f;
 }
 
 int Mob_CurrentRenderingId = -1;
@@ -4702,22 +4977,29 @@ void Mob_DamageMob(int id, int damage, cc_bool fromPlayer) {
 					}
 					break;
 				case MOB_IDX_PIG:
-					/* Pig: 0-2 raw pork (gold sword: always 2) */
-					lootCount = goldSword ? 2 : Random_Next(&mob_rng, 3);
-					if (lootCount > 0) {
-						lootSlot = DropItem_FindFreeSlot();
-						if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
-						if (lootSlot != -1) {
-							DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, ITEM_RAW_PORK);
-							droppedItemCount[lootSlot] = lootCount;
-							droppedItemPickupDelay[lootSlot] = 0.0f;
-							DropItem_ApplyRandomMomentum(lootSlot);
+					/* Pig: 0-2 pork (gold sword: always 2) */
+					/* Drop cooked porkchop if pig was on fire or in lava */
+					{
+						int porkItem = ITEM_RAW_PORK;
+						if (mobOnFireTimer[id] > 0.0f || Mob_IsInLava(e) || Mob_IsInFire(e)) {
+							porkItem = ITEM_COOKED_PORK;
+						}
+						lootCount = goldSword ? 2 : Random_Next(&mob_rng, 3);
+						if (lootCount > 0) {
+							lootSlot = DropItem_FindFreeSlot();
+							if (lootSlot == -1) lootSlot = DropItem_EvictOldest();
+							if (lootSlot != -1) {
+								DropItem_Spawn(lootSlot, dropPos, BLOCK_AIR, true, porkItem);
+								droppedItemCount[lootSlot] = lootCount;
+								droppedItemPickupDelay[lootSlot] = 0.0f;
+								DropItem_ApplyRandomMomentum(lootSlot);
+							}
 						}
 					}
 					break;
 				case MOB_IDX_SHEEP:
-					/* Sheep: drop 1-3 wool if not yet sheared (gold sword: always 3) */
-					if (!mobSheepSheared[id]) {
+					/* Sheep: drop 1-3 wool if not yet sheared AND killed by player (gold sword: always 3) */
+					if (!mobSheepSheared[id] && fromPlayer) {
 						int woolCount = goldSword ? 3 : Random_Next(&mob_rng, 3) + 1;
 						mobSheepSheared[id] = true;
 						lootSlot = DropItem_FindFreeSlot();
@@ -4761,13 +5043,14 @@ void Mob_DamageMob(int id, int damage, cc_bool fromPlayer) {
 			}
 		}
 
-		/* Sheep wool shearing: on first hit, drop 1-3 white cloth and remove wool layer */
-		if (Game_SurvivalMode && e && mobModelIdx[id] == MOB_IDX_SHEEP && !mobSheepSheared[id]) {
+		/* Sheep wool shearing: on first hit by player, drop 1-3 white cloth and remove wool layer */
+		if (Game_SurvivalMode && e && fromPlayer && mobModelIdx[id] == MOB_IDX_SHEEP && !mobSheepSheared[id]) {
 			cc_bool goldSwordShear = (fromPlayer && Hotbar_SelectedItem == ITEM_GOLD_SWORD);
 			int woolCount = goldSwordShear ? 3 : Random_Next(&mob_rng, 3) + 1;
 			Vec3 woolPos;
 			int woolSlot;
 			mobSheepSheared[id] = true;
+			mobSheepWoolTimer[id] = SHEEP_WOOL_REGROW_MIN + Random_Float(&mob_rng) * (SHEEP_WOOL_REGROW_MAX - SHEEP_WOOL_REGROW_MIN);
 			{
 				cc_string shearedModel = String_FromReadonly("sheep_nofur");
 				Entity_SetModel(e, &shearedModel);
@@ -4952,6 +5235,8 @@ static void SpawnRandomMob(void) {
 	mobSunDamageTimer[id] = 0.0f;
 	mobLavaDamageTimer[id] = 0.0f;
 	mobCactusDamageTimer[id] = 0.0f;
+	mobFireDamageTimer[id] = 0.0f;
+	mobOnFireTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_STANDARD;
 	mobSheepSheared[id] = false;
 
@@ -5247,6 +5532,8 @@ static void BoomCommand_Execute(const cc_string* args, int argsCount) {
 	mobSunDamageTimer[id] = 0.0f;
 	mobLavaDamageTimer[id] = 0.0f;
 	mobCactusDamageTimer[id] = 0.0f;
+	mobFireDamageTimer[id] = 0.0f;
+	mobOnFireTimer[id] = 0.0f;
 	mobCreeperVariant[id] = CREEPER_VAR_NUKE;
 	mobSheepSheared[id] = false;
 
@@ -5930,6 +6217,49 @@ void DayNightCycle_Disable(void) {
 	dn_active = false;
 }
 
+/*########################################################################################################################*
+*-----------------------------------------------Ambient fire sound tick---------------------------------------------------*
+*#########################################################################################################################*/
+/* Periodically check for nearby fire blocks and play fire.wav with distance-based volume */
+static void FireAmbient_Tick(struct ScheduledTask* task) {
+	struct Entity* pe = &Entities.CurPlayer->Base;
+	float px, py, pz;
+	int ix, iy, iz, radius, bestDistSq;
+	int dx, dy, dz, distSq, vol, rate;
+
+	if (!World.Loaded) return;
+	px = pe->Position.x; py = pe->Position.y; pz = pe->Position.z;
+
+	/* Search within 16 blocks for the nearest fire */
+	radius = 16;
+	bestDistSq = radius * radius + 1;
+
+	for (iy = (int)py - radius; iy <= (int)py + radius; iy++) {
+		if (iy < 0 || iy > World.MaxY) continue;
+		for (iz = (int)pz - radius; iz <= (int)pz + radius; iz++) {
+			if (iz < 0 || iz > World.MaxZ) continue;
+			for (ix = (int)px - radius; ix <= (int)px + radius; ix++) {
+				if (ix < 0 || ix > World.MaxX) continue;
+				if (World_GetBlock(ix, iy, iz) != BLOCK_FIRE) continue;
+
+				dx = ix - (int)px; dy = iy - (int)py; dz = iz - (int)pz;
+				distSq = dx * dx + dy * dy + dz * dz;
+				if (distSq < bestDistSq) bestDistSq = distSq;
+			}
+		}
+	}
+
+	if (bestDistSq > radius * radius) return; /* no fire nearby */
+
+	/* Volume falls off with distance */
+	vol = (int)(Audio_SoundsVolume * 1.5f * (1.0f - Math_SqrtF((float)bestDistSq) / (float)radius));
+	if (vol > Audio_SoundsVolume) vol = Audio_SoundsVolume;
+	if (vol <= 0) return;
+
+	rate = 80 + Random_Next(&mob_rng, 41); /* 80-120 */
+	Audio_PlayDigSoundRateVolume(SOUND_FIRE_AMBIENT, rate, vol);
+}
+
 static void OnInit(void) {
 	LocalPlayerInput_Add(&normalInput);
 	LocalPlayerInput_Add(&gamepadInput);
@@ -5941,6 +6271,7 @@ static void OnInit(void) {
 	ScheduledTask_Add(1.0, Mob_NaturalSpawnTick);
 	ScheduledTask_Add(1.0 / 20.0, Furnace_ScheduledTick);
 	ScheduledTask_Add(2.0, DayNightCycle_Tick);
+	ScheduledTask_Add(1.0, FireAmbient_Tick);
 
 	Commands_Register(&BoomCommand);
 
@@ -6266,6 +6597,8 @@ static void OnNewMap(void) {
 	/* Reset player damage state */
 	playerLavaDamageTimer   = 0.0f;
 	playerCactusDamageTimer = 0.0f;
+	playerFireDamageTimer   = 0.0f;
+	playerOnFireTimer       = 0.0f;
 	playerFallStartY        = 0.0f;
 	playerWasOnGround       = true;
 	playerInvulnTimer       = 0.0f;

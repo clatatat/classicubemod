@@ -18,6 +18,7 @@
 #include "Server.h"
 #include "TexturePack.h"
 #include "InputHandler.h"
+#include "Audio.h"
 
 struct _GuiData Gui;
 struct Screen* Gui_Screens[GUI_MAX_SCREENS];
@@ -578,6 +579,7 @@ int Screen_DoPointerDown(void* screen, int id, int x, int y) {
 
 		if (w->MenuClick) {
 			w->MenuClick(s, w);
+			Audio_PlayDigSoundRate(SOUND_CLICK, 100);
 		} else {
 			Elem_HandlesPointerDown(w, id, x, y);
 		}

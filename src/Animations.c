@@ -24,6 +24,7 @@ static void Animations_Update(int loc, struct Bitmap* bmp, int stride);
 
 #define WATER_TEX_LOC 14
 #define LAVA_TEX_LOC  30
+#define FIRE_TEX_LOC  31
 
 #ifndef CC_BUILD_WEB
 /* Based off the incredible work from https://dl.dropboxusercontent.com/u/12694594/lava.txt
@@ -259,6 +260,37 @@ static void Animations_Update(int texLoc, struct Bitmap* bmp, int stride) {
 	if (tex) Gfx_UpdateTexture(tex, 0, dstY, bmp, stride, Gfx.Mipmaps);
 }
 
+
+/*########################################################################################################################*
+*-----------------------------------------------------Fire animation------------------------------------------------------*
+*#########################################################################################################################*/
+static int fire_anim_frame;
+static int fire_anim_delay;
+
+static void FireAnimation_Tick(void) {
+	struct Bitmap frame;
+	int numFrames;
+
+	if (!anims_bmp.scan0) return;
+	if (anims_bmp.width < 16) return;
+
+	/* animations.png fire strip: 512x16 horizontal, 32 frames of 16x16 */
+	numFrames = anims_bmp.width / 16;
+	if (numFrames < 1) return;
+
+	/* Advance every other tick (~10fps) */
+	if (fire_anim_delay > 0) { fire_anim_delay--; return; }
+	fire_anim_delay = 1;
+
+	fire_anim_frame = (fire_anim_frame + 1) % numFrames;
+
+	Bitmap_Init(frame, 16, 16, NULL);
+	/* Each frame at horizontal offset = frame * 16, row 0 */
+	frame.scan0 = anims_bmp.scan0 + fire_anim_frame * 16;
+	Animations_Update(FIRE_TEX_LOC, &frame, anims_bmp.width);
+}
+
+
 static void Animations_Apply(struct AnimationData* data) {
 	struct Bitmap frame;
 	int loc, size;
@@ -340,6 +372,7 @@ static void Animations_Tick(struct ScheduledTask* task) {
 	if (useLavaAnim)  LavaAnimation_Tick();
 	if (useWaterAnim) WaterAnimation_Tick();
 #endif
+	FireAnimation_Tick();
 
 	if (!anims_count) return;
 	if (!anims_bmp.scan0) {

@@ -57,3 +57,11 @@ ID      Item Name            Texture (items.png)
 54      Sulphur              40                     1
 55      Feather              24                     1
 56      String               8                      1
+57      Wood Hoe             128                    2
+58      Stone Hoe            129                    4
+59      Iron Hoe             130                    6
+60      Diamond Hoe          131                    8
+61      Gold Hoe             132                    2
+62      Seeds                9                      1
+63      Wheat                25                     1
+64      Bread                41                     1

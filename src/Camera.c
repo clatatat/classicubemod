@@ -195,8 +195,8 @@ static Vec3 FirstPersonCamera_GetPosition(float t) {
 	float yaw     = e->Yaw * MATH_DEG2RAD;
 	PerspectiveCamera_CalcViewBobbing(p, t, 1);
 
-	/* Lower camera when crouching */
-	if (p->Crouching) camPos.y -= 0.125f;
+	/* Lower camera when crouching to keep eye inside 1.4-block hitbox */
+	if (p->Crouching) camPos.y -= 0.25f;
 
 	camPos.y += Camera.BobbingVer;
 	camPos.x += Camera.BobbingHor * Math_CosF(yaw);
@@ -253,8 +253,8 @@ static Vec3 ThirdPersonCamera_GetPosition(float t) {
 	PerspectiveCamera_CalcViewBobbing(p, t, dist);
 	target = Entity_GetEyePosition(e);
 
-	/* Lower camera when crouching */
-	if (p->Crouching) target.y -= 0.125f;
+	/* Lower camera when crouching to keep eye inside 1.4-block hitbox */
+	if (p->Crouching) target.y -= 0.25f;
 
 	target.y += Camera.BobbingVer;
 

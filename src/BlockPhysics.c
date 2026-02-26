@@ -95,7 +95,7 @@ struct Physics_ Physics;
 static RNGState physics_rnd;
 static int physics_tickCount;
 static int physics_maxWaterX, physics_maxWaterY, physics_maxWaterZ;
-static struct TickQueue lavaQ, waterQ;
+static struct TickQueue lavaQ, waterQ, fireQ, wheatQ;
 
 #define PHYSICS_DELAY_MASK 0xF8000000UL
 #define PHYSICS_POS_MASK   0x07FFFFFFUL
@@ -107,10 +107,13 @@ static struct TickQueue lavaQ, waterQ;
 static void Redstone_Reset(void); /* forward declaration */
 static void IronDoor_ScanWorld(void); /* forward declaration */
 static void TNT_ScanWorld(void); /* forward declaration */
+static void Wheat_ScanWorld(void);  /* forward declaration */
 
 static void Physics_OnNewMapLoaded(void* obj) {
 	TickQueue_Clear(&lavaQ);
 	TickQueue_Clear(&waterQ);
+	TickQueue_Clear(&fireQ);
+	TickQueue_Clear(&wheatQ);
 
 	physics_maxWaterX = World.MaxX - 2;
 	physics_maxWaterY = World.MaxY - 2;
@@ -755,6 +758,7 @@ static void Redstone_Reset(void) {
 	Redstone_AllocVisited();
 	IronDoor_ScanWorld();
 	TNT_ScanWorld();
+	Wheat_ScanWorld();
 }
 
 /* Schedule a torch to toggle after a 1-tick delay.
@@ -849,6 +853,7 @@ static void Redstone_TickTorchQueue(void) {
 					/* Torch has burned out - force it OFF and stop toggling */
 					if (Redstone_IsTorchOn(current)) {
 						Game_UpdateBlock(tx, ty, tz, Redstone_GetTorchOffVariant(current));
+						Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (physics_tickCount % 41));
 					}
 				} else {
 					Redstone_ApplyTorchToggle(tx, ty, tz, target);
@@ -2415,6 +2420,148 @@ static void Physics_HandleSnowyGrass(int index, BlockID block) {
 	Game_UpdateBlock(x, y, z, BLOCK_GRASS);
 }
 
+/* Dry farmland: check for water within 4 blocks horizontally (same Y or Y-1) */
+static void Physics_HandleFarmlandDry(int index, BlockID block) {
+	int x, y, z, dx, dz, cy;
+	BlockID b;
+	World_Unpack(index, x, y, z);
+
+	for (dx = -4; dx <= 4; dx++) {
+		for (dz = -4; dz <= 4; dz++) {
+			for (cy = y - 1; cy <= y; cy++) {
+				if (!World_Contains(x + dx, cy, z + dz)) continue;
+				b = World_GetBlock(x + dx, cy, z + dz);
+				if (b == BLOCK_WATER || b == BLOCK_STILL_WATER) {
+					Game_UpdateBlock(x, y, z, BLOCK_FARMLAND_WET);
+					return;
+				}
+			}
+		}
+	}
+}
+
+/* Wet farmland: if no water nearby, revert to dry */
+static void Physics_HandleFarmlandWet(int index, BlockID block) {
+	int x, y, z, dx, dz, cy;
+	BlockID b;
+	World_Unpack(index, x, y, z);
+
+	for (dx = -4; dx <= 4; dx++) {
+		for (dz = -4; dz <= 4; dz++) {
+			for (cy = y - 1; cy <= y; cy++) {
+				if (!World_Contains(x + dx, cy, z + dz)) continue;
+				b = World_GetBlock(x + dx, cy, z + dz);
+				if (b == BLOCK_WATER || b == BLOCK_STILL_WATER) {
+					return; /* Still has water nearby, stay wet */
+				}
+			}
+		}
+	}
+	/* No water found, revert to dry farmland */
+	Game_UpdateBlock(x, y, z, BLOCK_FARMLAND_DRY);
+}
+
+/* Wheat growth delay: ~20 ticks (~1 second between growth checks) */
+#define WHEAT_GROWTH_DELAY 20
+
+/* Enqueue a wheat block for future growth ticking */
+static void Physics_PlaceWheat(int index, BlockID block) {
+	cc_uint32 item = (cc_uint32)index;
+	item |= ((cc_uint32)WHEAT_GROWTH_DELAY << 27);
+	TickQueue_Enqueue(&wheatQ, item);
+}
+
+/* Process the wheat growth queue each tick (like fire queue) */
+static void Physics_TickWheat(void) {
+	cc_uint32 item;
+	int index, count;
+	BlockID block;
+	cc_uint32 delay;
+
+	count = wheatQ.count;
+	while (count > 0) {
+		item = TickQueue_Dequeue(&wheatQ);
+		count--;
+
+		delay = (item & PHYSICS_DELAY_MASK) >> 27;
+		index = (int)(item & ~PHYSICS_DELAY_MASK);
+
+		if (index < 0 || index >= World.Volume) continue;
+
+		block = World_GetRawBlock(index);
+		if (block < BLOCK_WHEAT_0 || block > BLOCK_WHEAT_7) continue;
+
+		if (delay > 0) {
+			item = (cc_uint32)index | ((delay - 1) << 27);
+			TickQueue_Enqueue(&wheatQ, item);
+			continue;
+		}
+
+		/* Delay expired: attempt growth */
+		{
+			int x, y, z, stage;
+			BlockID below;
+			World_Unpack(index, x, y, z);
+
+			/* Crops must be on farmland */
+			if (y <= 0) { Game_UpdateBlock(x, y, z, BLOCK_AIR); continue; }
+			below = World_GetBlock(x, y - 1, z);
+			if (below != BLOCK_FARMLAND_WET && below != BLOCK_FARMLAND_DRY) {
+				Game_UpdateBlock(x, y, z, BLOCK_AIR);
+				continue;
+			}
+
+			stage = block - BLOCK_WHEAT_0;
+
+			/* Only grow on wet farmland, and not already fully grown */
+			if (below == BLOCK_FARMLAND_WET && stage < 7) {
+				/* ~8% chance to advance per check */
+				if (Random_Next(&physics_rnd, 32) == 0) {
+					Game_UpdateBlock(x, y, z, (BlockID)(BLOCK_WHEAT_0 + stage + 1));
+				}
+			}
+
+			/* Re-enqueue for continued growth checking */
+			if (stage < 7) {
+				cc_uint32 reitem = (cc_uint32)index;
+				reitem |= ((cc_uint32)WHEAT_GROWTH_DELAY << 27);
+				TickQueue_Enqueue(&wheatQ, reitem);
+			}
+		}
+	}
+}
+
+/* Wheat activation: if block below is no longer farmland, break the crop */
+static void Physics_HandleWheatActivate(int index, BlockID block) {
+	int x, y, z;
+	BlockID below;
+	World_Unpack(index, x, y, z);
+
+	if (y <= 0) { Game_UpdateBlock(x, y, z, BLOCK_AIR); return; }
+	below = World_GetBlock(x, y - 1, z);
+	if (below != BLOCK_FARMLAND_WET && below != BLOCK_FARMLAND_DRY) {
+		Game_UpdateBlock(x, y, z, BLOCK_AIR);
+	}
+}
+
+/* Scan world for existing wheat blocks and enqueue them for growth */
+static void Wheat_ScanWorld(void) {
+	int i;
+	BlockID b;
+	if (!World.Blocks) return;
+	for (i = 0; i < World.Volume; i++) {
+		b = World_GetRawBlock(i);
+		if (b >= BLOCK_WHEAT_0 && b <= BLOCK_WHEAT_7) {
+			int stage = b - BLOCK_WHEAT_0;
+			if (stage < 7) {
+				cc_uint32 item = (cc_uint32)i;
+				item |= ((cc_uint32)WHEAT_GROWTH_DELAY << 27);
+				TickQueue_Enqueue(&wheatQ, item);
+			}
+		}
+	}
+}
+
 static void Physics_HandleFlower(int index, BlockID block) {
 	BlockID below;
 	int x, y, z;
@@ -2465,6 +2612,7 @@ static void Physics_PropagateLava(int posIndex, int x, int y, int z) {
 		/* Lava spreading into water turns the water solid */
 		if (block == BLOCK_WATER || block == BLOCK_STILL_WATER) {
 			Game_UpdateBlock(x, y, z, BLOCK_STONE);
+			Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (x * 7 + z * 13) % 41);
 		}
 	} else if (Blocks.Collide[block] == COLLIDE_NONE) {
 		TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | posIndex);
@@ -2508,6 +2656,7 @@ static void Physics_PropagateWater(int posIndex, int x, int y, int z) {
 		/* Water spreading into lava turns the lava solid */
 		if (block == BLOCK_LAVA || block == BLOCK_STILL_LAVA) {
 			Game_UpdateBlock(x, y, z, BLOCK_OBSIDIAN);
+			Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (x * 7 + z * 13) % 41);
 		}
 	} else if (Blocks.Collide[block] == COLLIDE_NONE) {
 		/* Sponge check */		
@@ -2950,11 +3099,204 @@ static void Physics_DeleteDoubleChest(int index, BlockID block) {
 	}
 }
 
+
+/*########################################################################################################################*
+*---------------------------------------------------------Fire------------------------------------------------------------*
+*#########################################################################################################################*/
+
+/* Fire spread delay: ~40 ticks (2 seconds) encoded in upper bits */
+#define FIRE_SPREAD_DELAY 40
+
+static cc_bool Block_IsFlammable(BlockID b) {
+	return b == BLOCK_WOOD || b == BLOCK_LOG || b == BLOCK_LEAVES ||
+	       b == BLOCK_BOOKSHELF || b == BLOCK_COBWEB ||
+	       (b >= BLOCK_RED && b <= BLOCK_WHITE); /* All wool colors */
+}
+
+static cc_bool Fire_HasFlammableNeighbor(int x, int y, int z) {
+	if (x > 0          && Block_IsFlammable(World_GetBlock(x - 1, y, z))) return true;
+	if (x < World.MaxX && Block_IsFlammable(World_GetBlock(x + 1, y, z))) return true;
+	if (z > 0          && Block_IsFlammable(World_GetBlock(x, y, z - 1))) return true;
+	if (z < World.MaxZ && Block_IsFlammable(World_GetBlock(x, y, z + 1))) return true;
+	if (y > 0          && Block_IsFlammable(World_GetBlock(x, y - 1, z))) return true;
+	if (y < World.MaxY && Block_IsFlammable(World_GetBlock(x, y + 1, z))) return true;
+	return false;
+}
+
+/* Try to place fire in an air block adjacent to a flammable surface */
+static void Fire_TrySpread(int x, int y, int z) {
+	BlockID b;
+	if (!World_Contains(x, y, z)) return;
+	b = World_GetBlock(x, y, z);
+	if (b != BLOCK_AIR) return;
+
+	/* Only spread here if there's a flammable block next to this air space */
+	if (!Fire_HasFlammableNeighbor(x, y, z)) return;
+
+	Game_UpdateBlock(x, y, z, BLOCK_FIRE);
+	/* Enqueue the new fire for future ticking */
+	{
+		cc_uint32 item = (cc_uint32)World_Pack(x, y, z);
+		item |= ((cc_uint32)FIRE_SPREAD_DELAY << 27);
+		TickQueue_Enqueue(&fireQ, item);
+	}
+}
+
+/* Try to consume (destroy) a flammable neighbor */
+static void Fire_TryConsume(int x, int y, int z) {
+	BlockID b;
+	if (!World_Contains(x, y, z)) return;
+	b = World_GetBlock(x, y, z);
+
+	if (b == BLOCK_TNT) {
+		/* Ignite TNT instead of destroying it */
+		TNT_ScheduleFuse(x, y, z);
+		return;
+	}
+
+	if (Block_IsFlammable(b)) {
+		/* Replace flammable block with fire (which will eventually burn out) */
+		Game_UpdateBlock(x, y, z, BLOCK_FIRE);
+	}
+}
+
+static void Physics_HandleFire(int index, BlockID block) {
+	int x, y, z;
+	BlockID below;
+	cc_bool hasFuel, onSolid;
+	int spreadDir;
+
+	World_Unpack(index, x, y, z);
+
+	below  = (y > 0) ? World_GetBlock(x, y - 1, z) : BLOCK_AIR;
+	onSolid = Blocks.Collide[below] == COLLIDE_SOLID;
+	hasFuel = Fire_HasFlammableNeighbor(x, y, z);
+
+	/* Fire with no fuel and not on a solid block burns out quickly */
+	if (!hasFuel && !onSolid) {
+		Game_UpdateBlock(x, y, z, BLOCK_AIR);
+		return;
+	}
+
+	/* Fire with no fuel but on solid ground burns out fairly fast */
+	if (!hasFuel) {
+		if (Random_Next(&physics_rnd, 4) == 0) {
+			Game_UpdateBlock(x, y, z, BLOCK_AIR);
+		}
+		return;
+	}
+
+	/* Fire with fuel: small chance to burn out */
+	if (Random_Next(&physics_rnd, 50) == 0) {
+		Game_UpdateBlock(x, y, z, BLOCK_AIR);
+		return;
+	}
+
+	/* Try to spread fire to adjacent air blocks */
+	spreadDir = Random_Next(&physics_rnd, 6);
+	switch (spreadDir) {
+		case 0: Fire_TrySpread(x - 1, y, z); break;
+		case 1: Fire_TrySpread(x + 1, y, z); break;
+		case 2: Fire_TrySpread(x, y - 1, z); break;
+		case 3: Fire_TrySpread(x, y + 1, z); break;
+		case 4: Fire_TrySpread(x, y, z - 1); break;
+		case 5: Fire_TrySpread(x, y, z + 1); break;
+	}
+
+	/* Try to consume an adjacent flammable block */
+	if (Random_Next(&physics_rnd, 3) == 0) {
+		spreadDir = Random_Next(&physics_rnd, 6);
+		switch (spreadDir) {
+			case 0: Fire_TryConsume(x - 1, y, z); break;
+			case 1: Fire_TryConsume(x + 1, y, z); break;
+			case 2: Fire_TryConsume(x, y - 1, z); break;
+			case 3: Fire_TryConsume(x, y + 1, z); break;
+			case 4: Fire_TryConsume(x, y, z - 1); break;
+			case 5: Fire_TryConsume(x, y, z + 1); break;
+		}
+	}
+
+	/* Re-enqueue this fire block for continued ticking */
+	{
+		cc_uint32 item = (cc_uint32)index;
+		item |= ((cc_uint32)FIRE_SPREAD_DELAY << 27);
+		TickQueue_Enqueue(&fireQ, item);
+	}
+}
+
+/* When fire is placed, enqueue it for ticking */
+static void Physics_PlaceFire(int index, BlockID block) {
+	int x, y, z;
+	cc_uint32 item;
+	World_Unpack(index, x, y, z);
+	Physics_ActivateNeighbours(x, y, z, index);
+
+	item = (cc_uint32)index;
+	item |= ((cc_uint32)FIRE_SPREAD_DELAY << 27);
+	TickQueue_Enqueue(&fireQ, item);
+}
+
+/* When fire is deleted, activate neighbors */
+static void Physics_DeleteFire(int index, BlockID block) {
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+	Physics_ActivateNeighbours(x, y, z, index);
+}
+
+/* Fire breaks when the block below it is removed (if floating) */
+static void Physics_ActivateFire(int index, BlockID block) {
+	int x, y, z;
+	BlockID below;
+
+	World_Unpack(index, x, y, z);
+	below = (y > 0) ? World_GetBlock(x, y - 1, z) : BLOCK_AIR;
+
+	/* Fire stays if it has a solid block below or a flammable neighbor */
+	if (Blocks.Collide[below] == COLLIDE_SOLID) return;
+	if (Fire_HasFlammableNeighbor(x, y, z)) return;
+
+	/* No support - fire goes out */
+	Game_UpdateBlock(x, y, z, BLOCK_AIR);
+}
+
+static void Physics_TickFire(void) {
+	cc_uint32 item;
+	int index, count;
+	BlockID block;
+	cc_uint32 delay;
+
+	count = fireQ.count;
+	while (count > 0) {
+		item = TickQueue_Dequeue(&fireQ);
+		count--;
+
+		delay = (item & PHYSICS_DELAY_MASK) >> 27;
+		index = (int)(item & ~PHYSICS_DELAY_MASK);
+
+		if (index < 0 || index >= World.Volume) continue;
+
+		block = World.Blocks[index];
+		if (block != BLOCK_FIRE) continue;
+
+		if (delay > 0) {
+			/* Re-enqueue with reduced delay */
+			item = (cc_uint32)index | ((delay - 1) << 27);
+			TickQueue_Enqueue(&fireQ, item);
+			continue;
+		}
+
+		Physics_HandleFire(index, block);
+	}
+}
+
+
 void Physics_Init(void) {
 	Event_Register_(&WorldEvents.MapLoaded,    NULL, Physics_OnNewMapLoaded);
 	Physics.Enabled = Options_GetBool(OPT_BLOCK_PHYSICS, true);
 	TickQueue_Init(&lavaQ);
 	TickQueue_Init(&waterQ);
+	TickQueue_Init(&fireQ);
+	TickQueue_Init(&wheatQ);
 
 	Physics.OnPlace[BLOCK_SAND]        = Physics_DoFalling;
 	Physics.OnPlace[BLOCK_GRAVEL]      = Physics_DoFalling;
@@ -2969,6 +3311,24 @@ void Physics_Init(void) {
 	Physics.OnActivate[BLOCK_GRASS]     = Physics_HandleGrassActivate;
 	Physics.OnActivate[BLOCK_SNOWY_GRASS]     = Physics_HandleSnowyGrassActivate;
 	Physics.OnRandomTick[BLOCK_SNOWY_GRASS]   = Physics_HandleSnowyGrass;
+
+	/* Farmland: hydration checks */
+	Physics.OnRandomTick[BLOCK_FARMLAND_DRY]  = Physics_HandleFarmlandDry;
+	Physics.OnRandomTick[BLOCK_FARMLAND_WET]  = Physics_HandleFarmlandWet;
+
+	/* Wheat crops: queue-based growth, break if unsupported */
+	{ int wi;
+	  for (wi = BLOCK_WHEAT_0; wi <= BLOCK_WHEAT_7; wi++) {
+		Physics.OnPlace[wi]    = Physics_PlaceWheat;
+		Physics.OnActivate[wi] = Physics_HandleWheatActivate;
+	  }
+	}
+
+	/* Fire: spread, burn out, support checks */
+	Physics.OnRandomTick[BLOCK_FIRE]   = Physics_HandleFire;
+	Physics.OnPlace[BLOCK_FIRE]        = Physics_PlaceFire;
+	Physics.OnDelete[BLOCK_FIRE]       = Physics_DeleteFire;
+	Physics.OnActivate[BLOCK_FIRE]     = Physics_ActivateFire;
 
 	Physics.OnRandomTick[BLOCK_DANDELION]    = Physics_HandleFlower;
 	Physics.OnRandomTick[BLOCK_ROSE]         = Physics_HandleFlower;
@@ -3149,6 +3509,8 @@ void Physics_Tick(void) {
 	Redstone_TickIronDoors();
 	Redstone_TickTNT();
 	Redstone_TickTNTFuse();
+	Physics_TickFire();
+	Physics_TickWheat();
 	physics_tickCount++;
 	Physics_TickRandomBlocks();
 }

@@ -1078,7 +1078,7 @@ static cc_bool LocalPlayer_TriggerSpeed(int key, struct InputDevice* device) {
 	if (Game_SurvivalMode && !Player_CheatsEnabled) {
 		p->Crouching = (!touch || !p->Crouching);
 		if (p->Crouching) {
-			p->Base.Size.y = 1.5f * p->Base.ModelScale.y;
+			p->Base.Size.y = 1.4f * p->Base.ModelScale.y;
 		} else {
 			Entity_UpdateModelBounds(&p->Base);
 		}
