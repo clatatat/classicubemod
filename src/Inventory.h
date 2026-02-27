@@ -121,6 +121,8 @@ extern const int ItemTextures[ITEM_COUNT];
 extern const int ItemDamage[ITEM_COUNT];
 /* Bare hand melee damage */
 #define ITEM_BARE_HAND_DAMAGE 1
+/* Armor defense points per item (0 for non-armor). Used for damage reduction. */
+extern const int ItemArmorPoints[ITEM_COUNT];
 /* Returns the maximum stack size for a given item ID (1 for tools/armor, 64 for most items) */
 int Item_MaxStackSize(int itemId);
 /* Returns the maximum stack size for a given block (1 for doors, 64 for most blocks) */

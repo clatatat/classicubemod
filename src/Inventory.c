@@ -85,6 +85,29 @@ const int ItemDamage[ITEM_COUNT] = {
 	1, 1, 1                  /* 62-64: Seeds, Wheat, Bread */
 };
 
+/* Armor defense points per item (matches vanilla Minecraft pre-1.9 values).
+   Helmet=slot0, Chestplate=slot1, Leggings=slot2, Boots=slot3.
+   Full sets: Cloth=7, Chainmail=12, Gold=11, Iron=15, Diamond=20. */
+const int ItemArmorPoints[ITEM_COUNT] = {
+	0,                        /* 0:  Air */
+	1, 3, 2, 1,              /* 1-4:   Cloth armor (helm, chest, legs, boots) */
+	0, 0, 0, 0,              /* 5-8:   Wood tools */
+	2, 5, 4, 1,              /* 9-12:  Chainmail armor */
+	0, 0, 0, 0,              /* 13-16: Stone tools */
+	2, 6, 5, 2,              /* 17-20: Iron armor */
+	0, 0, 0, 0,              /* 21-24: Iron tools */
+	3, 8, 6, 3,              /* 25-28: Diamond armor */
+	0, 0, 0, 0,              /* 29-32: Diamond tools */
+	2, 5, 3, 1,              /* 33-36: Gold armor */
+	0, 0, 0, 0,              /* 37-40: Gold tools */
+	0, 0, 0, 0, 0,           /* 41-45: Bow, Arrow, Stick, Flint&Steel, Flint */
+	0, 0, 0, 0,              /* 46-49: Coal, Iron Ingot, Gold Ingot, Diamond */
+	0, 0, 0, 0,              /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
+	0, 0, 0,                 /* 54-56: Sulphur, Feather, String */
+	0, 0, 0, 0, 0,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
+	0, 0, 0                  /* 62-64: Seeds, Wheat, Bread */
+};
+
 int Item_MaxStackSize(int itemId) {
 	/* Armor: not stackable */
 	if (itemId >= 1  && itemId <= 4)  return 1; /* Cloth */

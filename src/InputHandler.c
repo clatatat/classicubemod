@@ -2739,12 +2739,37 @@ static float playerInvulnTimer;       /* invulnerability frames after taking dam
 #define PLAYER_INVULN_TIME 0.5f       /* seconds of invulnerability after damage */
 #define SKELETON_ARROW_PLAYER_DAMAGE 2 /* damage from skeleton arrow to player */
 
+/* Sum defense points from all equipped armor pieces */
+static int Player_GetArmorPoints(void) {
+	int total = 0, i, itemId;
+	for (i = 0; i < 4; i++) {
+		itemId = SurvInv_Armor[i].itemId;
+		if (itemId > ITEM_NONE && itemId < ITEM_COUNT)
+			total += ItemArmorPoints[itemId];
+	}
+	return total;
+}
+
 /* Apply damage to the player (survival mode only) */
 void Player_Damage(int amount) {
+	int armor, effective, min_effective;
 	if (!Game_SurvivalMode) return;
 	if (Player_Health <= 0) return;
 	if (playerInvulnTimer > 0.0f) return;
 	if (Player_CheatsEnabled) return; /* invincible with cheats */
+
+	/* Armor reduction: classic Minecraft formula (pre-1.9, no toughness).
+	   effective = clamp(max(armor/5, armor - damage/2), 0, 20)
+	   damage_after = max(1, damage * (25 - effective) / 25) */
+	armor = Player_GetArmorPoints();
+	if (armor > 0) {
+		effective     = armor - amount / 2;
+		min_effective = armor / 5;
+		if (effective < min_effective) effective = min_effective;
+		if (effective > 20) effective = 20;
+		amount = amount * (25 - effective) / 25;
+		if (amount < 1) amount = 1;
+	}
 
 	Player_Health -= amount;
 	if (Player_Health < 0) Player_Health = 0;

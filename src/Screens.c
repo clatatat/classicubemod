@@ -2658,6 +2658,19 @@ static void SurvInv_Render(void* screen, float delta) {
 	}
 }
 
+/* Returns true if the given item/block can be placed in the given slot.
+   Armor slots 36-39 only accept the matching armor type; all other slots accept anything. */
+static cc_bool SurvInv_ItemAllowedInSlot(int slot, BlockID block, int itemId) {
+	int armorType;
+	if (slot < 36 || slot > 39) return true; /* not an armor slot */
+	if (block != BLOCK_AIR)     return false; /* armor slots hold items only */
+	if (itemId <= ITEM_NONE || itemId >= ITEM_COUNT) return false;
+	if (ItemArmorPoints[itemId] == 0) return false; /* not an armor item */
+	/* Within each 8-item tier group: offset 0=helm, 1=chest, 2=legs, 3=boots */
+	armorType = (itemId - 1) % 8;
+	return armorType == (slot - 36);
+}
+
 static int SurvInv_KeyDown(void* screen, int key, struct InputDevice* device) {
 	struct SurvivalInventoryScreen* s = (struct SurvivalInventoryScreen*)screen;
 
@@ -2708,6 +2721,7 @@ static int SurvInv_KeyDown(void* screen, int key, struct InputDevice* device) {
 		} else {
 			if (slotBlock == BLOCK_AIR && slotItem == ITEM_NONE) {
 				/* Place 1 item into empty slot */
+				if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) return true;
 				SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
 				SurvInv_SetSlotCount(slot, 1);
 				s->holdCount--;
@@ -2810,6 +2824,7 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 
 		if (slotBlock == BLOCK_AIR && slotItem == ITEM_NONE) {
 			/* Place entire held stack into empty slot */
+			if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) goto done;
 			SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
 			SurvInv_SetSlotCount(slot, s->holdCount);
 			s->holding   = false;
@@ -2832,6 +2847,7 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 			}
 		} else {
 			/* Swap with different type */
+			if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) goto done;
 			BlockID tmpBlock = slotBlock;
 			int tmpItem      = slotItem;
 			int tmpCount     = slotCount;
