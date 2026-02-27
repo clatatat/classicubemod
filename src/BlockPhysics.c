@@ -97,6 +97,11 @@ static int physics_tickCount;
 static int physics_maxWaterX, physics_maxWaterY, physics_maxWaterZ;
 static struct TickQueue lavaQ, waterQ, fireQ, wheatQ;
 
+/* Flow level metadata array - parallels World.Blocks */
+/* 0 = source, 1-7 = flow distance, 8+ = falling */
+static cc_uint8* physics_flowLevels;
+static int physics_flowLevelsSize;
+
 #define PHYSICS_DELAY_MASK 0xF8000000UL
 #define PHYSICS_POS_MASK   0x07FFFFFFUL
 #define PHYSICS_DELAY_SHIFT 27
@@ -123,12 +128,101 @@ static void Physics_OnNewMapLoaded(void* obj) {
 	Random_SeedFromCurrentTime(&physics_rnd);
 	Tree_Rnd = &physics_rnd;
 	
+	/* Allocate/reallocate flow level metadata */
+	if (physics_flowLevels) Mem_Free(physics_flowLevels);
+	physics_flowLevels = NULL;
+	physics_flowLevelsSize = 0;
+	if (World.Volume > 0) {
+		physics_flowLevels = (cc_uint8*)Mem_AllocCleared(World.Volume, 1, "flow levels");
+		physics_flowLevelsSize = World.Volume;
+	}
+	Physics.FlowLevels = physics_flowLevels;
+
 	Redstone_Reset();
 }
 
 void Physics_SetEnabled(cc_bool enabled) {
 	Physics.Enabled = enabled;
 	Physics_OnNewMapLoaded(NULL);
+}
+
+/* Forward declarations for finite liquid handlers */
+static void FiniteLiquid_PlaceLava(int index, BlockID block);
+static void FiniteLiquid_PlaceWater(int index, BlockID block);
+static void FiniteLiquid_DeleteWater(int index, BlockID block);
+static void FiniteLiquid_DeleteLava(int index, BlockID block);
+static void FiniteLiquid_ActivateWater(int index, BlockID block);
+static void FiniteLiquid_ActivateLava(int index, BlockID block);
+static void FiniteLiquid_TickWater(void);
+static void FiniteLiquid_TickLava(void);
+/* Forward declarations for classic liquid handlers */
+static void Physics_PlaceLava(int index, BlockID block);
+static void Physics_PlaceWater(int index, BlockID block);
+static void Physics_ActivateWater(int index, BlockID block);
+static void Physics_ActivateLava(int index, BlockID block);
+static void Physics_PlaceSponge(int index, BlockID block);
+static void Physics_DeleteSponge(int index, BlockID block);
+
+/* Helper to swap liquid handler registrations based on FiniteLiquid flag */
+static void Physics_RegisterLiquidHandlers(void) {
+	if (Physics.FiniteLiquid) {
+		Physics.OnPlace[BLOCK_LAVA]    = FiniteLiquid_PlaceLava;
+		Physics.OnPlace[BLOCK_WATER]   = FiniteLiquid_PlaceWater;
+		Physics.OnDelete[BLOCK_WATER]       = FiniteLiquid_DeleteWater;
+		Physics.OnDelete[BLOCK_STILL_WATER] = FiniteLiquid_DeleteWater;
+		Physics.OnDelete[BLOCK_LAVA]        = FiniteLiquid_DeleteLava;
+		Physics.OnDelete[BLOCK_STILL_LAVA]  = FiniteLiquid_DeleteLava;
+	} else {
+		Physics.OnPlace[BLOCK_LAVA]    = Physics_PlaceLava;
+		Physics.OnPlace[BLOCK_WATER]   = Physics_PlaceWater;
+		Physics.OnDelete[BLOCK_WATER]       = NULL;
+		Physics.OnDelete[BLOCK_STILL_WATER] = NULL;
+		Physics.OnDelete[BLOCK_LAVA]        = NULL;
+		Physics.OnDelete[BLOCK_STILL_LAVA]  = NULL;
+	}
+	Physics.OnPlace[BLOCK_SPONGE]  = Physics_PlaceSponge;
+	Physics.OnDelete[BLOCK_SPONGE] = Physics_DeleteSponge;
+
+	if (Physics.FiniteLiquid) {
+		Physics.OnActivate[BLOCK_WATER]       = FiniteLiquid_ActivateWater;
+		Physics.OnActivate[BLOCK_STILL_WATER] = FiniteLiquid_ActivateWater;
+		Physics.OnActivate[BLOCK_LAVA]        = FiniteLiquid_ActivateLava;
+		Physics.OnActivate[BLOCK_STILL_LAVA]  = FiniteLiquid_ActivateLava;
+
+		/* Finite liquid does NOT use random ticks - only scheduled ticks via queue.
+		   Using random ticks would cause stable water to repeatedly re-spread. */
+		Physics.OnRandomTick[BLOCK_WATER]       = NULL;
+		Physics.OnRandomTick[BLOCK_STILL_WATER] = NULL;
+		Physics.OnRandomTick[BLOCK_LAVA]        = NULL;
+		Physics.OnRandomTick[BLOCK_STILL_LAVA]  = NULL;
+	} else {
+		Physics.OnActivate[BLOCK_WATER]       = Physics.OnPlace[BLOCK_WATER];
+		Physics.OnActivate[BLOCK_STILL_WATER] = Physics.OnPlace[BLOCK_WATER];
+		Physics.OnActivate[BLOCK_LAVA]        = Physics.OnPlace[BLOCK_LAVA];
+		Physics.OnActivate[BLOCK_STILL_LAVA]  = Physics.OnPlace[BLOCK_LAVA];
+
+		Physics.OnRandomTick[BLOCK_WATER]       = Physics_ActivateWater;
+		Physics.OnRandomTick[BLOCK_STILL_WATER] = Physics_ActivateWater;
+		Physics.OnRandomTick[BLOCK_LAVA]        = Physics_ActivateLava;
+		Physics.OnRandomTick[BLOCK_STILL_LAVA]  = Physics_ActivateLava;
+	}
+}
+
+void Physics_SetFiniteLiquid(cc_bool enabled) {
+	Physics.FiniteLiquid = enabled;
+	/* Ensure flow levels array is allocated if enabling mid-game */
+	if (enabled && !physics_flowLevels && World.Volume > 0) {
+		physics_flowLevels = (cc_uint8*)Mem_AllocCleared(World.Volume, 1, "flow levels");
+		physics_flowLevelsSize = World.Volume;
+	}
+	Physics.FlowLevels = physics_flowLevels;
+	/* Clear liquid queues to avoid stale entries */
+	TickQueue_Clear(&lavaQ);
+	TickQueue_Clear(&waterQ);
+	TickQueue_Init(&lavaQ);
+	TickQueue_Init(&waterQ);
+	/* Swap handlers */
+	Physics_RegisterLiquidHandlers();
 }
 
 static void Physics_Activate(int index) {
@@ -2601,6 +2695,451 @@ static void Physics_HandleMushroom(int index, BlockID block) {
 }
 
 
+/*########################################################################################################################*
+*-----------------------------------------------Finite Liquid Physics-----------------------------------------------------*
+*#########################################################################################################################*/
+/* Minecraft Alpha-style finite water/lava spread.
+   Faithfully replicates BlockFlowing.updateTick from MC Alpha 1.0.6.
+   Water: flows 7 blocks horizontally (fluidType=1), lava: flows 3 blocks (fluidType=2).
+   Water has infinite source reproduction (2+ adjacent sources + solid below = new source).
+   Liquids prefer flowing toward nearby drops (optimal flow direction).
+   Stable blocks convert to "still" variant; neighbor changes reactivate them. */
+
+static cc_bool FiniteLiquid_IsWater(BlockID b) {
+	return b == BLOCK_WATER || b == BLOCK_STILL_WATER;
+}
+
+static cc_bool FiniteLiquid_IsLava(BlockID b) {
+	return b == BLOCK_LAVA || b == BLOCK_STILL_LAVA;
+}
+
+/* MC Alpha: getFlowDecay - returns metadata if same material, else -1 */
+static int FiniteLiquid_GetFlowDecay(int x, int y, int z, cc_bool isWater) {
+	BlockID b;
+	int idx;
+	if (!World_Contains(x, y, z)) return -1;
+	b = World_GetBlock(x, y, z);
+	if (isWater ? !FiniteLiquid_IsWater(b) : !FiniteLiquid_IsLava(b)) return -1;
+	idx = World_Pack(x, y, z);
+	return physics_flowLevels[idx];
+}
+
+/* MC Alpha: blockBlocksFlow - doors, signs, ladders always block; otherwise solid material blocks */
+static cc_bool FiniteLiquid_BlocksFlow(int x, int y, int z) {
+	BlockID b;
+	if (!World_Contains(x, y, z)) return true;
+	b = World_GetBlock(x, y, z);
+	if (b == BLOCK_AIR) return false;
+	/* Doors, signs, ladders block flow (MC Alpha hardcoded special cases) */
+	if (b == BLOCK_DOOR_NS_BOTTOM || b == BLOCK_DOOR_NS_TOP ||
+		b == BLOCK_DOOR_EW_BOTTOM || b == BLOCK_DOOR_EW_TOP ||
+		b == BLOCK_IRON_DOOR      || b == BLOCK_IRON_DOOR_NS_TOP ||
+		b == BLOCK_IRON_DOOR_EW_BOTTOM || b == BLOCK_IRON_DOOR_EW_TOP ||
+		b == BLOCK_LADDER) return true;
+	/* MC Alpha: material.isSolid() - in CC, solid collide blocks */
+	return Blocks.Collide[b] >= COLLIDE_SOLID;
+}
+
+/* MC Alpha: liquidCanDisplaceBlock
+   - same material: NO
+   - target is lava: NO (even water can't displace lava!)
+   - target blocks flow: NO
+   - otherwise: YES */
+static cc_bool FiniteLiquid_CanDisplace(int x, int y, int z, cc_bool isWater) {
+	BlockID b;
+	if (!World_Contains(x, y, z)) return false;
+	b = World_GetBlock(x, y, z);
+	/* Can't displace same liquid type */
+	if (isWater ? FiniteLiquid_IsWater(b) : FiniteLiquid_IsLava(b)) return false;
+	/* Can't displace lava (even water can't - MC Alpha behavior) */
+	if (FiniteLiquid_IsLava(b)) return false;
+	/* Can't displace flow-blocking blocks */
+	return !FiniteLiquid_BlocksFlow(x, y, z);
+}
+
+/* MC Alpha: getSmallestFlowDecay - accumulative; call once per cardinal neighbor.
+   Returns the smallest effective flow decay seen so far. Counts source blocks. */
+static int FiniteLiquid_GetSmallestFlowDecay(int x, int y, int z,
+	int currentSmallest, cc_bool isWater, int* numSources)
+{
+	int decay = FiniteLiquid_GetFlowDecay(x, y, z, isWater);
+	if (decay < 0) return currentSmallest;
+	if (decay == 0) (*numSources)++;
+	if (decay >= 8) decay = 0;
+	return (currentSmallest >= 0 && decay >= currentSmallest) ? currentSmallest : decay;
+}
+
+/* MC Alpha: calculateFlowCost - find shortest path to a drop within 4 blocks */
+static int FiniteLiquid_CalcFlowCost(int x, int y, int z, int depth, int fromDir, cc_bool isWater) {
+	int best = 1000;
+	int dir, nx, nz, cost;
+
+	for (dir = 0; dir < 4; dir++) {
+		/* Don't go back the way we came */
+		if ((dir == 0 && fromDir == 1) || (dir == 1 && fromDir == 0) ||
+			(dir == 2 && fromDir == 3) || (dir == 3 && fromDir == 2)) continue;
+
+		nx = x; nz = z;
+		if (dir == 0) nx--;
+		if (dir == 1) nx++;
+		if (dir == 2) nz--;
+		if (dir == 3) nz++;
+
+		if (FiniteLiquid_BlocksFlow(nx, y, nz)) continue;
+
+		/* Can't flow through source blocks of same type */
+		if (World_Contains(nx, y, nz)) {
+			BlockID nb = World_GetBlock(nx, y, nz);
+			if ((isWater ? FiniteLiquid_IsWater(nb) : FiniteLiquid_IsLava(nb)) &&
+				physics_flowLevels[World_Pack(nx, y, nz)] == 0) continue;
+		}
+
+		/* Found a drop - return current depth as cost */
+		if (!FiniteLiquid_BlocksFlow(nx, y - 1, nz)) return depth;
+
+		if (depth < 4) {
+			cost = FiniteLiquid_CalcFlowCost(nx, y, nz, depth + 1, dir, isWater);
+			if (cost < best) best = cost;
+		}
+	}
+	return best;
+}
+
+/* MC Alpha: getOptimalFlowDirections - find directions toward nearest drop */
+static void FiniteLiquid_GetOptimalDirs(int x, int y, int z, cc_bool isWater, cc_bool* dirs) {
+	int flowCost[4];
+	int dir, nx, nz, best;
+
+	for (dir = 0; dir < 4; dir++) {
+		flowCost[dir] = 1000;
+		nx = x; nz = z;
+		if (dir == 0) nx--;
+		if (dir == 1) nx++;
+		if (dir == 2) nz--;
+		if (dir == 3) nz++;
+
+		if (FiniteLiquid_BlocksFlow(nx, y, nz)) continue;
+
+		/* Don't flow toward same-type source blocks */
+		if (World_Contains(nx, y, nz)) {
+			BlockID nb = World_GetBlock(nx, y, nz);
+			if ((isWater ? FiniteLiquid_IsWater(nb) : FiniteLiquid_IsLava(nb)) &&
+				physics_flowLevels[World_Pack(nx, y, nz)] == 0) continue;
+		}
+
+		if (!FiniteLiquid_BlocksFlow(nx, y - 1, nz)) {
+			flowCost[dir] = 0;
+		} else {
+			flowCost[dir] = FiniteLiquid_CalcFlowCost(nx, y, nz, 1, dir, isWater);
+		}
+	}
+
+	best = flowCost[0];
+	for (dir = 1; dir < 4; dir++) {
+		if (flowCost[dir] < best) best = flowCost[dir];
+	}
+
+	for (dir = 0; dir < 4; dir++) {
+		dirs[dir] = (flowCost[dir] == best);
+	}
+}
+
+/* Check if position is near a sponge (within 2 blocks) */
+static cc_bool FiniteLiquid_NearSponge(int x, int y, int z) {
+	int xx, yy, zz;
+	for (yy = (y < 2 ? 0 : y - 2); yy <= (y > physics_maxWaterY ? World.MaxY : y + 2); yy++) {
+		for (zz = (z < 2 ? 0 : z - 2); zz <= (z > physics_maxWaterZ ? World.MaxZ : z + 2); zz++) {
+			for (xx = (x < 2 ? 0 : x - 2); xx <= (x > physics_maxWaterX ? World.MaxX : x + 2); xx++) {
+				if (World_GetBlock(xx, yy, zz) == BLOCK_SPONGE) return true;
+			}
+		}
+	}
+	return false;
+}
+
+/* MC Alpha: updateFlow - convert flowing liquid to still (stabilized) variant */
+static void FiniteLiquid_UpdateFlow(int x, int y, int z, cc_bool isWater) {
+	/* Convert flowing -> still, preserving flow level metadata */
+	BlockID stillBlock = isWater ? BLOCK_STILL_WATER : BLOCK_STILL_LAVA;
+	Game_UpdateBlock(x, y, z, stillBlock);
+}
+
+/* MC Alpha: flowIntoBlock - flow liquid into a neighboring position */
+static void FiniteLiquid_FlowInto(int x, int y, int z, int newLevel, cc_bool isWater) {
+	BlockID existing;
+	int idx;
+	if (!World_Contains(x, y, z)) return;
+	if (!FiniteLiquid_CanDisplace(x, y, z, isWater)) return;
+
+	existing = World_GetBlock(x, y, z);
+	idx = World_Pack(x, y, z);
+
+	if (existing != BLOCK_AIR) {
+		if (!isWater) {
+			/* Lava: trigger mix effects (fizz) when displacing non-air blocks */
+			Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (x * 7 + z * 13) % 41);
+		}
+		/* Non-lava liquids: in MC Alpha, the displaced block drops as item.
+		   CC doesn't have item drops, so just replace. */
+	}
+
+	/* Check sponge before placing water */
+	if (isWater && FiniteLiquid_NearSponge(x, y, z)) return;
+
+	physics_flowLevels[idx] = (cc_uint8)newLevel;
+	Game_UpdateBlock(x, y, z, isWater ? BLOCK_WATER : BLOCK_LAVA);
+
+	/* Schedule this new block for a future tick (MC Alpha: onBlockAdded -> scheduleBlockUpdate) */
+	if (isWater)
+		TickQueue_Enqueue(&waterQ, PHYSICS_WATER_DELAY | idx);
+	else
+		TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | idx);
+}
+
+/* MC Alpha: checkForHarden - when lava is placed, check for adjacent water and harden */
+static void FiniteLiquid_CheckLavaHarden(int x, int y, int z) {
+	cc_bool touchesWater = false;
+	int idx = World_Pack(x, y, z);
+	int level = physics_flowLevels[idx];
+
+	if (World_Contains(x, y, z - 1) && FiniteLiquid_IsWater(World_GetBlock(x, y, z - 1))) touchesWater = true;
+	if (World_Contains(x, y, z + 1) && FiniteLiquid_IsWater(World_GetBlock(x, y, z + 1))) touchesWater = true;
+	if (World_Contains(x - 1, y, z) && FiniteLiquid_IsWater(World_GetBlock(x - 1, y, z))) touchesWater = true;
+	if (World_Contains(x + 1, y, z) && FiniteLiquid_IsWater(World_GetBlock(x + 1, y, z))) touchesWater = true;
+	if (World_Contains(x, y + 1, z) && FiniteLiquid_IsWater(World_GetBlock(x, y + 1, z))) touchesWater = true;
+
+	if (touchesWater) {
+		if (level == 0) {
+			Game_UpdateBlock(x, y, z, BLOCK_OBSIDIAN);
+		} else {
+			Game_UpdateBlock(x, y, z, BLOCK_COBBLE);
+		}
+		physics_flowLevels[idx] = 0;
+		Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (x * 7 + z * 13) % 41);
+	}
+}
+
+/* When water touches lava, harden the lava into cobblestone or obsidian.
+   Only water on TOP of a lava source -> obsidian; all other contacts -> cobblestone. */
+static void FiniteLiquid_CheckWaterHarden(int x, int y, int z) {
+	int dirs[6][3] = { {0,0,-1}, {0,0,1}, {-1,0,0}, {1,0,0}, {0,1,0}, {0,-1,0} };
+	int i;
+	for (i = 0; i < 6; i++) {
+		int nx = x + dirs[i][0], ny = y + dirs[i][1], nz = z + dirs[i][2];
+		BlockID nb;
+		int nIdx, nLevel;
+		cc_bool waterAboveLava;
+		if (!World_Contains(nx, ny, nz)) continue;
+		nb = World_GetBlock(nx, ny, nz);
+		if (!FiniteLiquid_IsLava(nb)) continue;
+		nIdx = World_Pack(nx, ny, nz);
+		nLevel = physics_flowLevels[nIdx];
+		/* Obsidian only when water is directly on top of a lava source */
+		waterAboveLava = (dirs[i][1] == -1);
+		if (nLevel == 0 && waterAboveLava) {
+			Game_UpdateBlock(nx, ny, nz, BLOCK_OBSIDIAN);
+		} else {
+			Game_UpdateBlock(nx, ny, nz, BLOCK_COBBLE);
+		}
+		physics_flowLevels[nIdx] = 0;
+		Audio_PlayDigSoundRate(SOUND_FIZZ, 80 + (nx * 7 + nz * 13) % 41);
+	}
+}
+
+/* Main finite liquid update for a single block - MC Alpha: BlockFlowing.updateTick */
+static void FiniteLiquid_UpdateBlock(int index, cc_bool isWater) {
+	int x, y, z;
+	int curLevel, newLevel, numSources;
+	int fluidType = isWater ? 1 : 2;
+	cc_bool shouldUpdateFlow = true;
+
+	World_Unpack(index, x, y, z);
+	curLevel = physics_flowLevels[index];
+
+	/* Non-source blocks: recalculate what our level should be */
+	if (curLevel > 0) {
+		int smallestNeighbor = -100;
+		numSources = 0;
+
+		/* MC Alpha: getSmallestFlowDecay for each of 4 cardinal neighbors */
+		smallestNeighbor = FiniteLiquid_GetSmallestFlowDecay(x - 1, y, z, smallestNeighbor, isWater, &numSources);
+		smallestNeighbor = FiniteLiquid_GetSmallestFlowDecay(x + 1, y, z, smallestNeighbor, isWater, &numSources);
+		smallestNeighbor = FiniteLiquid_GetSmallestFlowDecay(x, y, z - 1, smallestNeighbor, isWater, &numSources);
+		smallestNeighbor = FiniteLiquid_GetSmallestFlowDecay(x, y, z + 1, smallestNeighbor, isWater, &numSources);
+
+		newLevel = smallestNeighbor + fluidType;
+		if (newLevel >= 8 || smallestNeighbor < 0) {
+			newLevel = -1;
+		}
+
+		/* Check for liquid above - falling liquid overrides level */
+		{
+			int aboveDecay = FiniteLiquid_GetFlowDecay(x, y + 1, z, isWater);
+			if (aboveDecay >= 0) {
+				newLevel = (aboveDecay >= 8) ? aboveDecay : aboveDecay + 8;
+			}
+		}
+
+		/* Water source reproduction: 2+ adjacent sources + solid block below = new source */
+		if (numSources >= 2 && isWater) {
+			if (y > 0) {
+				BlockID below = World_GetBlock(x, y - 1, z);
+				/* MC Alpha: isBlockNormalCube - solid opaque cube below */
+				if (Blocks.Collide[below] >= COLLIDE_SOLID) {
+					newLevel = 0;
+				}
+			}
+		}
+
+		/* Lava resists increasing levels (75% chance to keep current level) */
+		if (!isWater && curLevel < 8 && newLevel < 8 && newLevel > curLevel) {
+			if (Random_Range(&physics_rnd, 0, 4) != 0) {
+				newLevel = curLevel;
+				shouldUpdateFlow = false;
+			}
+		}
+
+		if (newLevel != curLevel) {
+			curLevel = newLevel;
+			if (newLevel < 0) {
+				/* Block should disappear */
+				Game_UpdateBlock(x, y, z, BLOCK_AIR);
+				physics_flowLevels[index] = 0;
+				Physics_ActivateNeighbours(x, y, z, index);
+				return;
+			} else {
+				/* Level changed - update metadata, re-schedule, notify neighbors */
+				physics_flowLevels[index] = (cc_uint8)newLevel;
+				/* Trigger mesh rebuild so flow-level visual height updates */
+				Game_UpdateBlock(x, y, z, isWater ? BLOCK_WATER : BLOCK_LAVA);
+				if (isWater)
+					TickQueue_Enqueue(&waterQ, PHYSICS_WATER_DELAY | index);
+				else
+					TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | index);
+				Physics_ActivateNeighbours(x, y, z, index);
+			}
+		} else if (shouldUpdateFlow) {
+			/* Level unchanged and stable - convert to still variant */
+			FiniteLiquid_UpdateFlow(x, y, z, isWater);
+		}
+	} else {
+		/* Source block (level 0) - always convert to still */
+		FiniteLiquid_UpdateFlow(x, y, z, isWater);
+	}
+
+	/* Check lava/water hardening interactions */
+	if (!isWater) {
+		FiniteLiquid_CheckLavaHarden(x, y, z);
+		/* If lava was hardened (turned to obsidian/cobble), stop spreading */
+		if (!FiniteLiquid_IsLava(World_GetBlock(x, y, z))) return;
+	} else {
+		FiniteLiquid_CheckWaterHarden(x, y, z);
+	}
+
+	/* --- Spreading phase (runs for both source and non-source blocks) --- */
+
+	/* Spread downward first */
+	if (FiniteLiquid_CanDisplace(x, y - 1, z, isWater)) {
+		int downLevel = (curLevel >= 8) ? curLevel : curLevel + 8;
+		FiniteLiquid_FlowInto(x, y - 1, z, downLevel, isWater);
+	} else if (curLevel >= 0 && (curLevel == 0 || FiniteLiquid_BlocksFlow(x, y - 1, z))) {
+		/* Can't flow down (or below blocks flow): spread horizontally */
+		cc_bool dirs[4];
+		int spreadLevel = curLevel + fluidType;
+		int nx, nz, dir;
+
+		/* Falling liquid spreads horizontally at level 1 */
+		if (curLevel >= 8) spreadLevel = 1;
+		/* Can't spread further if level would be >= 8 */
+		if (spreadLevel >= 8) return;
+
+		FiniteLiquid_GetOptimalDirs(x, y, z, isWater, dirs);
+
+		for (dir = 0; dir < 4; dir++) {
+			if (!dirs[dir]) continue;
+			nx = x; nz = z;
+			if (dir == 0) nx--;
+			if (dir == 1) nx++;
+			if (dir == 2) nz--;
+			if (dir == 3) nz++;
+			FiniteLiquid_FlowInto(nx, y, nz, spreadLevel, isWater);
+		}
+	}
+}
+
+/* Place handler for finite water */
+static void FiniteLiquid_PlaceWater(int index, BlockID block) {
+	physics_flowLevels[index] = 0; /* Source block */
+	TickQueue_Enqueue(&waterQ, PHYSICS_WATER_DELAY | index);
+}
+
+/* Place handler for finite lava */
+static void FiniteLiquid_PlaceLava(int index, BlockID block) {
+	physics_flowLevels[index] = 0; /* Source block */
+	TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | index);
+}
+
+/* Delete handler for finite water - clears flow level metadata */
+static void FiniteLiquid_DeleteWater(int index, BlockID block) {
+	physics_flowLevels[index] = 0;
+}
+
+/* Delete handler for finite lava - clears flow level metadata */
+static void FiniteLiquid_DeleteLava(int index, BlockID block) {
+	physics_flowLevels[index] = 0;
+}
+
+/* Activate handler for finite water.
+   When a still water block is activated by a neighbor change,
+   convert it back to flowing (MC Alpha: BlockStationary.onNeighborBlockChange) */
+static void FiniteLiquid_ActivateWater(int index, BlockID block) {
+	if (block == BLOCK_STILL_WATER) {
+		int x, y, z;
+		World_Unpack(index, x, y, z);
+		Game_UpdateBlock(x, y, z, BLOCK_WATER);
+	}
+	TickQueue_Enqueue(&waterQ, PHYSICS_WATER_DELAY | index);
+}
+
+/* Activate handler for finite lava.
+   When a still lava block is activated by a neighbor change,
+   convert it back to flowing (MC Alpha: BlockStationary.onNeighborBlockChange) */
+static void FiniteLiquid_ActivateLava(int index, BlockID block) {
+	if (block == BLOCK_STILL_LAVA) {
+		int x, y, z;
+		World_Unpack(index, x, y, z);
+		Game_UpdateBlock(x, y, z, BLOCK_LAVA);
+	}
+	TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | index);
+}
+
+/* Tick all queued finite water blocks */
+static void FiniteLiquid_TickWater(void) {
+	int i, count = waterQ.count;
+	for (i = 0; i < count; i++) {
+		int index;
+		if (Physics_CheckItem(&waterQ, &index)) {
+			BlockID block = World.Blocks[index];
+			if (block != BLOCK_WATER) continue; /* Only tick flowing, not still */
+			FiniteLiquid_UpdateBlock(index, true);
+		}
+	}
+}
+
+/* Tick all queued finite lava blocks */
+static void FiniteLiquid_TickLava(void) {
+	int i, count = lavaQ.count;
+	for (i = 0; i < count; i++) {
+		int index;
+		if (Physics_CheckItem(&lavaQ, &index)) {
+			BlockID block = World.Blocks[index];
+			if (block != BLOCK_LAVA) continue; /* Only tick flowing, not still */
+			FiniteLiquid_UpdateBlock(index, false);
+		}
+	}
+}
+
+
 static void Physics_PlaceLava(int index, BlockID block) {
 	TickQueue_Enqueue(&lavaQ, PHYSICS_LAVA_DELAY | index);
 }
@@ -3290,9 +3829,91 @@ static void Physics_TickFire(void) {
 }
 
 
+/*########################################################################################################################*
+*-------------------------------------------------Flow vector (MC Alpha)--------------------------------------------------*
+*#########################################################################################################################*/
+/* Get the effective flow decay level for flow vector calculation.
+   Same liquid: if rawLevel >= 8 (falling), treat as 0 (source). Otherwise rawLevel.
+   Not same liquid: returns -1. */
+static int Physics_GetEffectiveFlowDecay(int x, int y, int z, cc_bool isWater) {
+	BlockID b;
+	cc_bool sameLiquid;
+	int rawLevel;
+	if (!World_Contains(x, y, z)) return -1;
+	b = World_GetBlock(x, y, z);
+	sameLiquid = isWater ? (b == BLOCK_WATER || b == BLOCK_STILL_WATER)
+	                     : (b == BLOCK_LAVA  || b == BLOCK_STILL_LAVA);
+	if (!sameLiquid) return -1;
+	rawLevel = Physics.FlowLevels ? Physics.FlowLevels[World_Pack(x, y, z)] : 0;
+	return (rawLevel >= 8) ? 0 : rawLevel;
+}
+
+void Physics_GetFlowVector(int x, int y, int z, cc_bool isWater, Vec3* result) {
+	int myDecay, adjDecay;
+	float len;
+	BlockID belowBlock;
+	cc_bool belowSame;
+	result->x = 0; result->y = 0; result->z = 0;
+	if (!Physics.FiniteLiquid || !Physics.FlowLevels) return;
+
+	myDecay = Physics_GetEffectiveFlowDecay(x, y, z, isWater);
+	if (myDecay < 0) return;
+
+	/* Check 4 cardinal neighbors */
+	/* -X direction */
+	adjDecay = Physics_GetEffectiveFlowDecay(x - 1, y, z, isWater);
+	if (adjDecay >= 0) {
+		result->x -= (float)(adjDecay - myDecay);
+	} else if (World_Contains(x - 1, y, z) && Blocks.Collide[World_GetBlock(x - 1, y, z)] < COLLIDE_SOLID) {
+		adjDecay = Physics_GetEffectiveFlowDecay(x - 1, y - 1, z, isWater);
+		if (adjDecay >= 0) result->x -= (float)(adjDecay - (myDecay - 8));
+	}
+	/* +X direction */
+	adjDecay = Physics_GetEffectiveFlowDecay(x + 1, y, z, isWater);
+	if (adjDecay >= 0) {
+		result->x += (float)(adjDecay - myDecay);
+	} else if (World_Contains(x + 1, y, z) && Blocks.Collide[World_GetBlock(x + 1, y, z)] < COLLIDE_SOLID) {
+		adjDecay = Physics_GetEffectiveFlowDecay(x + 1, y - 1, z, isWater);
+		if (adjDecay >= 0) result->x += (float)(adjDecay - (myDecay - 8));
+	}
+	/* -Z direction */
+	adjDecay = Physics_GetEffectiveFlowDecay(x, y, z - 1, isWater);
+	if (adjDecay >= 0) {
+		result->z -= (float)(adjDecay - myDecay);
+	} else if (World_Contains(x, y, z - 1) && Blocks.Collide[World_GetBlock(x, y, z - 1)] < COLLIDE_SOLID) {
+		adjDecay = Physics_GetEffectiveFlowDecay(x, y - 1, z - 1, isWater);
+		if (adjDecay >= 0) result->z -= (float)(adjDecay - (myDecay - 8));
+	}
+	/* +Z direction */
+	adjDecay = Physics_GetEffectiveFlowDecay(x, y, z + 1, isWater);
+	if (adjDecay >= 0) {
+		result->z += (float)(adjDecay - myDecay);
+	} else if (World_Contains(x, y, z + 1) && Blocks.Collide[World_GetBlock(x, y, z + 1)] < COLLIDE_SOLID) {
+		adjDecay = Physics_GetEffectiveFlowDecay(x, y - 1, z + 1, isWater);
+		if (adjDecay >= 0) result->z += (float)(adjDecay - (myDecay - 8));
+	}
+
+	/* Falling liquid gets downward push */
+	if (Physics.FlowLevels[World_Pack(x, y, z)] >= 8) {
+		/* Check if any horizontal neighbor is blocking (MC Alpha: checks for solid face) */
+		/* Simplified: if falling liquid, bias downward */
+		result->y -= 6.0f;
+	}
+
+	/* Normalize */
+	len = Math_SqrtF(result->x * result->x + result->y * result->y + result->z * result->z);
+	if (len > 0.0001f) {
+		result->x /= len;
+		result->y /= len;
+		result->z /= len;
+	}
+}
+
+
 void Physics_Init(void) {
 	Event_Register_(&WorldEvents.MapLoaded,    NULL, Physics_OnNewMapLoaded);
 	Physics.Enabled = Options_GetBool(OPT_BLOCK_PHYSICS, true);
+	Physics.FiniteLiquid = Options_GetBool(OPT_FINITE_LIQUID, false);
 	TickQueue_Init(&lavaQ);
 	TickQueue_Init(&waterQ);
 	TickQueue_Init(&fireQ);
@@ -3335,20 +3956,7 @@ void Physics_Init(void) {
 	Physics.OnRandomTick[BLOCK_RED_SHROOM]   = Physics_HandleMushroom;
 	Physics.OnRandomTick[BLOCK_BROWN_SHROOM] = Physics_HandleMushroom;
 
-	Physics.OnPlace[BLOCK_LAVA]    = Physics_PlaceLava;
-	Physics.OnPlace[BLOCK_WATER]   = Physics_PlaceWater;
-	Physics.OnPlace[BLOCK_SPONGE]  = Physics_PlaceSponge;
-	Physics.OnDelete[BLOCK_SPONGE] = Physics_DeleteSponge;
-
-	Physics.OnActivate[BLOCK_WATER]       = Physics.OnPlace[BLOCK_WATER];
-	Physics.OnActivate[BLOCK_STILL_WATER] = Physics.OnPlace[BLOCK_WATER];
-	Physics.OnActivate[BLOCK_LAVA]        = Physics.OnPlace[BLOCK_LAVA];
-	Physics.OnActivate[BLOCK_STILL_LAVA]  = Physics.OnPlace[BLOCK_LAVA];
-
-	Physics.OnRandomTick[BLOCK_WATER]       = Physics_ActivateWater;
-	Physics.OnRandomTick[BLOCK_STILL_WATER] = Physics_ActivateWater;
-	Physics.OnRandomTick[BLOCK_LAVA]        = Physics_ActivateLava;
-	Physics.OnRandomTick[BLOCK_STILL_LAVA]  = Physics_ActivateLava;
+	Physics_RegisterLiquidHandlers();
 
 	Physics.OnPlace[BLOCK_SLAB]        = Physics_HandleSlab;
 	if (Game_ClassicMode) return;
@@ -3491,6 +4099,9 @@ void Physics_Init(void) {
 void Physics_Free(void) {
 	Event_Unregister_(&WorldEvents.MapLoaded,    NULL, Physics_OnNewMapLoaded);
 	Redstone_FreeVisited();
+	if (physics_flowLevels) { Mem_Free(physics_flowLevels); physics_flowLevels = NULL; }
+	physics_flowLevelsSize = 0;
+	Physics.FlowLevels = NULL;
 }
 
 void Physics_Tick(void) {
@@ -3499,8 +4110,13 @@ void Physics_Tick(void) {
 	if (Gui_GetInputGrab()) return;
 
 	/*if ((tickCount % 5) == 0) {*/
-	Physics_TickLava();
-	Physics_TickWater();
+	if (Physics.FiniteLiquid) {
+		FiniteLiquid_TickLava();
+		FiniteLiquid_TickWater();
+	} else {
+		Physics_TickLava();
+		Physics_TickWater();
+	}
 	/*}*/
 	Redstone_TickTorchQueue();
 	Redstone_TickButtonQueue();

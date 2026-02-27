@@ -10,6 +10,7 @@
 #include "Lighting.h"
 #include "Audio.h"
 #include "World.h"
+#include "BlockPhysics.h"
 
 struct _BlockLists Blocks;
 

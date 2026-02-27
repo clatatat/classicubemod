@@ -17,6 +17,7 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_VIEW_DISTANCE "viewdist"
 #define OPT_OCCLUSION_CULLING "gfx-occlcull"
 #define OPT_BLOCK_PHYSICS "singleplayerphysics"
+#define OPT_FINITE_LIQUID "finiteliquid"
 #define OPT_NAMES_MODE "namesmode"
 #define OPT_INVERT_MOUSE "invertmouse"
 #define OPT_SENSITIVITY "mousesensitivity"

@@ -13,6 +13,7 @@
 #include "Physics.h"
 #include "Model.h"
 #include "Audio.h"
+#include "BlockPhysics.h"
 
 /*########################################################################################################################*
 *----------------------------------------------------AnimatedComponent----------------------------------------------------*
@@ -931,6 +932,37 @@ static float PhysicsComp_GetBaseSpeed(struct PhysicsComp* comp) {
 #define LIQUID_GRAVITY 0.02f
 #define ROPE_GRAVITY   0.034f
 
+/* Accumulate flow push vectors from all overlapping liquid blocks for an entity */
+static void PhysicsComp_AccumulateFlowPush(struct Entity* entity, cc_bool isWater, Vec3* pushOut) {
+	struct AABB bounds;
+	IVec3 bbMin, bbMax;
+	int x, y, z;
+	Vec3 flow;
+	pushOut->x = 0; pushOut->y = 0; pushOut->z = 0;
+	if (!Physics.FiniteLiquid || !Physics.FlowLevels) return;
+
+	Entity_GetBounds(entity, &bounds);
+	IVec3_Floor(&bbMin, &bounds.Min);
+	IVec3_Floor(&bbMax, &bounds.Max);
+	bbMin.x = max(bbMin.x, 0); bbMax.x = min(bbMax.x, World.MaxX);
+	bbMin.y = max(bbMin.y, 0); bbMax.y = min(bbMax.y, World.MaxY);
+	bbMin.z = max(bbMin.z, 0); bbMax.z = min(bbMax.z, World.MaxZ);
+
+	for (y = bbMin.y; y <= bbMax.y; y++) {
+		for (z = bbMin.z; z <= bbMax.z; z++) {
+			for (x = bbMin.x; x <= bbMax.x; x++) {
+				BlockID b = World_GetBlock(x, y, z);
+				cc_bool sameLiquid = isWater
+					? (Blocks.ExtendedCollide[b] == COLLIDE_WATER)
+					: (Blocks.ExtendedCollide[b] == COLLIDE_LAVA);
+				if (!sameLiquid) continue;
+				Physics_GetFlowVector(x, y, z, isWater, &flow);
+				Vec3_AddBy(pushOut, &flow);
+			}
+		}
+	}
+}
+
 static cc_bool physComp_wasInWater;
 static RNGState physComp_rng;
 static cc_bool physComp_rngSeeded;
@@ -978,9 +1010,19 @@ void PhysicsComp_PhysicsTick(struct PhysicsComp* comp, Vec3 vel) {
 
 	if (Entity_TouchesAnyWater(entity) && !hacks->Floating) {
 		Vec3 waterDrag = { 0.8f, 0.8f, 0.8f };
+		Vec3 flowPush;
+		PhysicsComp_AccumulateFlowPush(entity, true, &flowPush);
+		entity->Velocity.x += flowPush.x * 0.004f;
+		entity->Velocity.y += flowPush.y * 0.004f;
+		entity->Velocity.z += flowPush.z * 0.004f;
 		PhysicsComp_MoveNormal(comp, vel, 0.02f * horSpeed, waterDrag, LIQUID_GRAVITY, verSpeed);
 	} else if (Entity_TouchesAnyLava(entity) && !hacks->Floating) {
 		Vec3 lavaDrag = { 0.5f, 0.5f, 0.5f };
+		Vec3 flowPush;
+		PhysicsComp_AccumulateFlowPush(entity, false, &flowPush);
+		entity->Velocity.x += flowPush.x * 0.004f;
+		entity->Velocity.y += flowPush.y * 0.004f;
+		entity->Velocity.z += flowPush.z * 0.004f;
 		PhysicsComp_MoveNormal(comp, vel, 0.02f * horSpeed, lavaDrag, LIQUID_GRAVITY, verSpeed);
 	} else if (Entity_TouchesAnyRope(entity) && !hacks->Floating) {
 		Vec3 ropeDrag = { 0.5f, 0.85f, 0.5f };

@@ -1562,6 +1562,12 @@ static void    MiO_SetPhysics(cc_bool v) {
 	Options_SetBool(OPT_BLOCK_PHYSICS, v);
 }
 
+static cc_bool MiO_GetFiniteLiquid(void) { return Physics.FiniteLiquid; }
+static void    MiO_SetFiniteLiquid(cc_bool v) {
+	Physics_SetFiniteLiquid(v);
+	Options_SetBool(OPT_FINITE_LIQUID, v);
+}
+
 static cc_bool MiO_GetInvert(void) { return Camera.Invert; }
 static void    MiO_SetInvert(cc_bool v) { 
 	Camera.Invert = v;
@@ -1596,6 +1602,12 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 
 		MenuOptionsScreen_AddBool(s, "Block physics",
 			MiO_GetPhysics, MiO_SetPhysics, NULL);
+		MenuOptionsScreen_AddBool(s, "Finite liquid",
+			MiO_GetFiniteLiquid, MiO_SetFiniteLiquid,
+			"&eIf &fON&e, water and lava spread a limited\n"
+			"&edistance like Minecraft Alpha.\n"
+			"&eIf &fOFF&e, water and lava spread infinitely\n"
+			"&eas in classic ClassiCube.");
 		MenuOptionsScreen_AddBool(s, "Smooth camera",
 			MiO_GetCamera, MiO_SetCamera, NULL);
 		MenuOptionsScreen_AddBool(s, "View bobbing",
@@ -1621,6 +1633,7 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	/* Disable certain options */
 	if (!Server.IsSinglePlayer) Menu_Remove(s, 0);
 	if (!Server.IsSinglePlayer) Menu_Remove(s, 4);
+	if (!Server.IsSinglePlayer) Menu_Remove(s, 5);
 }
 
 void MiscOptionsScreen_Show(void) {

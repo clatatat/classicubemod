@@ -1,6 +1,7 @@
 #ifndef CC_BLOCKPHYSICS_H
 #define CC_BLOCKPHYSICS_H
 #include "Core.h"
+#include "Vectors.h"
 CC_BEGIN_HEADER
 
 /* Implements simple block physics.
@@ -11,6 +12,12 @@ typedef void (*PhysicsHandler)(int index, BlockID block);
 CC_VAR extern struct Physics_ {
 	/* Whether block physics are enabled at all. */
 	cc_bool Enabled;
+	/* Whether finite (Minecraft Alpha-style) liquid spread is used. */
+	cc_bool FiniteLiquid;
+	/* Flow level metadata per block index (parallels World.Blocks).
+	   0 = source, 1-7 = flow distance, 8+ = falling.
+	   NULL when not allocated. Only valid when FiniteLiquid is true. */
+	cc_uint8* FlowLevels;
 	/* Called when block is activated by a neighbouring block change. */
 	/* e.g. trigger sand falling, water flooding */
 	PhysicsHandler OnActivate[256];
@@ -24,6 +31,7 @@ CC_VAR extern struct Physics_ {
 } Physics;
 
 void Physics_SetEnabled(cc_bool enabled);
+void Physics_SetFiniteLiquid(cc_bool enabled);
 void Physics_OnBlockChanged(int x, int y, int z, BlockID old, BlockID now);
 void Physics_Init(void);
 void Physics_Free(void);
@@ -34,6 +42,10 @@ void TNT_ScheduleFuse(int x, int y, int z);
 void TNT_Explode(int x, int y, int z);
 /* Immediately explode at the given world position with custom radius */
 void TNT_ExplodeRadius(int x, int y, int z, int power);
+/* Compute the flow direction vector at a given liquid block position (MC Alpha style).
+   Returns the normalized flow direction vector in *result.
+   isWater: true for water, false for lava. */
+void Physics_GetFlowVector(int x, int y, int z, cc_bool isWater, Vec3* result);
 
 CC_END_HEADER
 #endif
