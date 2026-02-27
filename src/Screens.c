@@ -2301,6 +2301,7 @@ static struct SurvivalInventoryScreen {
 	int      holdItem;
 	int      holdCount;
 
+	int      holdDurability; /* remaining durability of the cursor-held item */
 	int hoveredSlot;       /* -1 = none */
 
 	int isoState[SURVINV_ISO_VERTICES / 4];
@@ -2382,6 +2383,19 @@ static void SurvInv_SetSlotCount(int idx, int count) {
 	} else {
 		SurvInv_Output.count = count;
 	}
+}
+
+static int SurvInv_GetSlotDurability(int idx) {
+	if (idx < 27)  return SurvInv_Main[idx].durability;
+	if (idx < 36)  return Hotbar_GetDurability(idx - 27);
+	if (idx < 40)  return SurvInv_Armor[idx - 36].durability;
+	return 0;
+}
+
+static void SurvInv_SetSlotDurability(int idx, int dur) {
+	if (idx < 27)       SurvInv_Main[idx].durability        = dur;
+	else if (idx < 36)  Hotbar_SetDurability(idx - 27, dur);
+	else if (idx < 40)  SurvInv_Armor[idx - 36].durability  = dur;
 }
 
 /* Helper: check if two slot contents are the same type (for stacking) */
@@ -2656,6 +2670,40 @@ static void SurvInv_Render(void* screen, float delta) {
 		int mx = Pointers[0].x, my = Pointers[0].y;
 		SurvInv_RenderCount(s->holdCount, mx - cs / 2, my - cs / 2, cs);
 	}
+
+	/* Durability bars — drawn after everything else (no texture needed) */
+	if (Game_SurvivalMode) {
+		int barMaxW = cs * 10 / 16;
+		int barH    = cs / 14;
+		if (barH < 1) barH = 1;
+
+		for (i = 0; i < SURVINV_SLOT_COUNT; i++) {
+			BlockID slotBlock; int slotItem, maxDur, dur, stage, filled, hue, barX, barY;
+			SurvInv_GetSlot(i, &slotBlock, &slotItem);
+			if (slotItem <= ITEM_NONE || slotItem >= ITEM_COUNT) continue;
+			maxDur = ItemMaxDurability[slotItem];
+			if (maxDur == 0) continue; /* infinite */
+
+			dur = SurvInv_GetSlotDurability(i);
+			if (dur == 0) continue; /* full (never damaged) — no bar */
+
+			SurvInv_GetSlotPos(s, i, &sx, &sy);
+			barX = sx + (cs - barMaxW) / 2;
+			barY = sy + cs - barH - 3;
+
+			/* Quantise to 16 stages then map to bar width and colour */
+			stage  = dur * 32 / maxDur;
+			if (stage < 1) stage = 1;
+			filled = barMaxW * stage / 32;
+			hue    = 120 * stage / 32; /* 0° (red) → 120° (green) */
+
+			Gfx_Draw2DFlat(barX, barY, barMaxW, barH, PackedCol_Make(0, 0, 0, 255));
+			Gfx_Draw2DFlat(barX, barY, filled, barH, PackedCol_Make(
+				hue <= 60 ? 255 : (120 - hue) * 255 / 60,
+				hue <= 60 ? hue * 255 / 60 : 255,
+				0, 255));
+		}
+	}
 }
 
 /* Returns true if the given item/block can be placed in the given slot.
@@ -2703,12 +2751,14 @@ static int SurvInv_KeyDown(void* screen, int key, struct InputDevice* device) {
 			if (slotBlock == BLOCK_AIR && slotItem == ITEM_NONE) return true;
 			if (slotCount <= 1) {
 				/* Only 1 item: pick up the whole thing */
-				s->holding   = true;
-				s->holdBlock = slotBlock;
-				s->holdItem  = slotItem;
-				s->holdCount = 1;
+				s->holding        = true;
+				s->holdBlock      = slotBlock;
+				s->holdItem       = slotItem;
+				s->holdCount      = 1;
+				s->holdDurability = SurvInv_GetSlotDurability(slot);
 				SurvInv_SetSlot(slot, BLOCK_AIR, ITEM_NONE);
 				SurvInv_SetSlotCount(slot, 0);
+				SurvInv_SetSlotDurability(slot, 0);
 				if (slot == 44) Crafting_TakeOutput2x2();
 			} else {
 				int takeCount = slotCount / 2;
@@ -2724,12 +2774,14 @@ static int SurvInv_KeyDown(void* screen, int key, struct InputDevice* device) {
 				if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) return true;
 				SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
 				SurvInv_SetSlotCount(slot, 1);
+				SurvInv_SetSlotDurability(slot, s->holdDurability);
 				s->holdCount--;
 				if (s->holdCount <= 0) {
-					s->holding   = false;
-					s->holdBlock = BLOCK_AIR;
-					s->holdItem  = ITEM_NONE;
-					s->holdCount = 0;
+					s->holding        = false;
+					s->holdBlock      = BLOCK_AIR;
+					s->holdItem       = ITEM_NONE;
+					s->holdCount      = 0;
+					s->holdDurability = 0;
 				}
 			} else if (SurvInv_SameType(slotBlock, slotItem, s->holdBlock, s->holdItem) &&
 					   slotCount < SurvInv_MaxStack(s->holdBlock, s->holdItem)) {
@@ -2737,10 +2789,11 @@ static int SurvInv_KeyDown(void* screen, int key, struct InputDevice* device) {
 				SurvInv_SetSlotCount(slot, slotCount + 1);
 				s->holdCount--;
 				if (s->holdCount <= 0) {
-					s->holding   = false;
-					s->holdBlock = BLOCK_AIR;
-					s->holdItem  = ITEM_NONE;
-					s->holdCount = 0;
+					s->holding        = false;
+					s->holdBlock      = BLOCK_AIR;
+					s->holdItem       = ITEM_NONE;
+					s->holdCount      = 0;
+					s->holdDurability = 0;
 				}
 			}
 			/* Different type: do nothing */
@@ -2781,10 +2834,11 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 		} else {
 			/* Drop held item into the world */
 			SurvInv_DropHeldItem(s->holdBlock, s->holdItem, s->holdCount);
-			s->holding   = false;
-			s->holdBlock = BLOCK_AIR;
-			s->holdItem  = ITEM_NONE;
-			s->holdCount = 0;
+			s->holding        = false;
+			s->holdBlock      = BLOCK_AIR;
+			s->holdItem       = ITEM_NONE;
+			s->holdCount      = 0;
+			s->holdDurability = 0;
 			s->dirty = true;
 		}
 		return TOUCH_TYPE_GUI;
@@ -2796,13 +2850,15 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 	if (!s->holding) {
 		/* Pick up entire stack from slot */
 		if (slotBlock == BLOCK_AIR && slotItem == ITEM_NONE) return TOUCH_TYPE_GUI;
-		s->holding   = true;
-		s->holdBlock = slotBlock;
-		s->holdItem  = slotItem;
-		s->holdCount = slotCount;
+		s->holding         = true;
+		s->holdBlock       = slotBlock;
+		s->holdItem        = slotItem;
+		s->holdCount       = slotCount;
+		s->holdDurability  = SurvInv_GetSlotDurability(slot);
 		if (s->holdCount < 1) s->holdCount = 1; /* Normalize: creative mode items may have count=0 */
 		SurvInv_SetSlot(slot, BLOCK_AIR, ITEM_NONE);
 		SurvInv_SetSlotCount(slot, 0);
+		SurvInv_SetSlotDurability(slot, 0);
 		/* If taking from output slot, consume crafting materials */
 		if (slot == 44) Crafting_TakeOutput2x2();
 	} else {
@@ -2827,20 +2883,23 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 			if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) goto done;
 			SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
 			SurvInv_SetSlotCount(slot, s->holdCount);
-			s->holding   = false;
-			s->holdBlock = BLOCK_AIR;
-			s->holdItem  = ITEM_NONE;
-			s->holdCount = 0;
+			SurvInv_SetSlotDurability(slot, s->holdDurability);
+			s->holding        = false;
+			s->holdBlock      = BLOCK_AIR;
+			s->holdItem       = ITEM_NONE;
+			s->holdCount      = 0;
+			s->holdDurability = 0;
 		} else if (SurvInv_SameType(slotBlock, slotItem, s->holdBlock, s->holdItem)) {
 			/* Merge stacks of same type */
 			int maxS = SurvInv_MaxStack(s->holdBlock, s->holdItem);
 			int total = slotCount + s->holdCount;
 			if (total <= maxS) {
 				SurvInv_SetSlotCount(slot, total);
-				s->holding   = false;
-				s->holdBlock = BLOCK_AIR;
-				s->holdItem  = ITEM_NONE;
-				s->holdCount = 0;
+				s->holding        = false;
+				s->holdBlock      = BLOCK_AIR;
+				s->holdItem       = ITEM_NONE;
+				s->holdCount      = 0;
+				s->holdDurability = 0;
 			} else {
 				SurvInv_SetSlotCount(slot, maxS);
 				s->holdCount = total - maxS;
@@ -2848,14 +2907,17 @@ static int SurvInv_PointerDown(void* screen, int id, int x, int y) {
 		} else {
 			/* Swap with different type */
 			if (!SurvInv_ItemAllowedInSlot(slot, s->holdBlock, s->holdItem)) goto done;
-			BlockID tmpBlock = slotBlock;
-			int tmpItem      = slotItem;
-			int tmpCount     = slotCount;
-			SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
-			SurvInv_SetSlotCount(slot, s->holdCount);
-			s->holdBlock = tmpBlock;
-			s->holdItem  = tmpItem;
-			s->holdCount = tmpCount;
+			{ int tmpDur = SurvInv_GetSlotDurability(slot);
+			  BlockID tmpBlock = slotBlock;
+			  int tmpItem  = slotItem;
+			  int tmpCount = slotCount;
+			  SurvInv_SetSlot(slot, s->holdBlock, s->holdItem);
+			  SurvInv_SetSlotCount(slot, s->holdCount);
+			  SurvInv_SetSlotDurability(slot, s->holdDurability);
+			  s->holdBlock      = tmpBlock;
+			  s->holdItem       = tmpItem;
+			  s->holdCount      = tmpCount;
+			  s->holdDurability = tmpDur; }
 		}
 	}
 

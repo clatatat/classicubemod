@@ -19,6 +19,7 @@ struct _InventoryData Inventory;
 *#########################################################################################################################*/
 int HotbarItems[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
 int HotbarCounts[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
+int HotbarDurability[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
 
 struct SurvInvSlot SurvInv_Main[27];
 struct SurvInvSlot SurvInv_Armor[4];
@@ -106,6 +107,28 @@ const int ItemArmorPoints[ITEM_COUNT] = {
 	0, 0, 0,                 /* 54-56: Sulphur, Feather, String */
 	0, 0, 0, 0, 0,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
 	0, 0, 0                  /* 62-64: Seeds, Wheat, Bread */
+};
+
+/* Max durability per item (0 = no durability / infinite).
+   Values from Minecraft Alpha. Tools/armor only; hoes and misc items are infinite. */
+const int ItemMaxDurability[ITEM_COUNT] = {
+	0,                          /* 0:  Air */
+	64,  64,  64,  64,          /* 1-4:   Cloth armor */
+	32,  32,  32,  32,          /* 5-8:   Wood sword/shovel/pickaxe/axe */
+	128, 128, 128, 128,         /* 9-12:  Chainmail armor */
+	64,  64,  64,  64,          /* 13-16: Stone sword/shovel/pickaxe/axe */
+	256, 256, 256, 256,         /* 17-20: Iron armor */
+	128, 128, 128, 128,         /* 21-24: Iron sword/shovel/pickaxe/axe */
+	512, 512, 512, 512,         /* 25-28: Diamond armor */
+	1024,1024,1024,1024,        /* 29-32: Diamond sword/shovel/pickaxe/axe */
+	64,  64,  64,  64,          /* 33-36: Gold armor */
+	32,  32,  32,  32,          /* 37-40: Gold sword/shovel/pickaxe/axe */
+	0, 0, 0, 64, 0,             /* 41-45: Bow(inf), Arrow(inf), Stick(inf), Flint&Steel(64), Flint(inf) */
+	0, 0, 0, 0,                 /* 46-49: Coal, Iron Ingot, Gold Ingot, Diamond */
+	0, 0, 0, 0,                 /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
+	0, 0, 0,                    /* 54-56: Sulphur, Feather, String */
+	0, 0, 0, 0, 0,              /* 57-61: Hoes (infinite) */
+	0, 0, 0                     /* 62-64: Seeds, Wheat, Bread */
 };
 
 int Item_MaxStackSize(int itemId) {
@@ -271,7 +294,7 @@ void Inventory_Remove(BlockID block) {
 /*########################################################################################################################*
 *-----------------------------------------------Inventory save/load------------------------------------------------------*
 *#########################################################################################################################*/
-#define INV_SAVE_VERSION 1
+#define INV_SAVE_VERSION 2
 
 void Inventory_SaveToFile(const cc_string* path) {
 	cc_uint8 header[4];
@@ -295,6 +318,7 @@ void Inventory_SaveToFile(const cc_string* path) {
 	Stream_Write(&stream, (cc_uint8*)Inventory.Table, sizeof(Inventory.Table));
 	Stream_Write(&stream, (cc_uint8*)HotbarItems, sizeof(HotbarItems));
 	Stream_Write(&stream, (cc_uint8*)HotbarCounts, sizeof(HotbarCounts));
+	Stream_Write(&stream, (cc_uint8*)HotbarDurability, sizeof(HotbarDurability));
 
 	/* Survival inventory */
 	Stream_Write(&stream, (cc_uint8*)SurvInv_Main, sizeof(SurvInv_Main));
@@ -334,6 +358,7 @@ void Inventory_LoadFromFile(const cc_string* path) {
 	Stream_Read(&stream, (cc_uint8*)Inventory.Table, sizeof(Inventory.Table));
 	Stream_Read(&stream, (cc_uint8*)HotbarItems, sizeof(HotbarItems));
 	Stream_Read(&stream, (cc_uint8*)HotbarCounts, sizeof(HotbarCounts));
+	Stream_Read(&stream, (cc_uint8*)HotbarDurability, sizeof(HotbarDurability));
 
 	Stream_Read(&stream, (cc_uint8*)SurvInv_Main, sizeof(SurvInv_Main));
 	Stream_Read(&stream, (cc_uint8*)SurvInv_Armor, sizeof(SurvInv_Armor));

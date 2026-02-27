@@ -150,7 +150,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Furnace",           1, 47,  1, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
 
 { "Chest",            26, 27, 26, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD,   SOUND_WOOD   },
-{ "Cobweb",           11, 11, 11, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_CLOTH,  SOUND_NONE   },
+{ "Cobweb",           11, 11, 11, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE,  SOUND_STONE,  SOUND_NONE   },
 { "Ladder",           83, 83, 83, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_CLIMB, SOUND_WOOD, SOUND_WOOD },
 { "Door",             97, 97, 97, 16, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD },
 { "Red Ore Dust",     84, 86, 86, 1,  FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE },

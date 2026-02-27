@@ -139,9 +139,10 @@ extern int HotbarItems[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
 
 /* =========================== Survival Inventory =========================== */
 struct SurvInvSlot {
-	BlockID block;   /* BLOCK_AIR if empty or holding an item */
-	int     itemId;  /* ITEM_NONE if empty or holding a block */
-	int     count;   /* 0 = empty, 1-64 = stack count */
+	BlockID block;      /* BLOCK_AIR if empty or holding an item */
+	int     itemId;     /* ITEM_NONE if empty or holding a block */
+	int     count;      /* 0 = empty, 1-64 = stack count */
+	int     durability; /* remaining uses (0 = full/unset, only meaningful when ItemMaxDurability > 0) */
 };
 
 extern struct SurvInvSlot SurvInv_Main[27];   /* 3x9 main grid */
@@ -155,6 +156,15 @@ extern int HotbarCounts[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
 #define Hotbar_SetCount(idx, cnt) HotbarCounts[Inventory.Offset + (idx)] = (cnt)
 #define Hotbar_SelectedCount Hotbar_GetCount(Inventory.SelectedIndex)
 #define MAX_STACK_SIZE 64
+
+/* Per-slot remaining durability for hotbar items (0 = full/unset) */
+extern int HotbarDurability[INVENTORY_HOTBARS * INVENTORY_BLOCKS_PER_HOTBAR];
+#define Hotbar_GetDurability(idx) HotbarDurability[Inventory.Offset + (idx)]
+#define Hotbar_SetDurability(idx, val) HotbarDurability[Inventory.Offset + (idx)] = (val)
+#define Hotbar_SelectedDurability Hotbar_GetDurability(Inventory.SelectedIndex)
+
+/* Max durability per item ID (0 = infinite / no durability) */
+extern const int ItemMaxDurability[ITEM_COUNT];
 
 /* Saves inventory state (hotbar, items, counts, survival inventory) to file */
 void Inventory_SaveToFile(const cc_string* path);

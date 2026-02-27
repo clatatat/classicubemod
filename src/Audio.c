@@ -37,6 +37,7 @@ const char* const Sound_Names[SOUND_COUNT] = {
 	"fire",
 	"click",
 	"fizz",
+	"destroy",
 };
 
 #ifdef CC_BIG_ENDIAN
@@ -450,11 +451,12 @@ static void ProcessPickupSound(const cc_string* file, struct Stream* stream) {
 }
 
 static void ProcessExtraSounds(const cc_string* file, struct Stream* stream) {
-	static const cc_string splash_name = String_FromConst("splash");
-	static const cc_string ignite_name = String_FromConst("ignite");
-	static const cc_string fire_name   = String_FromConst("fire");
-	static const cc_string click_name  = String_FromConst("click");
-	static const cc_string fizz_name   = String_FromConst("fizz");
+	static const cc_string splash_name  = String_FromConst("splash");
+	static const cc_string ignite_name  = String_FromConst("ignite");
+	static const cc_string fire_name    = String_FromConst("fire");
+	static const cc_string click_name   = String_FromConst("click");
+	static const cc_string fizz_name    = String_FromConst("fizz");
+	static const cc_string destroy_name = String_FromConst("destroy");
 	struct SoundGroup* group = NULL;
 	struct Sound* snd;
 	cc_string name = *file;
@@ -475,6 +477,8 @@ static void ProcessExtraSounds(const cc_string* file, struct Stream* stream) {
 		group = &digBoard.groups[SOUND_CLICK];
 	} else if (String_CaselessEquals(&name, &fizz_name)) {
 		group = &digBoard.groups[SOUND_FIZZ];
+	} else if (String_CaselessEquals(&name, &destroy_name)) {
+		group = &digBoard.groups[SOUND_DESTROY];
 	}
 
 	if (!group) return;

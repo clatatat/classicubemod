@@ -490,6 +490,42 @@ static void Hotbar_EnsureCountTex(int count) {
 	hotbar_countTexValid[count] = true;
 }
 
+static void Hotbar_RenderDurabilityBars(struct HotbarWidget* w) {
+	int i, itemId, maxDur, dur, stage, hue, filled;
+	int barMaxW, barH, barX, barY, slotTop;
+	if (!Game_SurvivalMode) return;
+
+	barMaxW = (int)(w->slotWidth * 10.0f / 16.0f);
+	barH    = (int)(2.0f * DisplayInfo.ScaleY);
+	if (barH < 1) barH = 1;
+
+	for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+		if (i == HOTBAR_MAX_INDEX && Gui_TouchUI) continue;
+		itemId = Hotbar_GetItem(i);
+		if (itemId <= ITEM_NONE || itemId >= ITEM_COUNT) continue;
+		maxDur = ItemMaxDurability[itemId];
+		if (maxDur == 0) continue;
+
+		dur = Hotbar_GetDurability(i);
+		if (dur == 0) continue; /* full — no bar */
+
+		slotTop = w->y + (w->height / 2) - (int)(w->elemSize / 2);
+		barX    = HotbarWidget_TileX(w, i) - barMaxW / 2;
+		barY    = slotTop + (int)w->elemSize - barH - 1;
+
+		stage  = dur * 32 / maxDur;
+		if (stage < 1) stage = 1;
+		filled = barMaxW * stage / 32;
+		hue    = 120 * stage / 32;
+
+		Gfx_Draw2DFlat(barX, barY, barMaxW, barH, PackedCol_Make(0, 0, 0, 255));
+		Gfx_Draw2DFlat(barX, barY, filled, barH, PackedCol_Make(
+			hue <= 60 ? 255 : (120 - hue) * 255 / 60,
+			hue <= 60 ? hue * 255 / 60 : 255,
+			0, 255));
+	}
+}
+
 static void Hotbar_RenderCounts(struct HotbarWidget* w) {
 	int i, x, y, count;
 	struct Texture tex;
@@ -522,6 +558,8 @@ static int HotbarWidget_Render2(void* widget, int offset) {
 	HotbarWidget_RenderOutline(w, offset    );
 	HotbarWidget_RenderEntries(w, offset + 8);
 	Hotbar_RenderCounts(w);
+	Hotbar_RenderDurabilityBars(w);
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED); /* restore after Gfx_Draw2DFlat */
 
 	if (Gui_TouchUI) {
 		w->ellipsisTex.x = HotbarWidget_TileX(w, HOTBAR_MAX_INDEX) - w->ellipsisTex.width / 2;

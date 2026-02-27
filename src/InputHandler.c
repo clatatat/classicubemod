@@ -1053,6 +1053,9 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 							}
 						}
 					}
+				} else if (old == BLOCK_SNOW || old == BLOCK_SNOW_BLOCK) {
+					/* Snow and snow blocks only drop when broken by a shovel */
+					if (toolType != TOOL_SHOVEL) dropBlock = BLOCK_AIR;
 				} else if (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R) {
 					dropBlock = BLOCK_CHEST;
 				}
@@ -1106,6 +1109,58 @@ void Physics_DropBlock(int x, int y, int z, BlockID block) {
 	}
 }
 
+/* Destroy the selected hotbar tool and play the break sound */
+static void Item_DestroyHotbarTool(void) {
+	Hotbar_SetItem(Inventory.SelectedIndex, ITEM_NONE);
+	Inventory_Set(Inventory.SelectedIndex, BLOCK_AIR);
+	Hotbar_SetCount(Inventory.SelectedIndex, 0);
+	Hotbar_SetDurability(Inventory.SelectedIndex, 0);
+	Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+	if (!mob_rng_inited) { Random_SeedFromCurrentTime(&mob_rng); mob_rng_inited = true; }
+	Audio_PlayDigSoundRate(SOUND_DESTROY, 80 + Random_Next(&mob_rng, 41));
+}
+
+/* Decrement durability of the selected hotbar tool by 1. Destroys it at 0. */
+static void Item_DamageSelectedTool(void) {
+	int itemId = Hotbar_SelectedItem;
+	int maxDur, dur;
+	if (itemId <= ITEM_NONE || itemId >= ITEM_COUNT) return;
+	maxDur = ItemMaxDurability[itemId];
+	if (maxDur == 0) return; /* infinite */
+	dur = Hotbar_SelectedDurability;
+	if (dur == 0) dur = maxDur; /* lazy init: first use */
+	dur--;
+	if (dur <= 0) { Item_DestroyHotbarTool(); return; }
+	Hotbar_SetDurability(Inventory.SelectedIndex, dur);
+}
+
+/* Damage each equipped armor piece by floor(rawDamage/4), minimum 1 if rawDamage > 0 */
+static void Item_DamageArmorSlots(int rawDamage) {
+	int i, itemId, maxDur, dur, loss;
+	if (rawDamage <= 0) return;
+	loss = rawDamage / 4;
+	if (loss < 1) loss = 1;
+	for (i = 0; i < 4; i++) {
+		itemId = SurvInv_Armor[i].itemId;
+		if (itemId <= ITEM_NONE || itemId >= ITEM_COUNT) continue;
+		maxDur = ItemMaxDurability[itemId];
+		if (maxDur == 0) continue;
+		dur = SurvInv_Armor[i].durability;
+		if (dur == 0) dur = maxDur;
+		dur -= loss;
+		if (dur <= 0) {
+			SurvInv_Armor[i].itemId     = ITEM_NONE;
+			SurvInv_Armor[i].block      = BLOCK_AIR;
+			SurvInv_Armor[i].count      = 0;
+			SurvInv_Armor[i].durability = 0;
+			if (!mob_rng_inited) { Random_SeedFromCurrentTime(&mob_rng); mob_rng_inited = true; }
+			Audio_PlayDigSoundRate(SOUND_DESTROY, 80 + Random_Next(&mob_rng, 41));
+		} else {
+			SurvInv_Armor[i].durability = dur;
+		}
+	}
+}
+
 static void InputHandler_DeleteBlock(void) {
 	IVec3 pos;
 	BlockID old;
@@ -1144,6 +1199,8 @@ static void InputHandler_DeleteBlock(void) {
 		/* Instant break (e.g. torches, flowers) */
 		BreakBlockNow(pos, old);
 		BlockBreaking_Reset();
+		{ int _t, _r; GetToolInfo(Hotbar_SelectedItem, &_t, &_r);
+		  if (_t == TOOL_SHOVEL || _t == TOOL_PICKAXE || _t == TOOL_AXE) Item_DamageSelectedTool(); }
 		return;
 	}
 
@@ -1221,6 +1278,7 @@ static void InputHandler_PlaceBlock(void) {
 			Game_ChangeBlock(targetPos.x, targetPos.y, targetPos.z, BLOCK_FARMLAND_DRY);
 			Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock, BLOCK_FARMLAND_DRY);
 			Audio_PlayDigSound(SOUND_GRAVEL);
+			Item_DamageSelectedTool();
 			/* 40% chance to drop seeds when hoeing grass */
 			if (targetBlock == BLOCK_GRASS || targetBlock == BLOCK_SNOWY_GRASS) {
 				if (!mob_rng_inited) {
@@ -1341,6 +1399,7 @@ static void InputHandler_PlaceBlock(void) {
 		Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_FIRE);
 		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_FIRE);
 		{ int ignVol = (int)(Audio_SoundsVolume * 1.5f); if (ignVol > 100) ignVol = 100; Audio_PlayDigSoundRateVolume(SOUND_IGNITE, 100, ignVol); }
+		Item_DamageSelectedTool();
 		return;
 	}
 
@@ -1894,6 +1953,8 @@ void InputHandler_Tick(float delta) {
 			if (breaking_progress >= 1.0f) {
 				BreakBlockNow(breaking_pos, breaking_block);
 				BlockBreaking_Reset();
+				{ int _t, _r; GetToolInfo(Hotbar_SelectedItem, &_t, &_r);
+				  if (_t == TOOL_SHOVEL || _t == TOOL_PICKAXE || _t == TOOL_AXE) Item_DamageSelectedTool(); }
 			}
 		}
 	}
@@ -2757,6 +2818,9 @@ void Player_Damage(int amount) {
 	if (Player_Health <= 0) return;
 	if (playerInvulnTimer > 0.0f) return;
 	if (Player_CheatsEnabled) return; /* invincible with cheats */
+
+	/* Damage armor before applying reduction (uses raw incoming damage) */
+	Item_DamageArmorSlots(amount);
 
 	/* Armor reduction: classic Minecraft formula (pre-1.9, no toughness).
 	   effective = clamp(max(armor/5, armor - damage/2), 0, 20)
@@ -5167,6 +5231,9 @@ static cc_bool Mob_TryPunchMob(void) {
 	}
 
 	Mob_DamageMob(targetId, damage, true);
+	/* Swords lose 1 durability per hit landed */
+	{ int _t, _r; GetToolInfo(Hotbar_SelectedItem, &_t, &_r);
+	  if (_t == TOOL_SWORD) Item_DamageSelectedTool(); }
 	return true;
 }
 

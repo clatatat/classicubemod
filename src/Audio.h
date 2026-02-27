@@ -140,6 +140,7 @@ enum SoundType {
 	SOUND_FIRE_AMBIENT,
 	SOUND_CLICK,
 	SOUND_FIZZ,
+	SOUND_DESTROY,
 	SOUND_COUNT
 };
 extern const char* const Sound_Names[SOUND_COUNT];
