@@ -22,9 +22,34 @@ static void Animations_Update(int loc, struct Bitmap* bmp, int stride);
 	#define LIQUID_ANIM_MAX 64
 #endif
 
-#define WATER_TEX_LOC 14
-#define LAVA_TEX_LOC  30
-#define FIRE_TEX_LOC  31
+#define WATER_TEX_LOC      14
+#define LAVA_TEX_LOC       30
+#define FIRE_TEX_LOC       31
+#define WATER_FLOW_TEX_LOC      207
+#define LAVA_FLOW_TEX_LOC       208
+#define WATER_FLOW_DIAG_TEX_LOC 209
+#define LAVA_FLOW_DIAG_TEX_LOC  210
+
+/* Rotate a pixel buffer 45 degrees clockwise with wrapping (tileable).
+   Reads from src, writes to dst. Both are size*size BitmapCol arrays. */
+static void RotatePixels45(BitmapCol* dst, const BitmapCol* src, int size) {
+	/* cos(45)=sin(45)=0.7071. To find source pixel for output (ox,oy):
+	   rotate by -45: sx = cos*dx + sin*dy, sy = -sin*dx + cos*dy
+	   where dx=ox-center, dy=oy-center. Wrap with modular addressing. */
+	int ox, oy;
+	float center = (float)size * 0.5f;
+	for (oy = 0; oy < size; oy++) {
+		for (ox = 0; ox < size; ox++) {
+			float dx = (float)ox - center + 0.5f;
+			float dy = (float)oy - center + 0.5f;
+			float sx = 0.7071f * dx + 0.7071f * dy + center;
+			float sy = -0.7071f * dx + 0.7071f * dy + center;
+			int ix = (int)sx % size; if (ix < 0) ix += size;
+			int iy = (int)sy % size; if (iy < 0) iy += size;
+			dst[oy * size + ox] = src[iy * size + ix];
+		}
+	}
+}
 
 #ifndef CC_BUILD_WEB
 /* Based off the incredible work from https://dl.dropboxusercontent.com/u/12694594/lava.txt
@@ -171,6 +196,188 @@ static void WaterAnimation_Tick(void) {
 
 	Bitmap_Init(bmp, size, size, pixels);
 	Animations_Update(WATER_TEX_LOC, &bmp, size);
+}
+
+
+/*########################################################################################################################*
+*----------------------------------------------Flowing water animation----------------------------------------------------*
+*#########################################################################################################################*/
+/* Port of MC Alpha's TextureWaterFlowFX: same heat simulation as still water
+   but averages vertically (y-2..y), uses faster random constants,
+   and scrolls the output by tickCounter to create downward flow. */
+static float WF_soupHeat[LIQUID_ANIM_MAX  * LIQUID_ANIM_MAX];
+static float WF_potHeat[LIQUID_ANIM_MAX   * LIQUID_ANIM_MAX];
+static float WF_flameHeat[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+static RNGState WF_rnd;
+static cc_bool  WF_rndInited;
+static int      WF_tickCounter;
+
+static void FlowingWaterAnimation_Tick(void) {
+	BitmapCol pixels[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+	BitmapCol* ptr = pixels;
+	float soupHeat, color;
+	int size, mask, shift, totalPixels;
+	int x, y, i = 0;
+	int srcIdx;
+	struct Bitmap bmp;
+
+	size  = min(Atlas2D.TileSize, LIQUID_ANIM_MAX);
+	mask  = size - 1;
+	shift = Math_ilog2(size);
+	totalPixels = size * size;
+
+	if (!WF_rndInited) {
+		Random_SeedFromCurrentTime(&WF_rnd);
+		WF_rndInited = true;
+	}
+
+	WF_tickCounter++;
+
+	/* Heat simulation: average vertically (y-2..y) instead of horizontally */
+	for (y = 0; y < size; y++) {
+		for (x = 0; x < size; x++) {
+			soupHeat =
+				WF_soupHeat[((y - 2) & mask) << shift | (x & mask)] +
+				WF_soupHeat[((y - 1) & mask) << shift | (x & mask)] +
+				WF_soupHeat[y               << shift | (x & mask)];
+
+			WF_soupHeat[i] = soupHeat / 3.2f + WF_potHeat[i] * 0.8f;
+
+			WF_potHeat[i] += WF_flameHeat[i] * 0.05f;
+			if (WF_potHeat[i] < 0.0f) WF_potHeat[i] = 0.0f;
+
+			WF_flameHeat[i] -= 0.3f;
+			if (Random_Float(&WF_rnd) <= 0.2f) WF_flameHeat[i] = 0.5f;
+
+			i++;
+		}
+	}
+
+	/* Output with vertical scroll offset (creates downward flow effect) */
+	for (i = 0; i < totalPixels; i++) {
+		srcIdx = (i - WF_tickCounter * size) % totalPixels;
+		if (srcIdx < 0) srcIdx += totalPixels;
+
+		color = WF_soupHeat[srcIdx];
+		Math_Clamp(color, 0.0f, 1.0f);
+		color = color * color;
+
+		*ptr = BitmapCol_Make(
+			32.0f  + color * 32.0f,
+			50.0f  + color * 64.0f,
+			255,
+			146.0f + color * 50.0f);
+		ptr++;
+	}
+
+	Bitmap_Init(bmp, size, size, pixels);
+	Animations_Update(WATER_FLOW_TEX_LOC, &bmp, size);
+
+	/* Generate 45-degree rotated variant for diagonal flow */
+	{
+		BitmapCol diagPixels[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+		struct Bitmap diagBmp;
+		RotatePixels45(diagPixels, pixels, size);
+		Bitmap_Init(diagBmp, size, size, diagPixels);
+		Animations_Update(WATER_FLOW_DIAG_TEX_LOC, &diagBmp, size);
+	}
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------Flowing lava animation----------------------------------------------------*
+*#########################################################################################################################*/
+/* Port of MC Alpha's TextureLavaFlowFX: same heat simulation as still lava
+   but scrolls the output vertically (at 1/3 speed) to create downward flow. */
+static float LF_soupHeat[LIQUID_ANIM_MAX  * LIQUID_ANIM_MAX];
+static float LF_potHeat[LIQUID_ANIM_MAX   * LIQUID_ANIM_MAX];
+static float LF_flameHeat[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+static RNGState LF_rnd;
+static cc_bool  LF_rndInited;
+static int      LF_tickCounter;
+
+static void FlowingLavaAnimation_Tick(void) {
+	BitmapCol pixels[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+	BitmapCol* ptr = pixels;
+	float soupHeat, potHeat, color;
+	int size, mask, shift, totalPixels;
+	int x, y, i = 0;
+	int srcIdx;
+	struct Bitmap bmp;
+
+	size  = min(Atlas2D.TileSize, LIQUID_ANIM_MAX);
+	mask  = size - 1;
+	shift = Math_ilog2(size);
+	totalPixels = size * size;
+
+	if (!LF_rndInited) {
+		Random_SeedFromCurrentTime(&LF_rnd);
+		LF_rndInited = true;
+	}
+
+	LF_tickCounter++;
+
+	for (y = 0; y < size; y++) {
+		for (x = 0; x < size; x++) {
+			static cc_int8 sin_adj_table[16] = { 0, 0, 0, 1, 1, 1, 0, 0, 0, 0, 0, -1, -1, -1, 0, 0 };
+			int xx = x + sin_adj_table[y & 0xF], yy = y + sin_adj_table[x & 0xF];
+
+			soupHeat =
+				LF_soupHeat[((yy - 1) & mask) << shift | ((xx - 1) & mask)] +
+				LF_soupHeat[((yy - 1) & mask) << shift | (xx       & mask)] +
+				LF_soupHeat[((yy - 1) & mask) << shift | ((xx + 1) & mask)] +
+				LF_soupHeat[(yy & mask) << shift | ((xx - 1) & mask)] +
+				LF_soupHeat[(yy & mask) << shift | (xx       & mask)] +
+				LF_soupHeat[(yy & mask) << shift | ((xx + 1) & mask)] +
+				LF_soupHeat[((yy + 1) & mask) << shift | ((xx - 1) & mask)] +
+				LF_soupHeat[((yy + 1) & mask) << shift | (xx       & mask)] +
+				LF_soupHeat[((yy + 1) & mask) << shift | ((xx + 1) & mask)];
+
+			potHeat =
+				LF_potHeat[i] +
+				LF_potHeat[y << shift | ((x + 1) & mask)] +
+				LF_potHeat[((y + 1) & mask) << shift | x] +
+				LF_potHeat[((y + 1) & mask) << shift | ((x + 1) & mask)];
+
+			LF_soupHeat[i] = soupHeat * 0.1f + potHeat * 0.2f;
+
+			LF_potHeat[i] += LF_flameHeat[i] * 0.01f;
+			if (LF_potHeat[i] < 0.0f) LF_potHeat[i] = 0.0f;
+
+			LF_flameHeat[i] -= 0.06f;
+			if (Random_Float(&LF_rnd) <= 0.005f) LF_flameHeat[i] = 1.5f;
+
+			i++;
+		}
+	}
+
+	/* Output with vertical scroll (1/3 speed like MC Alpha) */
+	for (i = 0; i < totalPixels; i++) {
+		srcIdx = (i - (LF_tickCounter / 3) * size) % totalPixels;
+		if (srcIdx < 0) srcIdx += totalPixels;
+
+		color = 2.0f * LF_soupHeat[srcIdx];
+		Math_Clamp(color, 0.0f, 1.0f);
+
+		*ptr = BitmapCol_Make(
+			color * 100.0f + 155.0f,
+			color * color * 255.0f,
+			color * color * color * color * 128.0f,
+			255);
+		ptr++;
+	}
+
+	Bitmap_Init(bmp, size, size, pixels);
+	Animations_Update(LAVA_FLOW_TEX_LOC, &bmp, size);
+
+	/* Generate 45-degree rotated variant for diagonal flow */
+	{
+		BitmapCol diagPixels[LIQUID_ANIM_MAX * LIQUID_ANIM_MAX];
+		struct Bitmap diagBmp;
+		RotatePixels45(diagPixels, pixels, size);
+		Bitmap_Init(diagBmp, size, size, diagPixels);
+		Animations_Update(LAVA_FLOW_DIAG_TEX_LOC, &diagBmp, size);
+	}
 }
 #endif
 
@@ -371,6 +578,8 @@ static void Animations_Tick(struct ScheduledTask* task) {
 #ifndef CC_BUILD_WEB
 	if (useLavaAnim)  LavaAnimation_Tick();
 	if (useWaterAnim) WaterAnimation_Tick();
+	if (useLavaAnim)  FlowingLavaAnimation_Tick();
+	if (useWaterAnim) FlowingWaterAnimation_Tick();
 #endif
 	FireAnimation_Tick();
 

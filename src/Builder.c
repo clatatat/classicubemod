@@ -15,6 +15,23 @@
 #include "Options.h"
 #include "BlockPhysics.h"
 
+/* Tile locations for flowing liquid procedural animations (from Animations.c) */
+#define WATER_FLOW_TEX_LOC_B      207
+#define LAVA_FLOW_TEX_LOC_B       208
+#define WATER_FLOW_DIAG_TEX_LOC_B 209
+#define LAVA_FLOW_DIAG_TEX_LOC_B  210
+
+/* UV rotation table for top face of flowing liquid (4 rotations, 4 vertices each).
+   Vertices: v0=(x+1,z), v1=(x,z), v2=(x,z+1), v3=(x+1,z+1)
+   Each entry is {U_scale, V_scale} mapping to [0..UV2_Scale] x [vOrigin..v_bot].
+   Rotation 0: default (+Z flow), 1: 90 CW (+X), 2: 180 (-Z), 3: 270 CCW (-X) */
+static const float flowUV[4][4][2] = {
+	{{1,0},{0,0},{0,1},{1,1}},
+	{{0,0},{0,1},{1,1},{1,0}},
+	{{0,1},{1,1},{1,0},{0,0}},
+	{{1,1},{1,0},{0,0},{0,1}}
+};
+
 int Builder_SidesLevel, Builder_EdgeLevel;
 /* Packs an index into the 16x16x16 count array. Coordinates range from 0 to 15. */
 #define Builder_PackCount(xx, yy, zz) ((((yy) << 8) | ((zz) << 4) | (xx)) * FACE_COUNT)
@@ -109,6 +126,43 @@ static void AddVertices(BlockID block, Face face) {
 	int baseOffset = (Blocks.Draw[block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
 	int i = Atlas1D_Index(Block_Tex(block, face));
 	struct Builder1DPart* part = &Builder_Parts[baseOffset + i];
+	part->faces.count[face] += 4;
+}
+
+/* Like AddVertices, but for finite liquid blocks:
+   non-source blocks use flowing animation tiles; top face may use diagonal tile */
+static void AddVerticesFiniteLiquid(BlockID block, Face face) {
+	int baseOffset = (Blocks.Draw[block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
+	TextureLoc loc = Block_Tex(block, face);
+	int i;
+	struct Builder1DPart* part;
+
+	/* Non-bottom faces of flowing liquid use the flowing animation tile */
+	if (face != FACE_YMIN) {
+		int packIdx  = World_Pack(Builder_X, Builder_Y, Builder_Z);
+		int rawLevel = Physics.FlowLevels[packIdx];
+		int level    = rawLevel & 0x7F;
+		if (level > 0) {
+			cc_bool isWater = (block == BLOCK_WATER || block == BLOCK_STILL_WATER);
+			loc = isWater ? WATER_FLOW_TEX_LOC_B : LAVA_FLOW_TEX_LOC_B;
+
+			/* Top face might use the diagonal tile depending on flow direction */
+			if (face == FACE_YMAX) {
+				Vec3 flow;
+				float ax, az;
+				Physics_GetFlowVector(Builder_X, Builder_Y, Builder_Z, isWater, &flow);
+				ax = Math_AbsF(flow.x);
+				az = Math_AbsF(flow.z);
+				/* Diagonal when neither axis is dominant (2:1 ratio threshold) */
+				if (ax >= 0.001f && az >= 0.001f && ax <= az * 2.0f && az <= ax * 2.0f) {
+					loc = isWater ? WATER_FLOW_DIAG_TEX_LOC_B : LAVA_FLOW_DIAG_TEX_LOC_B;
+				}
+			}
+		}
+	}
+
+	i    = Atlas1D_Index(loc);
+	part = &Builder_Parts[baseOffset + i];
 	part->faces.count[face] += 4;
 }
 
@@ -569,6 +623,10 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	struct Builder1DPart* part;
 	struct VertexTextured* v;
 	TextureLoc loc;
+	TextureLoc flowLoc;     /* tile for side faces of flowing liquid */
+	TextureLoc flowTopLoc;  /* tile for top face (may be diagonal variant) */
+	int flowRot;            /* UV rotation index 0-3 for top face */
+	cc_bool isFlowing;
 	PackedCol col, tintCol;
 	float vOrigin, v_top, v_bot;
 
@@ -582,6 +640,54 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	if (!count_XMin && !count_XMax && !count_ZMin &&
 		!count_ZMax && !count_YMin && !count_YMax) return;
 
+	/* Determine whether this liquid is flowing (non-source) for texture */
+	{
+		int packIdx = World_Pack(x, y, z);
+		int rawLevel = Physics.FlowLevels[packIdx];
+		int level    = rawLevel & 0x7F;
+		isFlowing = (level > 0);
+		flowLoc    = isWater ? WATER_FLOW_TEX_LOC_B    : LAVA_FLOW_TEX_LOC_B;
+		flowTopLoc = flowLoc; /* default: cardinal tile */
+		flowRot    = 0;       /* default: no UV rotation */
+
+		/* Snap flow direction to 8 compass points and choose tile + UV rotation:
+		   Cardinal (N/E/S/W): use flowLoc with 0/90/180/270 UV rotation
+		   Diagonal (NE/SE/SW/NW): use diagonal tile with 0/90/180/270 UV rotation */
+		if (isFlowing) {
+			Vec3 flow;
+			float ax, az;
+			TextureLoc diagLoc = isWater ? WATER_FLOW_DIAG_TEX_LOC_B : LAVA_FLOW_DIAG_TEX_LOC_B;
+			Physics_GetFlowVector(x, y, z, isWater, &flow);
+			ax = Math_AbsF(flow.x);
+			az = Math_AbsF(flow.z);
+
+			if (ax < 0.001f && az < 0.001f) {
+				/* No horizontal flow — keep defaults */
+			} else if (ax > az * 2.0f) {
+				/* Mostly X: cardinal E(+X) or W(-X)
+				   Rot 3: V=+X (scroll east),  Rot 1: V=-X (scroll west) */
+				flowRot = flow.x > 0 ? 3 : 1;
+			} else if (az > ax * 2.0f) {
+				/* Mostly Z: cardinal S(+Z) or N(-Z)
+				   Rot 0: V=+Z (scroll south), Rot 2: V=-Z (scroll north) */
+				flowRot = flow.z > 0 ? 0 : 2;
+			} else {
+				/* Diagonal: use pre-rotated 45 tile.
+				   RotatePixels45 turns vertical stripes into NE-SW diagonals (in UV space).
+				   Choose rotation so stripe orientation + scroll direction = perceived diagonal motion.
+				   SE: NW-SE stripes + east scroll  -> rot 3
+				   NE: NE-SW stripes + north scroll -> rot 2
+				   NW: NW-SE stripes + west scroll  -> rot 1
+				   SW: NE-SW stripes + south scroll -> rot 0 */
+				flowTopLoc = diagLoc;
+				if (flow.x > 0 && flow.z > 0)       flowRot = 3; /* +X +Z (SE) */
+				else if (flow.x > 0 && flow.z <= 0)  flowRot = 2; /* +X -Z (NE) */
+				else if (flow.x <= 0 && flow.z <= 0) flowRot = 1; /* -X -Z (NW) */
+				else                                  flowRot = 0; /* -X +Z (SW) */
+			}
+		}
+	}
+
 	/* Compute per-corner surface heights */
 	h00 = Builder_LiquidCornerHeight(x, y, z, 0, 0, isWater);
 	h10 = Builder_LiquidCornerHeight(x, y, z, 1, 0, isWater);
@@ -593,9 +699,12 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	lightFlags = Blocks.LightOffset[block];
 	tintCol    = Blocks.FogCol[block];
 
-	/* FACE_YMAX - top face with per-corner heights */
+	/* FACE_YMAX - top face with per-corner heights, UV rotated by flow direction */
 	if (count_YMax) {
-		loc    = Block_Tex(block, FACE_YMAX);
+		int fr = flowRot;
+		float vRange;
+
+		loc    = isFlowing ? flowTopLoc : Block_Tex(block, FACE_YMAX);
 		offset = (lightFlags >> FACE_YMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 		col    = fullBright ? PACKEDCOL_WHITE : Lighting.Color_YMax_Fast(x, y + offset, z);
@@ -603,16 +712,21 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 
 		vOrigin = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
 		v_bot   = vOrigin + Atlas1D.InvTileSize * UV2_Scale;
+		vRange  = v_bot - vOrigin;
 		v       = part->faces.vertices[FACE_YMAX];
 
 		v->x = (float)(x + 1); v->y = y + h10; v->z = (float)z;       v->Col = col;
-		v->U = UV2_Scale; v->V = vOrigin; v++;
+		v->U = flowUV[fr][0][0] * UV2_Scale;
+		v->V = vOrigin + flowUV[fr][0][1] * vRange; v++;
 		v->x = (float)x;       v->y = y + h00; v->z = (float)z;       v->Col = col;
-		v->U = 0;         v->V = vOrigin; v++;
+		v->U = flowUV[fr][1][0] * UV2_Scale;
+		v->V = vOrigin + flowUV[fr][1][1] * vRange; v++;
 		v->x = (float)x;       v->y = y + h01; v->z = (float)(z + 1); v->Col = col;
-		v->U = 0;         v->V = v_bot; v++;
+		v->U = flowUV[fr][2][0] * UV2_Scale;
+		v->V = vOrigin + flowUV[fr][2][1] * vRange; v++;
 		v->x = (float)(x + 1); v->y = y + h11; v->z = (float)(z + 1); v->Col = col;
-		v->U = UV2_Scale; v->V = v_bot; v++;
+		v->U = flowUV[fr][3][0] * UV2_Scale;
+		v->V = vOrigin + flowUV[fr][3][1] * vRange; v++;
 		part->faces.vertices[FACE_YMAX] = v;
 	}
 
@@ -642,7 +756,7 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	/* FACE_XMIN - left face, top edge follows h00 and h01 */
 	if (count_XMin) {
 		float yTop_z0 = y + h00, yTop_z1 = y + h01;
-		loc    = Block_Tex(block, FACE_XMIN);
+		loc    = isFlowing ? flowLoc : Block_Tex(block, FACE_XMIN);
 		offset = (lightFlags >> FACE_XMIN) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 		col    = fullBright ? PACKEDCOL_WHITE :
@@ -669,7 +783,7 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	/* FACE_XMAX - right face, top edge follows h10 and h11 */
 	if (count_XMax) {
 		float yTop_z0 = y + h10, yTop_z1 = y + h11;
-		loc    = Block_Tex(block, FACE_XMAX);
+		loc    = isFlowing ? flowLoc : Block_Tex(block, FACE_XMAX);
 		offset = (lightFlags >> FACE_XMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 		col    = fullBright ? PACKEDCOL_WHITE :
@@ -696,7 +810,7 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	/* FACE_ZMIN - front face, top edge follows h00 and h10 */
 	if (count_ZMin) {
 		float yTop_x0 = y + h00, yTop_x1 = y + h10;
-		loc    = Block_Tex(block, FACE_ZMIN);
+		loc    = isFlowing ? flowLoc : Block_Tex(block, FACE_ZMIN);
 		offset = (lightFlags >> FACE_ZMIN) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 		col    = fullBright ? PACKEDCOL_WHITE :
@@ -723,7 +837,7 @@ static void Builder_RenderFiniteLiquid(int index, int x, int y, int z) {
 	/* FACE_ZMAX - back face, top edge follows h01 and h11 */
 	if (count_ZMax) {
 		float yTop_x0 = y + h01, yTop_x1 = y + h11;
-		loc    = Block_Tex(block, FACE_ZMAX);
+		loc    = isFlowing ? flowLoc : Block_Tex(block, FACE_ZMAX);
 		offset = (lightFlags >> FACE_ZMAX) & 1;
 		part   = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 		col    = fullBright ? PACKEDCOL_WHITE :
@@ -1296,7 +1410,7 @@ static int NormalBuilder_StretchXLiquid(int countIndex, int x, int y, int z, int
 	
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, FACE_YMAX);
+		AddVerticesFiniteLiquid(block, FACE_YMAX);
 		return count;
 	}
 	
@@ -1320,7 +1434,7 @@ static int NormalBuilder_StretchX(int countIndex, int x, int y, int z, int chunk
 	int count = 1; cc_bool stretchTile;
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, face);
+		AddVerticesFiniteLiquid(block, face);
 		return count;
 	}
 	x++;
@@ -1343,7 +1457,7 @@ static int NormalBuilder_StretchZ(int countIndex, int x, int y, int z, int chunk
 	int count = 1; cc_bool stretchTile;
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, face);
+		AddVerticesFiniteLiquid(block, face);
 		return count;
 	}
 	z++;
@@ -1642,7 +1756,7 @@ static int Adv_StretchXLiquid(int countIndex, int x, int y, int z, int chunkInde
 
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, FACE_YMAX);
+		AddVerticesFiniteLiquid(block, FACE_YMAX);
 		return count;
 	}
 
@@ -1668,7 +1782,7 @@ static int Adv_StretchX(int countIndex, int x, int y, int z, int chunkIndex, Blo
 	adv_bitFlags[chunkIndex] = adv_initBitFlags;
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, face);
+		AddVerticesFiniteLiquid(block, face);
 		return count;
 	}
 	
@@ -1694,7 +1808,7 @@ static int Adv_StretchZ(int countIndex, int x, int y, int z, int chunkIndex, Blo
 	adv_bitFlags[chunkIndex] = adv_initBitFlags;
 	/* Finite liquid uses per-corner heights, never stretch */
 	if (Builder_IsFiniteLiquid(block)) {
-		AddVertices(block, face);
+		AddVerticesFiniteLiquid(block, face);
 		return count;
 	}
 
@@ -2079,18 +2193,30 @@ static cc_bool Modern_CanStretch(BlockID initial, int chunkIndex, int x, int y, 
 static int Modern_StretchXLiquid(int countIndex, int x, int y, int z, int chunkIndex, BlockID block) {
 	int count = 1;
 	if (Builder_OccludedLiquid(chunkIndex)) return 0;
+	if (Builder_IsFiniteLiquid(block)) {
+		AddVerticesFiniteLiquid(block, FACE_YMAX);
+		return count;
+	}
 	AddVertices(block, FACE_YMAX);
 	return count;
 }
 
 static int Modern_StretchX(int countIndex, int x, int y, int z, int chunkIndex, BlockID block, Face face) {
 	int count = 1;
+	if (Builder_IsFiniteLiquid(block)) {
+		AddVerticesFiniteLiquid(block, face);
+		return count;
+	}
 	AddVertices(block, face);
 	return count;
 }
 
 static int Modern_StretchZ(int countIndex, int x, int y, int z, int chunkIndex, BlockID block, Face face) {
 	int count = 1;
+	if (Builder_IsFiniteLiquid(block)) {
+		AddVerticesFiniteLiquid(block, face);
+		return count;
+	}
 	AddVertices(block, face);
 	return count;
 }

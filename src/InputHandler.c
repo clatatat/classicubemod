@@ -1022,17 +1022,17 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 						int stage = old - BLOCK_WHEAT_0;
 						int seedCount, wheatCount, di;
 						if (stage == 7) {
-							/* Fully grown: 1 wheat + 0-3 seeds */
+							/* Fully grown: 1 wheat + 0-3 seeds (gold hoe: always 3) */
 							wheatCount = 1;
-							seedCount = Random_Next(&mob_rng, 4);
+							seedCount = (Hotbar_SelectedItem == ITEM_GOLD_HOE) ? 3 : Random_Next(&mob_rng, 4);
 						} else if (stage >= 4) {
-							/* Mid growth: 0-2 seeds, no wheat */
+							/* Mid growth: 0-2 seeds, no wheat (gold hoe: always 2) */
 							wheatCount = 0;
-							seedCount = Random_Next(&mob_rng, 3);
+							seedCount = (Hotbar_SelectedItem == ITEM_GOLD_HOE) ? 2 : Random_Next(&mob_rng, 3);
 						} else {
-							/* Early growth: 0-1 seeds, no wheat */
+							/* Early growth: 0-1 seeds, no wheat (gold hoe: always 1) */
 							wheatCount = 0;
-							seedCount = Random_Next(&mob_rng, 2);
+							seedCount = (Hotbar_SelectedItem == ITEM_GOLD_HOE) ? 1 : Random_Next(&mob_rng, 2);
 						}
 						for (di = 0; di < wheatCount; di++) {
 							int ws = DropItem_FindFreeSlot();
@@ -1279,13 +1279,13 @@ static void InputHandler_PlaceBlock(void) {
 			Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock, BLOCK_FARMLAND_DRY);
 			Audio_PlayDigSound(SOUND_GRAVEL);
 			Item_DamageSelectedTool();
-			/* 40% chance to drop seeds when hoeing grass */
+			/* 40% chance to drop seeds when hoeing grass (gold hoe: always drops) */
 			if (targetBlock == BLOCK_GRASS || targetBlock == BLOCK_SNOWY_GRASS) {
 				if (!mob_rng_inited) {
 					Random_SeedFromCurrentTime(&mob_rng);
 					mob_rng_inited = true;
 				}
-				if (Random_Next(&mob_rng, 5) < 2) {
+				if (Hotbar_SelectedItem == ITEM_GOLD_HOE || Random_Next(&mob_rng, 5) < 2) {
 					Vec3 seedPos;
 					int seedSlot;
 					seedPos.x = (float)targetPos.x + 0.5f;

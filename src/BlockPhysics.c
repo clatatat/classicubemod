@@ -2441,9 +2441,16 @@ static void Physics_HandleSapling(int index, BlockID block) {
 
 static void Physics_HandleDirt(int index, BlockID block) {
 	int x, y, z;
+	BlockID above;
 	World_Unpack(index, x, y, z);
 
 	if (!Gen_Themes[Gen_Theme].dirtToGrass) return;
+
+	/* Don't grow grass if water is above */
+	if (y + 1 < World.Height) {
+		above = World_GetBlock(x, y + 1, z);
+		if (above == BLOCK_WATER || above == BLOCK_STILL_WATER) return;
+	}
 
 	if (Lighting.IsLit(x, y, z)) {
 		Game_UpdateBlock(x, y, z, BLOCK_GRASS);
