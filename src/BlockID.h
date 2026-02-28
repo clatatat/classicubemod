@@ -83,6 +83,10 @@ enum BLOCKID {
 	BLOCK_STONE_PLATE = 70, /* Stone pressure plate (mob/player only, ignores items) */
 	BLOCK_FIRE = 71, /* Fire block - animated sprite, spreads to flammable blocks */
 
+	/* Survival blocks (player-placeable, above CPE range) */
+	BLOCK_SIGN_WALL = 72, /* Wall-mounted wooden sign (orientation from directional cache) */
+	BLOCK_SIGN_FLOOR = 73, /* Floor-mounted sign post (16-angle rotation stored in SignData) */
+
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,
 	/* Max block ID used in original classic plus CPE blocks. */

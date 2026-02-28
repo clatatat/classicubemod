@@ -1523,10 +1523,11 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	Drawer.X1 = x + min.x; Drawer.Y1 = y + min.y; Drawer.Z1 = z + min.z;
 	Drawer.X2 = x + max.x; Drawer.Y2 = y + max.y; Drawer.Z2 = z + max.z;
 
-	/* For buttons/levers/pressure plates, use dynamic bounds for UV mapping too, so textures match geometry */
+	/* For buttons/levers/pressure plates/floor signs, use dynamic bounds for UV mapping too, so textures match geometry */
 	if (Builder_Block == BLOCK_BUTTON || Builder_Block == BLOCK_BUTTON_PRESSED
 		|| IsLeverBlock(Builder_Block)
-		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED) {
+		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED
+		|| Builder_Block == BLOCK_SIGN_FLOOR) {
 		Drawer.MinBB = min; Drawer.MinBB.y = 1.0f - Drawer.MinBB.y;
 		Drawer.MaxBB = max; Drawer.MaxBB.y = 1.0f - Drawer.MaxBB.y;
 	}
@@ -2508,10 +2509,11 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 	adv_minBB = Blocks.MinBB[Builder_Block]; adv_maxBB = Blocks.MaxBB[Builder_Block];
 	adv_minBB.y = 1.0f - adv_minBB.y; adv_maxBB.y = 1.0f - adv_maxBB.y;
 
-	/* For buttons/levers/pressure plates, use dynamic bounds for UV mapping */
+	/* For buttons/levers/pressure plates/signs, use dynamic bounds for UV mapping */
 	if (Builder_Block == BLOCK_BUTTON || Builder_Block == BLOCK_BUTTON_PRESSED
 		|| IsLeverBlock(Builder_Block)
-		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED) {
+		|| Builder_Block == BLOCK_PRESSURE_PLATE || Builder_Block == BLOCK_PRESSURE_PLATE_PRESSED
+		|| Builder_Block == BLOCK_SIGN_FLOOR) {
 		adv_minBB = min; adv_minBB.y = 1.0f - adv_minBB.y;
 		adv_maxBB = max; adv_maxBB.y = 1.0f - adv_maxBB.y;
 	}

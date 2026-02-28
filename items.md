@@ -68,3 +68,4 @@ ID      Item Name            Texture (items.png)
 65      Bucket               74                     1
 66      Water Bucket         75                     1
 67      Lava Bucket          76                     1
+68      Sign                 42                     1

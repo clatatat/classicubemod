@@ -64,7 +64,7 @@ void Inventory_AddDefault(BlockID block);
 void Inventory_Remove(BlockID block);
 
 /* =========================== Item system =========================== */
-#define ITEM_COUNT 68
+#define ITEM_COUNT 69
 #define ITEM_NONE 0
 
 /* Named item IDs */
@@ -115,6 +115,7 @@ void Inventory_Remove(BlockID block);
 #define ITEM_BUCKET        65
 #define ITEM_WATER_BUCKET  66
 #define ITEM_LAVA_BUCKET   67
+#define ITEM_SIGN          68
 
 /* Item names indexed by item ID (0 = Air) */
 extern const char* const ItemNames[ITEM_COUNT];
@@ -278,6 +279,27 @@ void Chest_Remove(int x, int y, int z, struct ChestData* out);
 /* Returns the position of the other half of a double chest, given the block type.
    Returns false if the block isn't a double chest variant. */
 cc_bool Chest_GetPartnerPos(BlockID block, int x, int y, int z, int* px, int* py, int* pz);
+
+/* =========================== Signs =========================== */
+
+#define MAX_SIGNS 256
+
+/* Per-sign instance data: world position + 4 text lines (15 chars max each) */
+struct SignData {
+	int x, y, z;
+	char lines[4][16]; /* null-terminated, max 15 chars per line */
+	cc_uint8 rotation; /* 0-15 for floor signs (22.5 degrees each), 0 for wall signs */
+};
+
+extern struct SignData Signs[MAX_SIGNS];
+extern int Sign_Count;
+
+/* Returns the index into Signs[] for the sign at (x,y,z), or -1 if not found */
+int Sign_FindAt(int x, int y, int z);
+/* Adds a blank sign entry at (x,y,z). Does nothing if already present or Signs is full. */
+void Sign_AddAt(int x, int y, int z);
+/* Removes the sign at (x,y,z). Swap-with-last removal. */
+void Sign_RemoveAt(int x, int y, int z);
 
 /* Saves all furnace and chest data to container.dat */
 void Container_SaveToFile(const cc_string* path);

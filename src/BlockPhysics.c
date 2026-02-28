@@ -2809,7 +2809,8 @@ static cc_bool FiniteLiquid_BlocksFlow(int x, int y, int z) {
 		b == BLOCK_DOOR_EW_BOTTOM || b == BLOCK_DOOR_EW_TOP ||
 		b == BLOCK_IRON_DOOR      || b == BLOCK_IRON_DOOR_NS_TOP ||
 		b == BLOCK_IRON_DOOR_EW_BOTTOM || b == BLOCK_IRON_DOOR_EW_TOP ||
-		b == BLOCK_LADDER) return true;
+		b == BLOCK_LADDER ||
+		b == BLOCK_SIGN_WALL || b == BLOCK_SIGN_FLOOR) return true;
 	/* MC Alpha: material.isSolid() - in CC, solid collide blocks */
 	return Blocks.Collide[b] >= COLLIDE_SOLID;
 }

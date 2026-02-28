@@ -33,6 +33,7 @@ void SurvivalInventoryScreen_Show(void);
 void CraftingTableScreen_Show(void);
 void FurnaceScreen_Show(void);
 void ChestScreen_Show(void);
+void SignEditScreen_Show(int x, int y, int z);
 void HUDScreen_Show(void);
 void LoadingScreen_Show(const cc_string* title, const cc_string* message);
 void GeneratingScreen_Show(void);

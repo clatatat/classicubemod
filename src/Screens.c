@@ -24,6 +24,7 @@
 #include "Options.h"
 #include "InputHandler.h"
 #include "Protocol.h"
+#include "Signs.h"
 
 #define CHAT_MAX_STATUS Array_Elems(Chat_Status)
 #define CHAT_MAX_BOTTOMRIGHT Array_Elems(Chat_BottomRight)
@@ -1409,7 +1410,7 @@ static int ChatScreen_KeyDown(void* screen, int key, struct InputDevice* device)
 	} else if (key == CCKEY_SLASH) {
 		ChatScreen_OpenInput(&slash);
 	} else if (InputBind_Claims(BIND_INVENTORY, key, device)) {
-		/* Block creative inventory in survival unless cheats enabled */
+		/* Creative block menu: always in creative, needs cheats in survival */
 		if (Game_SurvivalMode && !Player_CheatsEnabled) return false;
 		InventoryScreen_Show();
 	} else if (Game_SurvivalMode && (key == 'I' || key == 'E')) {
@@ -5211,6 +5212,311 @@ void DeathScreen_Show(void) {
 	s->VTABLE      = &DeathScreen_VTABLE;
 
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_DISCONNECT);
+}
+
+
+/*########################################################################################################################*
+*----------------------------------------------------SignEditScreen-------------------------------------------------------*
+*#########################################################################################################################*/
+/* Modelled after Minecraft Alpha 1.0.6 GuiEditSign:
+   - Dark semi-transparent overlay background
+   - "Edit sign message:" title (white with shadow) centered at top
+   - 4 lines of text rendered centered, active line flanked by "> " and " <"
+   - Blinking cursor markers (toggle every ~6 ticks / 0.3s)
+   - "Done" button at bottom
+   - Up/Down/Enter to change lines, Backspace to delete, Esc or Done to save & close
+   - Max 15 chars per line, printable ASCII only */
+static struct SignEditScreen {
+	Screen_Body
+	int signX, signY, signZ;   /* world position of sign being edited */
+	int editLine;              /* currently active line (0-3) */
+	int updateCounter;         /* tick counter for cursor blink (every 6 ticks = 0.3s) */
+	cc_bool showCursor;
+	float tickAccum;           /* accumulates delta for tick counting */
+	struct FontDesc titleFont;
+	struct FontDesc lineFont;
+	char lines[4][16];         /* local text copy, null-terminated, max 15 chars */
+	struct ButtonWidget doneBtn;
+	struct Widget* __widgets[1];
+} SignEditScreen_Instance CC_BIG_VAR;
+
+/* Write local lines[] back to Signs[] and invalidate cached texture */
+static void SignEdit_Commit(struct SignEditScreen* s) {
+	int idx = Sign_FindAt(s->signX, s->signY, s->signZ);
+	if (idx >= 0) {
+		int i;
+		for (i = 0; i < 4; i++)
+			Mem_Copy(Signs[idx].lines[i], s->lines[i], 16);
+		Signs_InvalidateAt(s->signX, s->signY, s->signZ);
+	}
+}
+
+static void SignEdit_DoneClick(void* s, void* w) {
+	struct SignEditScreen* scr = (struct SignEditScreen*)s;
+	SignEdit_Commit(scr);
+	Gui_Remove((struct Screen*)scr);
+}
+
+static void SignEdit_Init(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	int idx = Sign_FindAt(s->signX, s->signY, s->signZ);
+	int i;
+	s->widgets     = s->__widgets;
+	s->numWidgets  = 0;
+	s->maxWidgets  = Array_Elems(s->__widgets);
+	s->maxVertices = BUTTONWIDGET_MAX;
+	s->editLine    = 0;
+	s->updateCounter = 0;
+	s->showCursor  = true;
+	s->tickAccum   = 0.0f;
+	for (i = 0; i < 4; i++) {
+		if (idx >= 0) Mem_Copy(s->lines[i], Signs[idx].lines[i], 16);
+		else          s->lines[i][0] = '\0';
+	}
+	Gui_MakeTitleFont(&s->titleFont);
+	Font_Make(&s->lineFont, 16, FONT_FLAGS_NONE);
+
+	ButtonWidget_Add(s, &s->doneBtn, 200, SignEdit_DoneClick);
+
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
+}
+
+static void SignEdit_Free(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	SignEdit_Commit(s);
+	Font_Free(&s->titleFont);
+	Font_Free(&s->lineFont);
+}
+
+static void SignEdit_Update(void* screen, float delta) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	/* Alpha blinks every 6 ticks at 20 TPS = 0.3 seconds */
+	s->tickAccum += delta;
+	while (s->tickAccum >= 0.05f) {
+		s->tickAccum -= 0.05f;
+		s->updateCounter++;
+	}
+	{
+		cc_bool newShow = (s->updateCounter / 6) % 2 == 0;
+		if (newShow != s->showCursor) {
+			s->showCursor = newShow;
+			s->dirty      = true;
+		}
+	}
+}
+
+static void SignEdit_BuildMesh(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	Screen_BuildMesh(screen);
+	(void)s;
+}
+
+static void SignEdit_Render(void* screen, float delta) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	/* Dark semi-transparent overlay like Alpha's drawDefaultBackground */
+	PackedCol overlayTop    = PackedCol_Make(0x10, 0x10, 0x10, 0x60);
+	PackedCol overlayBottom = PackedCol_Make(0x10, 0x10, 0x10, 0xA0);
+	struct Texture lineTex = { 0 };
+	struct Texture signTex = { 0 };
+	struct DrawTextArgs args;
+	char strBuf[32];
+	cc_string str;
+	int scrW = Window_Main.Width, scrH = Window_Main.Height;
+	int i, len;
+	int signW, signH, signX, signY;
+
+	/* Full-screen dark gradient overlay */
+	Gfx_SetAlphaBlending(true);
+	Gfx_Draw2DGradient(0, 0, scrW, scrH, overlayTop, overlayBottom);
+
+	/* Draw wood sign face behind the text lines */
+	{
+		struct Context2D ctx;
+		struct Bitmap* atlas = &Atlas2D.Bmp;
+		int tileSize = Atlas2D.TileSize;
+		int srcX = Atlas2D_TileX(4) * tileSize;
+		int srcY = Atlas2D_TileY(4) * tileSize;
+		int dx, dy, sx, sy;
+		/* Sign face proportions: wider than tall, like Minecraft's sign model */
+		int texW = 128, texH = 64;
+
+		Context2D_Alloc(&ctx, texW, texH);
+		if (atlas->scan0 && tileSize > 0) {
+			struct Bitmap* dst = (struct Bitmap*)&ctx;
+			for (dy = 0; dy < texH; dy++) {
+				BitmapCol* dstRow = Bitmap_GetRow(dst, dy);
+				sy = srcY + (dy * tileSize / texH);
+				if (sy >= atlas->height) continue;
+				for (dx = 0; dx < texW; dx++) {
+					sx = srcX + (dx * tileSize / texW);
+					if (sx >= atlas->width) continue;
+					dstRow[dx] = Bitmap_GetRow(atlas, sy)[sx];
+				}
+			}
+		} else {
+			Context2D_Clear(&ctx, BitmapCol_Make(70, 43, 10, 255), 0, 0, texW, texH);
+		}
+		Context2D_MakeTexture(&signTex, &ctx);
+		Context2D_Free(&ctx);
+
+		/* Fixed base size (192x96) scaled by DPI, matching other UI elements */
+		signW = Display_ScaleX(192);
+		signH = Display_ScaleY(96);
+		signX = (scrW - signW) / 2;
+		signY = (scrH - signH) / 2 - Display_ScaleY(30);
+		signTex.x = (short)signX;
+		signTex.y = (short)signY;
+		signTex.width  = (short)signW;
+		signTex.height = (short)signH;
+		Texture_Render(&signTex);
+		Gfx_DeleteTexture(&signTex.ID);
+	}
+
+	/* Title: "Edit sign message:" centered above the sign board */
+	{
+		static const cc_string title = String_FromConst("Edit sign message:");
+		DrawTextArgs_Make(&args, &title, &s->titleFont, true);
+		Drawer2D_MakeTextTexture(&lineTex, &args);
+		lineTex.x = (short)((scrW - lineTex.width) / 2);
+		lineTex.y = (short)Display_ScaleY(40);
+		Texture_Render(&lineTex);
+		Gfx_DeleteTexture(&lineTex.ID);
+	}
+
+	/* 4 sign lines centered on the sign face, black text no shadow */
+	signW = Display_ScaleX(192);
+	signH = Display_ScaleY(96);
+	signX = (scrW - signW) / 2;
+	signY = (scrH - signH) / 2 - Display_ScaleY(30);
+	for (i = 0; i < 4; i++) {
+		/* Even vertical distribution: small top padding + equal spacing within board */
+		int lineY = signY + signH / 8 + i * (signH * 3 / 16);
+		Mem_Set(strBuf, 0, sizeof(strBuf));
+
+		/* Prepend &0 for black color */
+		strBuf[0] = '&'; strBuf[1] = '0';
+
+		if (i == s->editLine && s->showCursor) {
+			/* Build "&0> text <" display for active line */
+			strBuf[2] = '>'; strBuf[3] = ' ';
+			Mem_Copy(strBuf + 4, s->lines[i], String_CalcLen(s->lines[i], 16));
+			len = 4 + String_CalcLen(s->lines[i], 16);
+			strBuf[len] = ' '; strBuf[len + 1] = '<'; strBuf[len + 2] = '\0';
+		} else if (i == s->editLine) {
+			/* Active line without cursor markers (blink off) */
+			Mem_Copy(strBuf + 2, s->lines[i], String_CalcLen(s->lines[i], 16));
+			strBuf[2 + String_CalcLen(s->lines[i], 16)] = '\0';
+		} else {
+			/* Inactive line */
+			Mem_Copy(strBuf + 2, s->lines[i], String_CalcLen(s->lines[i], 16));
+			strBuf[2 + String_CalcLen(s->lines[i], 16)] = '\0';
+		}
+
+		str = String_FromReadonly(strBuf);
+		if (str.length <= 2) continue; /* skip if only "&0" with no actual text */
+		DrawTextArgs_Make(&args, &str, &s->lineFont, false);
+		Drawer2D_MakeTextTexture(&lineTex, &args);
+		lineTex.x = (short)((scrW - lineTex.width) / 2);
+		lineTex.y = (short)lineY;
+		Texture_Render(&lineTex);
+		Gfx_DeleteTexture(&lineTex.ID);
+	}
+
+	/* Render all widgets (Done button) the standard menu way */
+	Screen_Render2Widgets(screen, delta);
+
+	Gfx_SetAlphaBlending(false);
+}
+
+static int SignEdit_KeyDown(void* screen, int key, struct InputDevice* device) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	if (key == CCKEY_ESCAPE || key == device->escapeButton) {
+		SignEdit_Commit(s);
+		Gui_Remove((struct Screen*)s);
+		return true;
+	}
+	if (key == CCKEY_ENTER || key == CCKEY_KP_ENTER || key == CCKEY_DOWN) {
+		s->editLine = (s->editLine + 1) & 3;
+		s->dirty = true;
+		return true;
+	}
+	if (key == CCKEY_UP) {
+		s->editLine = (s->editLine - 1) & 3;
+		s->dirty = true;
+		return true;
+	}
+	if (key == CCKEY_BACKSPACE) {
+		int len = String_CalcLen(s->lines[s->editLine], 16);
+		if (len > 0) { s->lines[s->editLine][len - 1] = '\0'; s->dirty = true; }
+		return true;
+	}
+	return true; /* consume all keys while sign editor is open */
+}
+
+static int SignEdit_KeyPress(void* screen, char keyChar) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	int len = String_CalcLen(s->lines[s->editLine], 16);
+	if (keyChar >= 32 && keyChar < 127 && len < 15) {
+		s->lines[s->editLine][len]     = keyChar;
+		s->lines[s->editLine][len + 1] = '\0';
+		s->dirty = true;
+	}
+	return true;
+}
+
+static int SignEdit_Text(void* screen, const cc_string* str) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	int i, len = String_CalcLen(s->lines[s->editLine], 16);
+	for (i = 0; i < str->length && len < 15; i++, len++) {
+		char c = str->buffer[i];
+		if (c >= 32 && c < 127) {
+			s->lines[s->editLine][len]     = c;
+			s->lines[s->editLine][len + 1] = '\0';
+		}
+	}
+	s->dirty = true;
+	return true;
+}
+
+static void SignEdit_Layout(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	/* "Done" button centered at bottom area */
+	Widget_SetLocation(&s->doneBtn, ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 120);
+}
+
+static void SignEdit_ContextLost(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	Font_Free(&s->titleFont);
+	Font_Free(&s->lineFont);
+	Screen_ContextLost(screen);
+}
+
+static void SignEdit_ContextRecreated(void* screen) {
+	struct SignEditScreen* s = (struct SignEditScreen*)screen;
+	Screen_UpdateVb(screen);
+	Gui_MakeTitleFont(&s->titleFont);
+	Font_Make(&s->lineFont, 16, FONT_FLAGS_NONE);
+	ButtonWidget_SetConst(&s->doneBtn, "Done", &s->titleFont);
+	SignEdit_Layout(screen);
+}
+
+static const struct ScreenVTABLE SignEditScreen_VTABLE = {
+	SignEdit_Init,          SignEdit_Update,      SignEdit_Free,
+	SignEdit_Render,        SignEdit_BuildMesh,
+	SignEdit_KeyDown,       Screen_InputUp,       SignEdit_KeyPress, SignEdit_Text,
+	Menu_PointerDown,       Screen_PointerUp,     Menu_PointerMove, Screen_TMouseScroll,
+	SignEdit_Layout,        SignEdit_ContextLost,  SignEdit_ContextRecreated
+};
+
+void SignEditScreen_Show(int x, int y, int z) {
+	struct SignEditScreen* s = &SignEditScreen_Instance;
+	s->signX      = x;
+	s->signY      = y;
+	s->signZ      = z;
+	s->grabsInput = true;
+	s->closable   = true;
+	s->VTABLE     = &SignEditScreen_VTABLE;
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_INVENTORY);
 }
 
 

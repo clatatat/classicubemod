@@ -72,6 +72,9 @@ static const struct SimpleBlockDef snowy_grass_def = {"Snowy Grass", 116, 118, 2
 static const struct SimpleBlockDef stone_plate_pressed_def = {"Stone Pressure Plate Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
 static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
+static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+
 static const struct SimpleBlockDef wheat_stage_defs[8] = {
 	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
 	{"Wheat Stage 2", 134, 134, 134, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
@@ -274,7 +277,7 @@ static cc_bool IsButton(BlockID block); /* forward declaration */
 static cc_bool IsLever(BlockID block); /* forward declaration */
 static cc_bool IsPressurePlate(BlockID block); /* forward declaration */
 static cc_bool IsIronDoor(BlockID block); /* forward declaration */
-static cc_bool IsDirectionalBlock(BlockID block) {
+cc_bool IsDirectionalBlock(BlockID block) {
 	return block == BLOCK_CHEST || block == BLOCK_FURNACE || block == BLOCK_LADDER || block == BLOCK_TORCH
 		|| block == BLOCK_RED_ORE_TORCH || block == BLOCK_RED_ORE_TORCH_OFF
 		|| block == BLOCK_RED_TORCH_ON_S || block == BLOCK_RED_TORCH_ON_N
@@ -283,7 +286,9 @@ static cc_bool IsDirectionalBlock(BlockID block) {
 		|| block == BLOCK_RED_TORCH_OFF_E || block == BLOCK_RED_TORCH_OFF_W
 		|| block == BLOCK_RED_TORCH_UNMOUNTED || block == BLOCK_RED_TORCH_UNMOUNTED_OFF
 		|| IsButton(block)
-		|| IsLever(block);
+		|| IsLever(block)
+		|| block == BLOCK_SIGN_WALL
+		|| block == BLOCK_SIGN_FLOOR;
 }
 
 /* Calculate which direction a torch should face based on adjacent solid blocks */
@@ -787,8 +792,8 @@ void DirectionalBlock_GetRenderBounds(BlockID block, int x, int y, int z, Vec3* 
 		return;
 	}
 	
-	/* Only ladders, torches, and buttons need dynamic render bounds */
-	if (block != BLOCK_LADDER && !IsAnyTorch(block) && !IsButton(block) && !IsLever(block)) {
+	/* Only ladders, torches, buttons, levers and wall signs need dynamic render bounds */
+	if (block != BLOCK_LADDER && !IsAnyTorch(block) && !IsButton(block) && !IsLever(block) && block != BLOCK_SIGN_WALL && block != BLOCK_SIGN_FLOOR) {
 		if (!directionalFacing_Enabled) {
 			*min = Blocks.RenderMinBB[block];
 			*max = Blocks.RenderMaxBB[block];
@@ -887,9 +892,42 @@ void DirectionalBlock_GetRenderBounds(BlockID block, int x, int y, int z, Vec3* 
 		return;
 	}
 	
+	/* Wall sign bounds: thin board against the attachment wall */
+	if (block == BLOCK_SIGN_WALL) {
+		switch (facing) {
+			case 0: /* Facing North - attached to south wall (+Z), board at +Z edge */
+				min->x = 1.0f/16.0f; min->y = 4.0f/16.0f; min->z = 15.0f/16.0f;
+				max->x = 15.0f/16.0f; max->y = 12.0f/16.0f; max->z = 1;
+				break;
+			case 1: /* Facing South - attached to north wall (-Z), board at -Z edge */
+				min->x = 1.0f/16.0f; min->y = 4.0f/16.0f; min->z = 0;
+				max->x = 15.0f/16.0f; max->y = 12.0f/16.0f; max->z = 1.0f/16.0f;
+				break;
+			case 2: /* Facing West - attached to east wall (+X), board at +X edge */
+				min->x = 15.0f/16.0f; min->y = 4.0f/16.0f; min->z = 1.0f/16.0f;
+				max->x = 1; max->y = 12.0f/16.0f; max->z = 15.0f/16.0f;
+				break;
+			case 3: /* Facing East - attached to west wall (-X), board at -X edge */
+				min->x = 0; min->y = 4.0f/16.0f; min->z = 1.0f/16.0f;
+				max->x = 1.0f/16.0f; max->y = 12.0f/16.0f; max->z = 15.0f/16.0f;
+				break;
+			default:
+				*min = Blocks.RenderMinBB[block]; *max = Blocks.RenderMaxBB[block];
+				break;
+		}
+		return;
+	}
+
+	/* Floor sign post: small centered post (board is custom-rendered in Signs.c) */
+	if (block == BLOCK_SIGN_FLOOR) {
+		min->x = 7.0f/16.0f; min->y = 0;          min->z = 7.0f/16.0f;
+		max->x = 9.0f/16.0f; max->y = 9.0f/16.0f; max->z = 9.0f/16.0f;
+		return;
+	}
+
 	/* Set render bounds based on facing direction */
 	/* facing: 0=North(-Z), 1=South(+Z), 2=West(-X), 3=East(+X) */
-	
+
 	/* Ladder bounds - thin against wall */
 	switch (facing) {
 		case 0: /* Facing North - attached to south wall, thin in +Z */
@@ -1086,7 +1124,8 @@ static void Block_CalcStretch(BlockID block) {
 	/*  adjacent blocks must never be merged into a single stretch */
 	/* Furnaces and chests have unique face textures that differ per-block */
 	if (block == BLOCK_RED_ORE_DUST || block == BLOCK_LIT_RED_ORE_DUST ||
-	    IsAnyTorch(block) || block == BLOCK_FURNACE || block == BLOCK_CHEST) {
+	    IsAnyTorch(block) || block == BLOCK_FURNACE || block == BLOCK_CHEST ||
+	    block == BLOCK_SIGN_WALL || block == BLOCK_SIGN_FLOOR) {
 		Blocks.CanStretch[block] = 0;
 	}
 
@@ -1290,6 +1329,10 @@ void Block_ResetProps(BlockID block) {
 		def = &farmland_wet_def;
 	} else if (block >= BLOCK_WHEAT_0 && block <= BLOCK_WHEAT_7) {
 		def = &wheat_stage_defs[block - BLOCK_WHEAT_0];
+	} else if (block == BLOCK_SIGN_WALL) {
+		def = &sign_wall_def;
+	} else if (block == BLOCK_SIGN_FLOOR) {
+		def = &sign_floor_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1492,6 +1535,20 @@ void Block_ResetProps(BlockID block) {
 		Vec3_Set(Blocks.MaxBB[block], 11.0f/16.0f, 12.0f/16.0f, 1);
 		Vec3_Set(Blocks.RenderMinBB[block], 5.0f/16.0f, 4.0f/16.0f, 13.0f/16.0f);
 		Vec3_Set(Blocks.RenderMaxBB[block], 11.0f/16.0f, 12.0f/16.0f, 1);
+	} else if (block == BLOCK_SIGN_WALL) {
+		/* Sign board: thin 1/16 deep against default south wall (+Z), full width, centered vertically */
+		/* Default orientation: facing 0 (North), board at +Z edge. Dynamic bounds override at render time. */
+		Vec3_Set(Blocks.MinBB[block], 1.0f/16.0f, 4.0f/16.0f, 15.0f/16.0f);
+		Vec3_Set(Blocks.MaxBB[block], 15.0f/16.0f, 12.0f/16.0f, 1);
+		Vec3_Set(Blocks.RenderMinBB[block], 1.0f/16.0f, 4.0f/16.0f, 15.0f/16.0f);
+		Vec3_Set(Blocks.RenderMaxBB[block], 15.0f/16.0f, 12.0f/16.0f, 1);
+	} else if (block == BLOCK_SIGN_FLOOR) {
+		/* Floor sign post only — the rotated board is custom-rendered in Signs.c */
+		/* Post: 2/16 wide centered, from bottom to 9/16 */
+		Vec3_Set(Blocks.MinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);
+		Vec3_Set(Blocks.MaxBB[block], 9.0f/16.0f, 9.0f/16.0f, 9.0f/16.0f);
+		Vec3_Set(Blocks.RenderMinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);
+		Vec3_Set(Blocks.RenderMaxBB[block], 9.0f/16.0f, 9.0f/16.0f, 9.0f/16.0f);
 	} else if (block == BLOCK_PRESSURE_PLATE || block == BLOCK_STONE_PLATE) {
 		/* Unpressed pressure plate: full width, 2 pixels tall */
 		Vec3_Set(Blocks.MinBB[block], 1.0f/16.0f, 0, 1.0f/16.0f);
@@ -1877,6 +1934,9 @@ static void OnReset(void) {
 
 	/* Remove wheat stages from inventory (grown on farmland) */
 	{ int i; for (i = BLOCK_WHEAT_0; i <= BLOCK_WHEAT_7; i++) Inventory_Remove(i); }
+
+	/* Remove sign wall block from classic inventory (accessed as survival item ITEM_SIGN) */
+	Inventory_Remove(BLOCK_SIGN_WALL);
 
 	DirectionalCache_Clear();
 }

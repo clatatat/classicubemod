@@ -44,7 +44,8 @@ const char* const ItemNames[ITEM_COUNT] = {
 	"Sulphur", "Feather", "String",
 	"Wood Hoe", "Stone Hoe", "Iron Hoe", "Diamond Hoe", "Gold Hoe",
 	"Seeds", "Wheat", "Bread",
-	"Bucket", "Water Bucket", "Lava Bucket"
+	"Bucket", "Water Bucket", "Lava Bucket",
+	"Sign"
 };
 
 const int ItemTextures[ITEM_COUNT] = {
@@ -65,7 +66,8 @@ const int ItemTextures[ITEM_COUNT] = {
 	40, 24, 8,                /* 54-56: Sulphur, Feather, String */
 	128, 129, 130, 131, 132,  /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
 	9, 25, 41,                 /* 62-64: Seeds, Wheat, Bread */
-	74, 75, 76                 /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	74, 75, 76,                /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	42                         /* 68:    Sign */
 };
 
 const int ItemDamage[ITEM_COUNT] = {
@@ -86,7 +88,8 @@ const int ItemDamage[ITEM_COUNT] = {
 	1, 1, 1,                 /* 54-56: Sulphur, Feather, String */
 	2, 4, 6, 8, 2,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
 	1, 1, 1,                  /* 62-64: Seeds, Wheat, Bread */
-	1, 1, 1                   /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	1, 1, 1,                  /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	1                          /* 68:    Sign */
 };
 
 /* Armor defense points per item (matches vanilla Minecraft pre-1.9 values).
@@ -110,7 +113,8 @@ const int ItemArmorPoints[ITEM_COUNT] = {
 	0, 0, 0,                 /* 54-56: Sulphur, Feather, String */
 	0, 0, 0, 0, 0,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
 	0, 0, 0,                  /* 62-64: Seeds, Wheat, Bread */
-	0, 0, 0                   /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	0, 0, 0,                  /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	0                          /* 68:    Sign */
 };
 
 /* Max durability per item (0 = no durability / infinite).
@@ -134,6 +138,7 @@ const int ItemMaxDurability[ITEM_COUNT] = {
 	0, 0, 0, 0, 0,              /* 57-61: Hoes (infinite) */
 	0, 0, 0,                     /* 62-64: Seeds, Wheat, Bread */
 	0, 0, 0                      /* 65-67: Bucket, Water Bucket, Lava Bucket */
+	, 0                          /* 68:    Sign */
 };
 
 int Item_MaxStackSize(int itemId) {
@@ -152,6 +157,8 @@ int Item_MaxStackSize(int itemId) {
 	if (itemId >= 57 && itemId <= 61) return 1; /* Hoes */
 	if (itemId == ITEM_BOW)        return 1;
 	if (itemId == ITEM_FLINT_STEEL) return 1;
+	/* Signs: not stackable */
+	if (itemId == ITEM_SIGN) return 1;
 	/* Buckets: not stackable */
 	if (itemId == ITEM_BUCKET)       return 1;
 	if (itemId == ITEM_WATER_BUCKET) return 1;
@@ -551,6 +558,11 @@ static const struct CraftRecipe craftRecipes[] = {
 	{ 2, 3, { CI(ITEM_IRON_INGOT), CI(ITEM_IRON_INGOT),
 	           CI(ITEM_IRON_INGOT), CI(ITEM_IRON_INGOT),
 	           CI(ITEM_IRON_INGOT), CI(ITEM_IRON_INGOT), 0,0,0 }, BLOCK_IRON_DOOR, ITEM_NONE, 1 },
+
+	/* Sign: 6 Planks + Stick (3x3) -> 1 Sign */
+	{ 3, 3, { CB(BLOCK_WOOD), CB(BLOCK_WOOD), CB(BLOCK_WOOD),
+	           CB(BLOCK_WOOD), CB(BLOCK_WOOD), CB(BLOCK_WOOD),
+	           0,              CI(ITEM_STICK), 0 }, BLOCK_AIR, ITEM_SIGN, 1 },
 
 	/* Ladder: 7 Sticks in H pattern (3x3) -> 1 Ladder */
 	{ 3, 3, { CI(ITEM_STICK), 0,              CI(ITEM_STICK),
@@ -1163,6 +1175,40 @@ int Chest_Count;
 int Chest_ViewIdx  = -1;
 int Chest_ViewIdx2 = -1;
 
+
+/*########################################################################################################################*
+*-----------------------------------------------------Sign Storage-------------------------------------------------------*
+*#########################################################################################################################*/
+struct SignData Signs[MAX_SIGNS];
+int Sign_Count = 0;
+
+int Sign_FindAt(int x, int y, int z) {
+	int i;
+	for (i = 0; i < Sign_Count; i++) {
+		if (Signs[i].x == x && Signs[i].y == y && Signs[i].z == z)
+			return i;
+	}
+	return -1;
+}
+
+void Sign_AddAt(int x, int y, int z) {
+	if (Sign_FindAt(x, y, z) >= 0) return;
+	if (Sign_Count >= MAX_SIGNS) return;
+	Mem_Set(&Signs[Sign_Count], 0, sizeof(struct SignData));
+	Signs[Sign_Count].x = x;
+	Signs[Sign_Count].y = y;
+	Signs[Sign_Count].z = z;
+	Sign_Count++;
+}
+
+void Sign_RemoveAt(int x, int y, int z) {
+	int idx = Sign_FindAt(x, y, z);
+	if (idx < 0) return;
+	Sign_Count--;
+	if (idx < Sign_Count)
+		Signs[idx] = Signs[Sign_Count];
+}
+
 struct SurvInvSlot Chest_Slots[DCHEST_SLOTS];
 int Chest_SlotCount;
 
@@ -1336,6 +1382,27 @@ void Container_SaveToFile(const cc_string* path) {
 		}
 	}
 
+	/* Write sign count */
+	Stream_SetU32_BE(buf, Sign_Count);
+	Stream_Write(&s, buf, 4);
+
+	for (i = 0; i < Sign_Count; i++) {
+		struct SignData* sg = &Signs[i];
+		/* Position */
+		Stream_SetU32_BE(&buf[0], sg->x);
+		Stream_SetU32_BE(&buf[4], sg->y);
+		Stream_SetU32_BE(&buf[8], sg->z);
+		Stream_Write(&s, buf, 12);
+		/* Text lines: 4 x 16 bytes each */
+		Stream_Write(&s, sg->lines[0], 16);
+		Stream_Write(&s, sg->lines[1], 16);
+		Stream_Write(&s, sg->lines[2], 16);
+		Stream_Write(&s, sg->lines[3], 16);
+		/* Rotation: 1 byte (0-15 for floor signs, 0 for wall signs) */
+		buf[0] = sg->rotation;
+		Stream_Write(&s, buf, 1);
+	}
+
 	res = s.Close(&s);
 	if (res) Logger_SysWarn(res, "closing container.dat");
 }
@@ -1393,6 +1460,33 @@ void Container_LoadFromFile(const cc_string* path) {
 			for (j = 0; j < CHEST_SLOTS; j++) {
 				Container_ReadSlot(&s, &c->slots[j]);
 			}
+		}
+	}
+
+	/* Read sign count */
+	if (!Stream_Read(&s, buf, 4)) {
+		count = Stream_GetU32_BE(buf);
+		if (count > MAX_SIGNS) count = MAX_SIGNS;
+
+		Sign_Count = count;
+		for (i = 0; i < count; i++) {
+			struct SignData* sg = &Signs[i];
+			/* Position */
+			if (Stream_Read(&s, buf, 12)) break;
+			sg->x = Stream_GetU32_BE(&buf[0]);
+			sg->y = Stream_GetU32_BE(&buf[4]);
+			sg->z = Stream_GetU32_BE(&buf[8]);
+			/* Text lines */
+			if (Stream_Read(&s, sg->lines[0], 16)) break;
+			if (Stream_Read(&s, sg->lines[1], 16)) break;
+			if (Stream_Read(&s, sg->lines[2], 16)) break;
+			if (Stream_Read(&s, sg->lines[3], 16)) break;
+			/* Ensure null-terminated */
+			sg->lines[0][15] = 0; sg->lines[1][15] = 0;
+			sg->lines[2][15] = 0; sg->lines[3][15] = 0;
+			/* Rotation: 1 byte (0-15 for floor signs, 0 for wall signs) */
+			if (Stream_Read(&s, buf, 1)) { sg->rotation = 0; break; }
+			sg->rotation = buf[0] & 0x0F;
 		}
 	}
 

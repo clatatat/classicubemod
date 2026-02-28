@@ -801,14 +801,19 @@ static struct ChatCommand BlockEditCommand = {
 static void CheatCommand_Execute(const cc_string* args, int argsCount) {
 	static const cc_string msgOn  = String_FromConst("&eCheats &aenabled &7(invincible)");
 	static const cc_string msgOff = String_FromConst("&eCheats &cdisabled");
+	static const cc_string msgCreative = String_FromConst("&eCheats are always on in creative mode.");
+
+	/* In creative mode, cheats are always enabled — /cheat does nothing */
+	if (!Game_SurvivalMode) {
+		Chat_Add(&msgCreative);
+		return;
+	}
 
 	Player_CheatsEnabled = !Player_CheatsEnabled;
 
-	if (Game_SurvivalMode) {
-		/* In survival, cheats toggle hacks access + invincibility */
-		Entities.CurPlayer->Hacks.Enabled = Player_CheatsEnabled;
-		HacksComp_Update(&Entities.CurPlayer->Hacks);
-	}
+	/* In survival, cheats toggle hacks access + invincibility */
+	Entities.CurPlayer->Hacks.Enabled = Player_CheatsEnabled;
+	HacksComp_Update(&Entities.CurPlayer->Hacks);
 
 	Chat_Add(Player_CheatsEnabled ? &msgOn : &msgOff);
 }

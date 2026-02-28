@@ -33,6 +33,7 @@
 #include "HeldBlockRenderer.h"
 #include "SelOutlineRenderer.h"
 #include "Menus.h"
+#include "Signs.h"
 #include "Audio.h"
 #include "Stream.h"
 #include "Builder.h"
@@ -527,6 +528,7 @@ static void Game_Load(void) {
 	for (comp = comps_head; comp; comp = comp->next) {
 		if (comp->Init) comp->Init();
 	}
+	Signs_Init();
 
 	TexturePack_ExtractCurrent(true);
 	if (TexturePack_DefaultMissing) {
@@ -593,6 +595,7 @@ static void Render3DFrame(float delta, float t) {
 
 	MapRenderer_Update(delta);
 	MapRenderer_RenderNormal(delta);
+	Signs_RenderText();
 	EnvRenderer_RenderMapSides();
 
 	EntityShadows_Render();

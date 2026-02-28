@@ -35,6 +35,7 @@
 #include "Stream.h"
 #include "Generator.h"
 #include "Model.h"
+#include "Signs.h"
 
 /* Forward declarations for dropped item functions */
 static int DropItem_FindFreeSlot(void);
@@ -1087,6 +1088,20 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					if (toolType != TOOL_SHOVEL) dropBlock = BLOCK_AIR;
 				} else if (old >= BLOCK_DCHEST_S_L && old <= BLOCK_DCHEST_W_R) {
 					dropBlock = BLOCK_CHEST;
+				} else if (old == BLOCK_SIGN_WALL || old == BLOCK_SIGN_FLOOR) {
+					/* Sign: drop as ITEM_SIGN item; also remove from sign data and invalidate texture */
+					dropBlock = BLOCK_AIR;
+					Sign_RemoveAt(pos.x, pos.y, pos.z);
+					Signs_InvalidateAt(pos.x, pos.y, pos.z);
+					{
+						int ss = DropItem_FindFreeSlot();
+						if (ss == -1) ss = DropItem_EvictOldest();
+						if (ss != -1) {
+							DropItem_Spawn(ss, dropPos, BLOCK_AIR, true, ITEM_SIGN);
+							droppedItemPickupDelay[ss] = 0.0f;
+							DropItem_ApplyRandomMomentum(ss);
+						}
+					}
 				}
 				if (dropBlock != BLOCK_AIR) {
 					slot = DropItem_FindFreeSlot();
@@ -1212,6 +1227,11 @@ static void InputHandler_DeleteBlock(void) {
 
 	/* Creative mode: instant break */
 	if (!Game_SurvivalMode) {
+		/* Clean up sign data if breaking a sign */
+		if (old == BLOCK_SIGN_WALL || old == BLOCK_SIGN_FLOOR) {
+			Sign_RemoveAt(pos.x, pos.y, pos.z);
+			Signs_InvalidateAt(pos.x, pos.y, pos.z);
+		}
 		BreakBlockNow(pos, old);
 		return;
 	}
@@ -1293,6 +1313,12 @@ static void InputHandler_PlaceBlock(void) {
 		    (targetBlock >= BLOCK_DCHEST_S_L && targetBlock <= BLOCK_DCHEST_W_R)) {
 			Chest_Open(targetPos.x, targetPos.y, targetPos.z);
 			ChestScreen_Show();
+			return;
+		}
+
+		/* If clicking on a wall or floor sign, open the sign editor */
+		if (targetBlock == BLOCK_SIGN_WALL || targetBlock == BLOCK_SIGN_FLOOR) {
+			SignEditScreen_Show(targetPos.x, targetPos.y, targetPos.z);
 			return;
 		}
 
@@ -1513,6 +1539,57 @@ static void InputHandler_PlaceBlock(void) {
 		}
 		/* Convert lava bucket back to empty bucket */
 		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_BUCKET);
+		return;
+	}
+
+	/* Sign: place wall sign on horizontal wall face, or floor sign on top face */
+	/* Works both with ITEM_SIGN (survival crafted) and BLOCK_SIGN_WALL/BLOCK_SIGN_FLOOR (from O menu / cheat) */
+	if (Hotbar_SelectedItem == ITEM_SIGN || Inventory_SelectedBlock == BLOCK_SIGN_WALL || Inventory_SelectedBlock == BLOCK_SIGN_FLOOR) {
+		Face face = Game_SelectedPos.closest;
+		BlockID signBlock;
+		cc_uint8 signRot = 0;
+
+		if (face == FACE_YMAX) {
+			/* Floor sign: placed on top of a block */
+			float yaw = LocalPlayer_Instances[0].Base.Yaw;
+			signRot = (cc_uint8)((int)Math_Floor(yaw * 16.0f / 360.0f + 0.5f) & 15);
+			signBlock = BLOCK_SIGN_FLOOR;
+		} else if (face == FACE_XMIN || face == FACE_XMAX || face == FACE_ZMIN || face == FACE_ZMAX) {
+			/* Wall sign: placed on a vertical wall face */
+			signBlock = BLOCK_SIGN_WALL;
+		} else {
+			return; /* Can't place on bottom face */
+		}
+
+		pos = Game_SelectedPos.translatedPos;
+		if (!Game_SelectedPos.valid || !World_Contains(pos.x, pos.y, pos.z)) return;
+
+		old = World_GetBlock(pos.x, pos.y, pos.z);
+		if (Game_CanPick(old)) return;
+
+		Game_ChangeBlock(pos.x, pos.y, pos.z, signBlock);
+		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, signBlock);
+		Sign_AddAt(pos.x, pos.y, pos.z);
+		/* Set rotation for floor signs */
+		if (signBlock == BLOCK_SIGN_FLOOR) {
+			int idx = Sign_FindAt(pos.x, pos.y, pos.z);
+			if (idx >= 0) Signs[idx].rotation = signRot;
+		}
+		Audio_PlayDigSound(SOUND_WOOD);
+		if (Game_SurvivalMode && Hotbar_SelectedItem == ITEM_SIGN) {
+			/* Consume crafted sign item from hotbar */
+			int sel = Inventory.SelectedIndex;
+			int cnt = Hotbar_GetCount(sel);
+			if (cnt > 1) {
+				Hotbar_SetCount(sel, cnt - 1);
+			} else {
+				Hotbar_SetItem(sel, ITEM_NONE);
+				Hotbar_SetCount(sel, 0);
+				Inventory_Set(sel, BLOCK_AIR);
+			}
+			Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+		}
+		SignEditScreen_Show(pos.x, pos.y, pos.z);
 		return;
 	}
 
@@ -2669,12 +2746,14 @@ static cc_bool BindTriggered_DeleteItem(int key, struct InputDevice* device) {
 
 static cc_bool BindTriggered_DropItemSprite(int key, struct InputDevice* device) {
 	struct Screen* s;
-	/* Item menu requires cheats in any mode */
-	if (!Player_CheatsEnabled) return false;
+	/* Item menu: always available in creative, needs cheats in survival */
+	if (Game_SurvivalMode && !Player_CheatsEnabled) return false;
+	/* Don't toggle item menu if another screen (e.g. sign editor) has input */
+	if (Gui.InputGrab) return false;
 	s = Gui_GetScreen(GUI_PRIORITY_INVENTORY);
 	if (s) {
 		Gui_Remove(s);
-	} else if (!Gui.InputGrab) {
+	} else {
 		ItemInventoryScreen_Show();
 	}
 	return true;
@@ -6199,13 +6278,24 @@ static void BlockBreaking_BuildCrackMesh(void) {
 	offset = 0.002f;
 	col    = PackedCol_Make(255, 255, 255, 220);
 
-	/* Use block bounding box for non-full blocks (slabs, etc.) */
-	x1 = (float)breaking_pos.x + Blocks.MinBB[breaking_block].x - offset;
-	y1 = (float)breaking_pos.y + Blocks.MinBB[breaking_block].y - offset;
-	z1 = (float)breaking_pos.z + Blocks.MinBB[breaking_block].z - offset;
-	x2 = (float)breaking_pos.x + Blocks.MaxBB[breaking_block].x + offset;
-	y2 = (float)breaking_pos.y + Blocks.MaxBB[breaking_block].y + offset;
-	z2 = (float)breaking_pos.z + Blocks.MaxBB[breaking_block].z + offset;
+	/* Use dynamic render bounds for directional blocks (signs, ladders, etc.) */
+	if (IsDirectionalBlock(breaking_block)) {
+		Vec3 rMin, rMax;
+		DirectionalBlock_GetRenderBounds(breaking_block, breaking_pos.x, breaking_pos.y, breaking_pos.z, &rMin, &rMax);
+		x1 = (float)breaking_pos.x + rMin.x - offset;
+		y1 = (float)breaking_pos.y + rMin.y - offset;
+		z1 = (float)breaking_pos.z + rMin.z - offset;
+		x2 = (float)breaking_pos.x + rMax.x + offset;
+		y2 = (float)breaking_pos.y + rMax.y + offset;
+		z2 = (float)breaking_pos.z + rMax.z + offset;
+	} else {
+		x1 = (float)breaking_pos.x + Blocks.MinBB[breaking_block].x - offset;
+		y1 = (float)breaking_pos.y + Blocks.MinBB[breaking_block].y - offset;
+		z1 = (float)breaking_pos.z + Blocks.MinBB[breaking_block].z - offset;
+		x2 = (float)breaking_pos.x + Blocks.MaxBB[breaking_block].x + offset;
+		y2 = (float)breaking_pos.y + Blocks.MaxBB[breaking_block].y + offset;
+		z2 = (float)breaking_pos.z + Blocks.MaxBB[breaking_block].z + offset;
+	}
 
 	v = (struct VertexTextured*)Gfx_LockDynamicVb(crack_vb,
 				VERTEX_FORMAT_TEXTURED, CRACK_NUM_VERTICES);

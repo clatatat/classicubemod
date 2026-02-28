@@ -190,7 +190,9 @@ static cc_bool RayTrace(struct RayTracer* t, const Vec3* origin, const Vec3* dir
 		    || t->block == BLOCK_RED_TORCH_OFF_E || t->block == BLOCK_RED_TORCH_OFF_W
 		    || t->block == BLOCK_RED_TORCH_UNMOUNTED || t->block == BLOCK_RED_TORCH_UNMOUNTED_OFF
 		    || t->block == BLOCK_BUTTON || t->block == BLOCK_BUTTON_PRESSED
-		    || t->block == BLOCK_LEVER || t->block == BLOCK_LEVER_ON) {
+		    || t->block == BLOCK_LEVER || t->block == BLOCK_LEVER_ON
+		    || t->block == BLOCK_SIGN_WALL
+		    || t->block == BLOCK_SIGN_FLOOR) {
 			Vec3 min, max;
 			DirectionalBlock_GetRenderBounds(t->block, x, y, z, &min, &max);
 			Vec3_Add(&t->Min, &v, &min);

@@ -152,6 +152,7 @@ cc_bool AutoRotate_BlocksShareGroup(BlockID block, BlockID blockOther);
 TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face face);
 /* Get render bounds for a directional block at a specific position in world */
 void DirectionalBlock_GetRenderBounds(BlockID block, int x, int y, int z, Vec3* min, Vec3* max);
+cc_bool IsDirectionalBlock(BlockID block);
 /* Get facing direction for a directional block (0-3 for walls, 4 for ground/torch) */
 cc_uint8 DirectionalBlock_GetFacing(int x, int y, int z);
 
