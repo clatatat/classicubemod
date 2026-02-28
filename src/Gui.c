@@ -750,6 +750,7 @@ static void OnContextLost(void* obj) {
 	Gfx_DeleteTexture(&Gui.GuiClassicTex);
 	Gfx_DeleteTexture(&Gui.IconsTex);
 	Gfx_DeleteTexture(&Gui.TouchTex);
+	SurvGUI_DeleteTextures();
 }
 
 static void OnInit(void) {
@@ -758,6 +759,7 @@ static void OnInit(void) {
 	TextureEntry_Register(&guiClassic_entry);
 	TextureEntry_Register(&icons_entry);
 	TextureEntry_Register(&touch_entry);
+	SurvGUI_RegisterTextures();
 
 	Event_Register_(&InputEvents.Wheel,   NULL, OnMouseWheel);
 	Event_Register_(&PointerEvents.Moved, NULL, OnPointerMove);

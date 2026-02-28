@@ -2272,6 +2272,289 @@ void ItemInventoryScreen_Show(void) {
 
 
 /*########################################################################################################################*
+*---------------------------------------------------SurvGUI Slot Textures-------------------------------------------------*
+*#########################################################################################################################*/
+/* Slot texture (slot.png, 18x18), armor overlay textures, and border texture loaded from the texture pack */
+static GfxResourceID SurvGUI_SlotTex;
+static GfxResourceID SurvGUI_ArmorHelmetTex;
+static GfxResourceID SurvGUI_ArmorChestTex;
+static GfxResourceID SurvGUI_ArmorPantsTex;
+static GfxResourceID SurvGUI_ArmorBootsTex;
+static GfxResourceID SurvGUI_BorderTex;
+
+static void SlotPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_SlotTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry slot_entry = { "slot.png", SlotPngProcess };
+
+static void SlotHelmetPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArmorHelmetTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry slot_helmet_entry = { "slot_helmet.png", SlotHelmetPngProcess };
+
+static void SlotChestPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArmorChestTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry slot_chest_entry = { "slot_chest.png", SlotChestPngProcess };
+
+static void SlotPantsPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArmorPantsTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry slot_pants_entry = { "slot_pants.png", SlotPantsPngProcess };
+
+static void SlotBootsPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArmorBootsTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry slot_boots_entry = { "slot_boots.png", SlotBootsPngProcess };
+
+static void GuiBorderPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_BorderTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry guiborder_entry = { "guiborder.png", GuiBorderPngProcess };
+
+static GfxResourceID SurvGUI_ArrowEmptyTex;
+static GfxResourceID SurvGUI_ArrowFullTex;
+
+static void ArrowEmptyPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArrowEmptyTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry arrowempty_entry = { "arrowui_empty.png", ArrowEmptyPngProcess };
+
+static void ArrowFullPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_ArrowFullTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry arrowfull_entry = { "arrowui_full.png", ArrowFullPngProcess };
+
+static GfxResourceID SurvGUI_FlameLitTex;
+static GfxResourceID SurvGUI_FlameUnlitTex;
+
+static void FlameLitPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_FlameLitTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry flamelit_entry = { "furnace_flame_lit.png", FlameLitPngProcess };
+
+static void FlameUnlitPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&SurvGUI_FlameUnlitTex, stream, name, NULL, NULL);
+}
+static struct TextureEntry flameunlit_entry = { "furnace_flame_unlit.png", FlameUnlitPngProcess };
+
+void SurvGUI_RegisterTextures(void) {
+	TextureEntry_Register(&slot_entry);
+	TextureEntry_Register(&slot_helmet_entry);
+	TextureEntry_Register(&slot_chest_entry);
+	TextureEntry_Register(&slot_pants_entry);
+	TextureEntry_Register(&slot_boots_entry);
+	TextureEntry_Register(&guiborder_entry);
+	TextureEntry_Register(&arrowempty_entry);
+	TextureEntry_Register(&arrowfull_entry);
+	TextureEntry_Register(&flamelit_entry);
+	TextureEntry_Register(&flameunlit_entry);
+}
+
+void SurvGUI_DeleteTextures(void) {
+	Gfx_DeleteTexture(&SurvGUI_SlotTex);
+	Gfx_DeleteTexture(&SurvGUI_ArmorHelmetTex);
+	Gfx_DeleteTexture(&SurvGUI_ArmorChestTex);
+	Gfx_DeleteTexture(&SurvGUI_ArmorPantsTex);
+	Gfx_DeleteTexture(&SurvGUI_ArmorBootsTex);
+	Gfx_DeleteTexture(&SurvGUI_BorderTex);
+	Gfx_DeleteTexture(&SurvGUI_ArrowEmptyTex);
+	Gfx_DeleteTexture(&SurvGUI_ArrowFullTex);
+	Gfx_DeleteTexture(&SurvGUI_FlameLitTex);
+	Gfx_DeleteTexture(&SurvGUI_FlameUnlitTex);
+}
+
+/* Draws a single inventory slot at (x,y) with size cs using slot.png tinted #c6c6c6.
+   Falls back to a flat dark quad if slot.png is not loaded. */
+static void SurvGUI_DrawSlot(int x, int y, int cs, cc_bool hovered) {
+	PackedCol slotCol  = PackedCol_Make(0xc6, 0xc6, 0xc6, 255);
+	PackedCol hoverCol = PackedCol_Make(255, 255, 255, 80);
+	struct Texture tex;
+
+	if (SurvGUI_SlotTex) {
+		/* slot.png is 32x32 but only the top-left 18x18 pixels are used */
+		#define SLOT_UV (18.0f / 32.0f)
+		Tex_SetRect(tex, x, y, cs, cs);
+		Tex_SetUV(tex, 0.0f, 0.0f, SLOT_UV, SLOT_UV);
+		tex.ID = SurvGUI_SlotTex;
+		Texture_RenderShaded(&tex, slotCol);
+		#undef SLOT_UV
+	} else {
+		Gfx_Draw2DFlat(x + 1, y + 1, cs - 2, cs - 2, PackedCol_Make(0xc6, 0xc6, 0xc6, 255));
+	}
+
+	if (hovered) {
+		Gfx_Draw2DFlat(x + 1, y + 1, cs - 2, cs - 2, hoverCol);
+	}
+}
+
+/*
+ * guiborder.png layout (32 wide x 4 tall, 8 tiles of 4x4 each, 1-indexed from left):
+ *   tile 1 = top-right corner
+ *   tile 2 = bottom-right corner
+ *   tile 3 = bottom-left corner
+ *   tile 4 = top-left corner
+ *   tile 5 = top side
+ *   tile 6 = right side
+ *   tile 7 = bottom side
+ *   tile 8 = left side
+ *
+ * UV for tile N in a 32x4 texture: u = (N-1)/8 .. N/8, v = 0..1
+ */
+
+/* Draws one tile (or partial tile) from guiborder.png at screen rect (x,y,w,h).
+   wFrac/hFrac are UV fractions (1.0 = full tile) used to clip partial last tiles. */
+static void SurvGUI_DrawBorderTile(int x, int y, int w, int h, int tileN, float wFrac, float hFrac) {
+	struct Texture tex;
+	float u1 = (tileN - 1) / 8.0f;
+	if (!SurvGUI_BorderTex || w <= 0 || h <= 0) return;
+	Tex_SetRect(tex, x, y, w, h);
+	Tex_SetUV(tex, u1, 0.0f, u1 + wFrac / 8.0f, hFrac);
+	tex.ID = SurvGUI_BorderTex;
+	Texture_Render(&tex);
+}
+
+/* Tiles tileN horizontally from (x,y) across len pixels, each stamp b×b (last may be clipped). */
+static void SurvGUI_BorderHRun(int x, int y, int len, int b, int tileN) {
+	int end = x + len;
+	while (x < end) {
+		int w = (x + b <= end) ? b : end - x;
+		SurvGUI_DrawBorderTile(x, y, w, b, tileN, (float)w / b, 1.0f);
+		x += b;
+	}
+}
+
+/* Tiles tileN vertically from (x,y) across len pixels, each stamp b×b (last may be clipped). */
+static void SurvGUI_BorderVRun(int x, int y, int len, int b, int tileN) {
+	int end = y + len;
+	while (y < end) {
+		int h = (y + b <= end) ? b : end - y;
+		SurvGUI_DrawBorderTile(x, y, b, h, tileN, 1.0f, (float)h / b);
+		y += b;
+	}
+}
+
+/* Draws the border frame around a GUI panel at (px,py) with size (pw,ph).
+   b = border thickness in screen pixels.
+   The border is drawn *outside* the panel rect so the corners overlap the edge. */
+static void SurvGUI_DrawBorder(int px, int py, int pw, int ph, int b) {
+	/* Outer rect that the border occupies */
+	int ox = px - b, oy = py - b;
+	int ow = pw + 2*b, oh = ph + 2*b;
+	if (!SurvGUI_BorderTex) return;
+	/* Corners — always exactly b×b */
+	SurvGUI_DrawBorderTile(ox,          oy,          b, b, 4, 1.0f, 1.0f); /* top-left     */
+	SurvGUI_DrawBorderTile(ox + ow - b, oy,          b, b, 1, 1.0f, 1.0f); /* top-right    */
+	SurvGUI_DrawBorderTile(ox,          oy + oh - b, b, b, 3, 1.0f, 1.0f); /* bottom-left  */
+	SurvGUI_DrawBorderTile(ox + ow - b, oy + oh - b, b, b, 2, 1.0f, 1.0f); /* bottom-right */
+	/* Sides — tiled in b×b stamps between the corners */
+	SurvGUI_BorderHRun(ox + b, oy,          ow - 2*b, b, 5); /* top    */
+	SurvGUI_BorderHRun(ox + b, oy + oh - b, ow - 2*b, b, 7); /* bottom */
+	SurvGUI_BorderVRun(ox,          oy + b, oh - 2*b, b, 8); /* left   */
+	SurvGUI_BorderVRun(ox + ow - b, oy + b, oh - 2*b, b, 6); /* right  */
+}
+
+/* Arrow UV: only the left-most 22 of 32 pixels are used -> u2 = 22/32 = 0.6875 */
+#define ARROW_UV_U2 (22.0f / 32.0f)
+/* Aspect ratio of visible region: 22 wide x 16 tall */
+#define ARROW_ASPECT (22.0f / 16.0f)
+
+/* Draws the furnace flame indicator at (x,y) with size cs.
+   furnace_flame_unlit.png is the background; furnace_flame_lit.png fills from the
+   bottom up based on fuelPct (1.0 = fully lit, 0.0 = fully unlit).
+   Both textures are 32x32 but only the top-left 18x18 region is used. */
+#define FLAME_UV (18.0f / 32.0f)
+static void SurvGUI_DrawFlame(int x, int y, int cs, float fuelPct) {
+	struct Texture tex;
+
+	/* Unlit background — always drawn */
+	if (SurvGUI_FlameUnlitTex) {
+		Tex_SetRect(tex, x, y, cs, cs);
+		Tex_SetUV(tex, 0.0f, 0.0f, FLAME_UV, FLAME_UV);
+		tex.ID = SurvGUI_FlameUnlitTex;
+		Texture_Render(&tex);
+	}
+
+	/* Lit overlay — fills from the bottom up, shrinks from the top as fuel depletes */
+	if (SurvGUI_FlameLitTex && fuelPct > 0.0f) {
+		int litCols, litH;
+		float litV1;
+		if (fuelPct > 1.0f) fuelPct = 1.0f;
+		litCols = (int)(18.0f * fuelPct);
+		if (litCols < 1) litCols = 1;
+		litH  = (int)(cs * litCols / 18.0f);
+		if (litH < 1) litH = 1;
+		litV1 = (18 - litCols) / 32.0f;
+		Tex_SetRect(tex, x, y + cs - litH, cs, litH);
+		Tex_SetUV(tex, 0.0f, litV1, FLAME_UV, FLAME_UV);
+		tex.ID = SurvGUI_FlameLitTex;
+		Texture_Render(&tex);
+	}
+}
+#undef FLAME_UV
+
+/* Draws the crafting/smelting arrow at (x,y) with given width.
+   Height is derived from the aspect ratio.
+   progress = 0.0 means fully empty, 1.0 means fully filled. */
+static void SurvGUI_DrawArrow(int x, int y, int w, float progress) {
+	struct Texture tex;
+	int h = (int)(w / ARROW_ASPECT);
+
+	/* Empty arrow background */
+	if (SurvGUI_ArrowEmptyTex) {
+		Tex_SetRect(tex, x, y, w, h);
+		Tex_SetUV(tex, 0.0f, 0.0f, ARROW_UV_U2, 1.0f);
+		tex.ID = SurvGUI_ArrowEmptyTex;
+		Texture_Render(&tex);
+	}
+
+	/* Filled overlay (snapped to texture pixel columns) */
+	if (SurvGUI_ArrowFullTex && progress > 0.0f) {
+		int filledCols, fillW;
+		float fillU2;
+		if (progress > 1.0f) progress = 1.0f;
+		filledCols = (int)(22.0f * progress);
+		if (filledCols < 1) filledCols = 1;
+		fillU2 = filledCols / 32.0f;
+		fillW  = (int)(w * filledCols / 22.0f);
+		if (fillW < 1) fillW = 1;
+		Tex_SetRect(tex, x, y, fillW, h);
+		Tex_SetUV(tex, 0.0f, 0.0f, fillU2, 1.0f);
+		tex.ID = SurvGUI_ArrowFullTex;
+		Texture_Render(&tex);
+	}
+}
+
+/* Draws the armor overlay icon for the given armor slot (0=helmet,1=chest,2=pants,3=boots)
+   at position (x,y) with size cs. Rendered at the same visual size as items (cs*0.76),
+   centered in the slot. Only drawn when the slot is empty. */
+static void SurvGUI_DrawArmorOverlay(int armorIdx, int x, int y, int cs) {
+	static GfxResourceID* armorTexPtrs[4] = {
+		&SurvGUI_ArmorHelmetTex,
+		&SurvGUI_ArmorChestTex,
+		&SurvGUI_ArmorPantsTex,
+		&SurvGUI_ArmorBootsTex
+	};
+	struct Texture tex;
+	GfxResourceID id;
+	int size, ox, oy;
+
+	if (armorIdx < 0 || armorIdx > 3) return;
+	id = *armorTexPtrs[armorIdx];
+	if (!id) return;
+
+	/* Match item render size: isoSize = cs * 0.38f, item spans isoSize*2 */
+	size = (int)(cs * 0.38f * 2.0f);
+	ox   = x + (cs - size) / 2;
+	oy   = y + (cs - size) / 2;
+
+	Tex_SetRect(tex, ox, oy, size, size);
+	Tex_SetUV(tex, 0.0f, 0.0f, 1.0f, 1.0f);
+	tex.ID = id;
+	Texture_Render(&tex);
+}
+
+/*########################################################################################################################*
 *--------------------------------------------------SurvivalInventoryScreen------------------------------------------------*
 *#########################################################################################################################*/
 /* Slot layout (45 total):
@@ -2467,12 +2750,12 @@ static void SurvInv_Layout(void* screen) {
 	s->armorX = baseX;
 	s->armorY = baseY;
 
-	/* Crafting 2x2: top right area */
-	s->craftX = baseX + cs * 5;
+	/* Crafting 2x2: top right area (adjacent to armor) */
+	s->craftX = baseX + cs * 4;
 	s->craftY = baseY;
 
-	/* Output: to the right of crafting */
-	s->outputX = s->craftX + cs * 3;
+	/* Output: to the right of crafting with extra gap for arrow */
+	s->outputX = s->craftX + cs * 4;
 	s->outputY = s->craftY + cs / 2;
 
 	/* Main 3x9 grid */
@@ -2484,7 +2767,7 @@ static void SurvInv_Layout(void* screen) {
 
 	/* Title above everything */
 	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 3;
+	s->title.yOffset = baseY - s->title.height - 12;
 	Widget_Layout(&s->title);
 }
 
@@ -2587,26 +2870,43 @@ static void SurvInv_Render(void* screen, float delta) {
 	int itemId;
 	float isoSize;
 
-	PackedCol bgTop     = PackedCol_Make( 34,  34,  34, 168);
-	PackedCol bgBottom  = PackedCol_Make( 57,  57, 104, 202);
-	PackedCol slotCol   = PackedCol_Make(  0,   0,   0, 100);
-	PackedCol hoverCol  = PackedCol_Make(255, 255, 255,  80);
+	PackedCol bgCol = PackedCol_Make(0xc6, 0xc6, 0xc6, 255);
 
 	cs      = s->cellSize;
 	isoSize = cs * 0.38f;
 
 	/* Background panel */
-	Gfx_Draw2DGradient(s->armorX - 4, s->armorY - 4,
-		cs * 9 + 8, s->hotbarY + cs - s->armorY + 8, bgTop, bgBottom);
+	{
+		int px = s->armorX - 4, py = s->armorY - 4;
+		int pw = cs * 9 + 8,    ph = s->hotbarY + cs - s->armorY + 8;
+		int b  = 8;
+		Gfx_Draw2DFlat(px, py, pw, ph, bgCol);
+		SurvGUI_DrawBorder(px, py, pw, ph, b);
+	}
 
 	/* Slot backgrounds */
 	for (i = 0; i < SURVINV_SLOT_COUNT; i++) {
 		SurvInv_GetSlotPos(s, i, &sx, &sy);
-		if (i == s->hoveredSlot) {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, hoverCol);
-		} else {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, slotCol);
-		}
+		SurvGUI_DrawSlot(sx, sy, cs, i == s->hoveredSlot);
+	}
+
+	/* Crafting arrow: between 2x2 grid and output slot (empty only, half-size) */
+	{
+		int gapX   = s->craftX + cs * 2;
+		int gapW   = s->outputX - gapX;
+		int arrowW = gapW / 2;
+		int arrowX = gapX + (gapW - arrowW) / 2;
+		int arrowH = (int)(arrowW / ARROW_ASPECT);
+		int arrowY = s->craftY + (cs * 2 - arrowH) / 2;
+		SurvGUI_DrawArrow(arrowX, arrowY, arrowW, 0.0f);
+	}
+
+	/* Armor overlays — drawn on empty armor slots only */
+	for (i = 0; i < 4; i++) {
+		SurvInv_GetSlot(36 + i, &block, &itemId);
+		if (block != BLOCK_AIR || itemId != ITEM_NONE) continue;
+		SurvInv_GetSlotPos(s, 36 + i, &sx, &sy);
+		SurvGUI_DrawArmorOverlay(i, sx, sy, cs);
 	}
 
 	/* Build iso batch for slot contents */
@@ -3154,15 +3454,15 @@ static void CraftTable_Layout(void* screen) {
 	baseY = (Window_UI.Height - totalHeight) / 2;
 
 	/* Center the crafting area (3x3 grid + gap + output) within the 9-wide row */
-	craftAreaWidth = cs * 3 + cs + cs;  /* 3 grid cols + 1 gap col + 1 output col */
+	craftAreaWidth = cs * 3 + cs * 2 + cs;  /* 3 grid cols + 2 gap cols + 1 output col */
 	craftAreaX = baseX + (totalWidth - craftAreaWidth) / 2;
 
 	/* Crafting 3x3 grid */
 	s->craftX = craftAreaX;
 	s->craftY = baseY;
 
-	/* Output: to the right of crafting with gap */
-	s->outputX = craftAreaX + cs * 4;
+	/* Output: to the right of crafting with extra gap for arrow */
+	s->outputX = craftAreaX + cs * 5;
 	s->outputY = s->craftY + cs;
 
 	/* Main 3x9 grid */
@@ -3174,7 +3474,7 @@ static void CraftTable_Layout(void* screen) {
 
 	/* Title above everything */
 	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 3;
+	s->title.yOffset = baseY - s->title.height - 12;
 	Widget_Layout(&s->title);
 }
 
@@ -3233,26 +3533,35 @@ static void CraftTable_Render(void* screen, float delta) {
 	int itemId;
 	float isoSize;
 
-	PackedCol bgTop     = PackedCol_Make( 34,  34,  34, 168);
-	PackedCol bgBottom  = PackedCol_Make( 57,  57, 104, 202);
-	PackedCol slotCol   = PackedCol_Make(  0,   0,   0, 100);
-	PackedCol hoverCol  = PackedCol_Make(255, 255, 255,  80);
+	PackedCol bgCol = PackedCol_Make(0xc6, 0xc6, 0xc6, 255);
 
 	cs      = s->cellSize;
 	isoSize = cs * 0.38f;
 
 	/* Background panel */
-	Gfx_Draw2DGradient(s->gridX - 4, s->craftY - 4,
-		cs * 9 + 8, s->hotbarY + cs - s->craftY + 8, bgTop, bgBottom);
+	{
+		int px = s->gridX - 4,  py = s->craftY - 4;
+		int pw = cs * 9 + 8,    ph = s->hotbarY + cs - s->craftY + 8;
+		int b  = 8;
+		Gfx_Draw2DFlat(px, py, pw, ph, bgCol);
+		SurvGUI_DrawBorder(px, py, pw, ph, b);
+	}
 
 	/* Slot backgrounds */
 	for (i = 0; i < CRAFTTABLE_SLOT_COUNT; i++) {
 		CraftTable_GetSlotPos(s, i, &sx, &sy);
-		if (i == s->hoveredSlot) {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, hoverCol);
-		} else {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, slotCol);
-		}
+		SurvGUI_DrawSlot(sx, sy, cs, i == s->hoveredSlot);
+	}
+
+	/* Crafting arrow: between 3x3 grid and output slot (empty only, half-size) */
+	{
+		int gapX   = s->craftX + cs * 3;
+		int gapW   = s->outputX - gapX;
+		int arrowW = gapW / 2;
+		int arrowX = gapX + (gapW - arrowW) / 2;
+		int arrowH = (int)(arrowW / ARROW_ASPECT);
+		int arrowY = s->craftY + (cs * 3 - arrowH) / 2;
+		SurvGUI_DrawArrow(arrowX, arrowY, arrowW, 0.0f);
 	}
 
 	/* Build iso batch for slot contents */
@@ -3682,48 +3991,45 @@ static void Furnace_Layout(void* screen) {
 	gap = cs / 3;
 
 	totalWidth  = cs * 9;
-	totalHeight = cs * 2 + gap + cs * 3 + gap + cs;
+	totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
 	baseX = (Window_UI.Width  - totalWidth)  / 2;
 	baseY = (Window_UI.Height - totalHeight) / 2;
 
-	/* Center furnace slots (input, fuel, arrow, output) in top area */
-	furnaceAreaW = cs * 4; /* input col + gap + arrow + output col */
+	/* Center furnace slots (input, flame, fuel, arrow, output) in top area */
+	furnaceAreaW = cs * 4; /* input/flame/fuel col + gap + arrow + output col */
 	furnaceAreaX = baseX + (totalWidth - furnaceAreaW) / 2;
 
-	/* Input: top center */
+	/* Input: top slot */
 	s->inputX = furnaceAreaX;
 	s->inputY = baseY;
 
-	/* Fuel: below input */
+	/* Fuel: bottom slot (below flame) */
 	s->fuelX = furnaceAreaX;
-	s->fuelY = baseY + cs;
+	s->fuelY = baseY + cs * 2;
 
-	/* Output: to the right */
+	/* Output: to the right, vertically centered in the 3-row area */
 	s->outputX = furnaceAreaX + cs * 3;
-	s->outputY = baseY + cs / 2;
+	s->outputY = baseY + cs;
 
-	/* Progress bar between input/fuel and output */
-	s->progX = furnaceAreaX + cs + cs / 4;
-	s->progY = baseY + cs / 2 + cs / 4;
-	s->progW = cs + cs / 2;
-	s->progH = cs / 3;
+	/* Progress bar (unused legacy fields) */
+	s->progX = 0; s->progY = 0; s->progW = 0; s->progH = 0;
 
-	/* Vertical fuel bar to the left of input/fuel slots */
-	s->fuelBarW = cs / 4;
-	s->fuelBarH = cs * 2;    /* spans both input and fuel rows */
-	s->fuelBarX = furnaceAreaX - s->fuelBarW - cs / 4;
-	s->fuelBarY = baseY;
+	/* Flame indicator: middle slot, same column as input/fuel */
+	s->fuelBarW = cs;
+	s->fuelBarH = cs;
+	s->fuelBarX = furnaceAreaX;
+	s->fuelBarY = baseY + cs;
 
 	/* Main 3x9 grid */
 	s->gridX = baseX;
-	s->gridY = baseY + cs * 2 + gap;
+	s->gridY = baseY + cs * 3 + gap;
 
 	/* Hotbar row */
 	s->hotbarY = s->gridY + cs * 3 + gap;
 
 	/* Title above everything */
 	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 3;
+	s->title.yOffset = baseY - s->title.height - 12;
 	Widget_Layout(&s->title);
 }
 
@@ -3778,49 +4084,43 @@ static void Furnace_Render(void* screen, float delta) {
 	int itemId;
 	float isoSize;
 
-	PackedCol bgTop     = PackedCol_Make( 34,  34,  34, 168);
-	PackedCol bgBottom  = PackedCol_Make( 57,  57, 104, 202);
-	PackedCol slotCol   = PackedCol_Make(  0,   0,   0, 100);
-	PackedCol hoverCol  = PackedCol_Make(255, 255, 255,  80);
-	PackedCol progBg    = PackedCol_Make(100, 100, 100, 200);
-	PackedCol progFill  = PackedCol_Make(255, 160,  50, 230);
+	PackedCol bgCol    = PackedCol_Make(0xc6, 0xc6, 0xc6, 255);
 
 	cs      = s->cellSize;
 	isoSize = cs * 0.38f;
 
 	/* Background panel */
-	Gfx_Draw2DGradient(s->gridX - 4, s->inputY - 4,
-		cs * 9 + 8, s->hotbarY + cs - s->inputY + 8, bgTop, bgBottom);
+	{
+		int px = s->gridX - 4,  py = s->inputY - 4;
+		int pw = cs * 9 + 8,    ph = s->hotbarY + cs - s->inputY + 8;
+		int b  = 8;
+		Gfx_Draw2DFlat(px, py, pw, ph, bgCol);
+		SurvGUI_DrawBorder(px, py, pw, ph, b);
+	}
 
 	/* Slot backgrounds */
 	for (i = 0; i < FURNACE_SLOT_COUNT; i++) {
 		Furnace_GetSlotPos(s, i, &sx, &sy);
-		if (i == s->hoveredSlot) {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, hoverCol);
-		} else {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, slotCol);
-		}
+		SurvGUI_DrawSlot(sx, sy, cs, i == s->hoveredSlot);
 	}
 
-	/* Progress bar */
-	Gfx_Draw2DFlat(s->progX, s->progY, s->progW, s->progH, progBg);
-	if (Furnace_Active && Furnace_SmeltProgress > 0.0f) {
-		int fillW = (int)(s->progW * Furnace_SmeltProgress);
-		Gfx_Draw2DFlat(s->progX, s->progY, fillW, s->progH, progFill);
-	}
-
-	/* Vertical fuel bar */
+	/* Smelting arrow — half-size, centered horizontally in gap, aligned to flame row */
 	{
-		PackedCol fuelBg   = PackedCol_Make(60, 60, 60, 200);
-		PackedCol fuelFill = PackedCol_Make(255, 100, 30, 230);
-		Gfx_Draw2DFlat(s->fuelBarX, s->fuelBarY, s->fuelBarW, s->fuelBarH, fuelBg);
-		if (Furnace_FuelBurnTotal > 0.0f && Furnace_FuelBurnLeft > 0.0f) {
-			float fuelPct = Furnace_FuelBurnLeft / Furnace_FuelBurnTotal;
-			int fillH = (int)(s->fuelBarH * fuelPct);
-			/* Fill from bottom up */
-			Gfx_Draw2DFlat(s->fuelBarX, s->fuelBarY + s->fuelBarH - fillH,
-				s->fuelBarW, fillH, fuelFill);
-		}
+		int gapX   = s->inputX + cs;
+		int gapW   = s->outputX - gapX;
+		int arrowW = gapW / 2;
+		int arrowX = gapX + (gapW - arrowW) / 2;
+		int arrowH = (int)(arrowW / ARROW_ASPECT);
+		int arrowY = s->fuelBarY + (cs - arrowH) / 2;
+		float prog = (Furnace_Active && Furnace_SmeltProgress > 0.0f) ? Furnace_SmeltProgress : 0.0f;
+		SurvGUI_DrawArrow(arrowX, arrowY, arrowW, prog);
+	}
+
+	/* Flame indicator (replaces old fuel bar) */
+	{
+		float fuelPct = (Furnace_FuelBurnTotal > 0.0f && Furnace_FuelBurnLeft > 0.0f)
+			? (Furnace_FuelBurnLeft / Furnace_FuelBurnTotal) : 0.0f;
+		SurvGUI_DrawFlame(s->fuelBarX, s->fuelBarY, s->fuelBarW, fuelPct);
 	}
 
 	/* Build iso batch for slot contents */
@@ -4245,7 +4545,7 @@ static void ChestScr_Layout(void* screen) {
 
 	/* Title above everything */
 	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 3;
+	s->title.yOffset = baseY - s->title.height - 12;
 	Widget_Layout(&s->title);
 }
 
@@ -4313,26 +4613,24 @@ static void ChestScr_Render(void* screen, float delta) {
 	int itemId;
 	float isoSize;
 
-	PackedCol bgTop     = PackedCol_Make( 34,  34,  34, 168);
-	PackedCol bgBottom  = PackedCol_Make( 57,  57, 104, 202);
-	PackedCol slotCol   = PackedCol_Make(  0,   0,   0, 100);
-	PackedCol hoverCol  = PackedCol_Make(255, 255, 255,  80);
+	PackedCol bgCol = PackedCol_Make(0xc6, 0xc6, 0xc6, 255);
 
 	cs      = s->cellSize;
 	isoSize = cs * 0.38f;
 
 	/* Background panel */
-	Gfx_Draw2DGradient(s->chestX - 4, s->chestY - 4,
-		cs * 9 + 8, s->hotbarY + cs - s->chestY + 8, bgTop, bgBottom);
+	{
+		int px = s->chestX - 4, py = s->chestY - 4;
+		int pw = cs * 9 + 8,    ph = s->hotbarY + cs - s->chestY + 8;
+		int b  = 8;
+		Gfx_Draw2DFlat(px, py, pw, ph, bgCol);
+		SurvGUI_DrawBorder(px, py, pw, ph, b);
+	}
 
 	/* Slot backgrounds */
 	for (i = 0; i < s->totalSlots; i++) {
 		ChestScr_GetSlotPos(s, i, &sx, &sy);
-		if (i == s->hoveredSlot) {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, hoverCol);
-		} else {
-			Gfx_Draw2DFlat(sx + 1, sy + 1, cs - 2, cs - 2, slotCol);
-		}
+		SurvGUI_DrawSlot(sx, sy, cs, i == s->hoveredSlot);
 	}
 
 	/* Build iso batch for slot contents */

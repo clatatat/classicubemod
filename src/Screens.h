@@ -55,5 +55,10 @@ void ChatScreen_AppendInput(const cc_string* text);
 /* Sets number of visible lines in the main chat widget. */
 void ChatScreen_SetChatlines(int lines);
 
+/* Registers texture pack entries for survival GUI slot textures (slot.png, slot_*.png). */
+void SurvGUI_RegisterTextures(void);
+/* Deletes GPU resources for survival GUI slot textures (call on context lost). */
+void SurvGUI_DeleteTextures(void);
+
 CC_END_HEADER
 #endif
