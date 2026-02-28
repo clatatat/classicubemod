@@ -876,6 +876,45 @@ static void RainPngProcess(struct Stream* stream, const cc_string* name) {
 }
 static struct TextureEntry rain_entry = { "rain.png", RainPngProcess };
 
+static GfxResourceID water_overlay_tex;
+static void WaterOverlayPngProcess(struct Stream* stream, const cc_string* name) {
+	Game_UpdateTexture(&water_overlay_tex, stream, name, NULL, NULL);
+}
+static struct TextureEntry water_overlay_entry = { "water.png", WaterOverlayPngProcess };
+
+/* Returns whether the camera is currently inside a water block */
+static cc_bool EnvRenderer_CameraInWater(void) {
+	IVec3 coords;
+	BlockID block;
+	IVec3_Floor(&coords, &Camera.CurrentPos);
+	block = World_SafeGetBlock(coords.x, coords.y, coords.z);
+	if (!Blocks.FogDensity[block]) return false;
+	if (!CameraInsideBlock(block, &coords)) return false;
+	return (Blocks.ExtendedCollide[block] == COLLIDE_WATER);
+}
+
+/* Draw2DHook: renders water.png as a fullscreen overlay when underwater */
+static void EnvRenderer_DrawUnderwaterOverlay(float delta) {
+	struct Texture tex;
+	if (!water_overlay_tex) return;
+	if (!World.Loaded) return;
+	if (!EnvRenderer_CameraInWater()) return;
+
+	tex.ID     = water_overlay_tex;
+	tex.x      = 0;
+	tex.y      = 0;
+	tex.width  = Game.Width;
+	tex.height = Game.Height;
+	tex.uv.u1  = 0.0f;
+	tex.uv.v1  = 0.0f;
+	tex.uv.u2  = 1.0f;
+	tex.uv.v2  = 1.0f;
+
+	Gfx_SetAlphaBlending(true);
+	Texture_RenderShaded(&tex, PackedCol_Make(255, 255, 255, 128));
+	Gfx_SetAlphaBlending(false);
+}
+
 
 static void DeleteSkyVB(void)     { Gfx_DeleteVb(&sky_vb); }
 static void DeleteCloudsVB(void)  { Gfx_DeleteVb(&clouds_vb); }
@@ -903,6 +942,7 @@ static void OnContextLost(void* obj) {
 	Gfx_DeleteTexture(&skybox_tex);
 	Gfx_DeleteTexture(&rain_tex);
 	Gfx_DeleteTexture(&snow_tex);
+	Gfx_DeleteTexture(&water_overlay_tex);
 }
 
 static void UpdateAll(void) {
@@ -998,6 +1038,10 @@ static void OnInit(void) {
 	TextureEntry_Register(&skybox_entry);
 	TextureEntry_Register(&snow_entry);
 	TextureEntry_Register(&rain_entry);
+	TextureEntry_Register(&water_overlay_entry);
+
+	/* Register underwater overlay as a 2D draw hook */
+	Game.Draw2DHooks[1] = EnvRenderer_DrawUnderwaterOverlay;
 
 	Event_Register_(&TextureEvents.PackChanged,  NULL, OnTexturePackChanged);
 	Event_Register_(&TextureEvents.AtlasChanged, NULL, OnTerrainAtlasChanged);
@@ -1014,6 +1058,7 @@ static void OnFree(void) {
 	OnContextLost(NULL);
 	Mem_Free(Weather_Heightmap);
 	Weather_Heightmap = NULL;
+	Game.Draw2DHooks[1] = NULL;
 }
 
 static void OnReset(void) {
