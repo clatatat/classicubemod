@@ -2750,12 +2750,12 @@ static void SurvInv_Layout(void* screen) {
 	s->armorX = baseX;
 	s->armorY = baseY;
 
-	/* Crafting 2x2: top right area (adjacent to armor) */
-	s->craftX = baseX + cs * 4;
+	/* Crafting 2x2: top right area */
+	s->craftX = baseX + cs * 5 - cs / 4;
 	s->craftY = baseY;
 
-	/* Output: to the right of crafting with extra gap for arrow */
-	s->outputX = s->craftX + cs * 4;
+	/* Output: to the right of crafting with gap for arrow */
+	s->outputX = s->craftX + cs * 3 + cs / 4;
 	s->outputY = s->craftY + cs / 2;
 
 	/* Main 3x9 grid */
@@ -2890,12 +2890,13 @@ static void SurvInv_Render(void* screen, float delta) {
 		SurvGUI_DrawSlot(sx, sy, cs, i == s->hoveredSlot);
 	}
 
-	/* Crafting arrow: between 2x2 grid and output slot (empty only, half-size) */
+	/* Crafting arrow: centered between 2x2 grid and output slot with small gaps */
 	{
 		int gapX   = s->craftX + cs * 2;
 		int gapW   = s->outputX - gapX;
-		int arrowW = gapW / 2;
-		int arrowX = gapX + (gapW - arrowW) / 2;
+		int pad    = cs / 6;
+		int arrowX = gapX + pad;
+		int arrowW = gapW - pad * 2;
 		int arrowH = (int)(arrowW / ARROW_ASPECT);
 		int arrowY = s->craftY + (cs * 2 - arrowH) / 2;
 		SurvGUI_DrawArrow(arrowX, arrowY, arrowW, 0.0f);
