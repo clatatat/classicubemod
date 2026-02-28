@@ -349,11 +349,15 @@ static void Adv_PropagateSkyLight(void) {
 				if (maxY >= World.Height) maxY = World.Height - 1;
 
 				for (y = minY; y <= maxY; y++) {
+					/* Verify the sky-column block at this level is actually transparent;
+					   solid blocks can get sky=15 from SHADES_FROM_BELOW heightmap offset
+					   and must not seed light through themselves */
+					if (!Adv_CanLightPass(World_GetBlock(x, y, z))) continue;
+
 					nb = World_GetBlock(nx, y, nz);
 					if (Adv_CanLightPass(nb)) {
 						nIdx = World_Pack(nx, y, nz);
 						if (adv_skylight[nIdx] < ADV_MAX_LEVEL - 1) {
-							adv_skylight[nIdx] = ADV_MAX_LEVEL - 1; /* mark immediately to prevent duplicate seeds */
 							entry.x = nx; entry.y = y; entry.z = nz;
 							entry.level = ADV_MAX_LEVEL - 1;
 							Queue_Enqueue(&adv_queue, &entry);
@@ -470,6 +474,9 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 			for (x = minX; x <= maxX; x++) {
 				idx = World_Pack(x, y, z);
 				if (adv_skylight[idx] != ADV_MAX_LEVEL) continue;
+				/* Only transparent sky blocks should seed neighbors;
+				   solid blocks can get sky=15 from SHADES_FROM_BELOW offset */
+				if (!Adv_CanLightPass(World_GetBlock(x, y, z))) continue;
 
 				for (d = 0; d < 6; d++) {
 					nx = x + adv_dirs[d][0];
@@ -503,6 +510,8 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 				idx = World_Pack(x, y, z);
 				sky = adv_skylight[idx];
 				if (sky <= 1) continue;
+				/* Don't seed from solid blocks that incorrectly have sky light */
+				if (!Adv_CanLightPass(World_GetBlock(x, y, z))) continue;
 
 				for (d = 0; d < 6; d++) {
 					nx = x + adv_dirs[d][0];
