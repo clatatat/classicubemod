@@ -43,7 +43,8 @@ const char* const ItemNames[ITEM_COUNT] = {
 	"Bowl", "Mushroom Stew", "Raw Pork", "Cooked Pork",
 	"Sulphur", "Feather", "String",
 	"Wood Hoe", "Stone Hoe", "Iron Hoe", "Diamond Hoe", "Gold Hoe",
-	"Seeds", "Wheat", "Bread"
+	"Seeds", "Wheat", "Bread",
+	"Bucket", "Water Bucket", "Lava Bucket"
 };
 
 const int ItemTextures[ITEM_COUNT] = {
@@ -63,7 +64,8 @@ const int ItemTextures[ITEM_COUNT] = {
 	71, 72, 87, 88,           /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
 	40, 24, 8,                /* 54-56: Sulphur, Feather, String */
 	128, 129, 130, 131, 132,  /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
-	9, 25, 41                 /* 62-64: Seeds, Wheat, Bread */
+	9, 25, 41,                 /* 62-64: Seeds, Wheat, Bread */
+	74, 75, 76                 /* 65-67: Bucket, Water Bucket, Lava Bucket */
 };
 
 const int ItemDamage[ITEM_COUNT] = {
@@ -83,7 +85,8 @@ const int ItemDamage[ITEM_COUNT] = {
 	1, 1, 1, 1,              /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
 	1, 1, 1,                 /* 54-56: Sulphur, Feather, String */
 	2, 4, 6, 8, 2,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
-	1, 1, 1                  /* 62-64: Seeds, Wheat, Bread */
+	1, 1, 1,                  /* 62-64: Seeds, Wheat, Bread */
+	1, 1, 1                   /* 65-67: Bucket, Water Bucket, Lava Bucket */
 };
 
 /* Armor defense points per item (matches vanilla Minecraft pre-1.9 values).
@@ -106,7 +109,8 @@ const int ItemArmorPoints[ITEM_COUNT] = {
 	0, 0, 0, 0,              /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
 	0, 0, 0,                 /* 54-56: Sulphur, Feather, String */
 	0, 0, 0, 0, 0,           /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
-	0, 0, 0                  /* 62-64: Seeds, Wheat, Bread */
+	0, 0, 0,                  /* 62-64: Seeds, Wheat, Bread */
+	0, 0, 0                   /* 65-67: Bucket, Water Bucket, Lava Bucket */
 };
 
 /* Max durability per item (0 = no durability / infinite).
@@ -128,7 +132,8 @@ const int ItemMaxDurability[ITEM_COUNT] = {
 	0, 0, 0, 0,                 /* 50-53: Bowl, Mushroom Stew, Raw Pork, Cooked Pork */
 	0, 0, 0,                    /* 54-56: Sulphur, Feather, String */
 	0, 0, 0, 0, 0,              /* 57-61: Hoes (infinite) */
-	0, 0, 0                     /* 62-64: Seeds, Wheat, Bread */
+	0, 0, 0,                     /* 62-64: Seeds, Wheat, Bread */
+	0, 0, 0                      /* 65-67: Bucket, Water Bucket, Lava Bucket */
 };
 
 int Item_MaxStackSize(int itemId) {
@@ -147,6 +152,10 @@ int Item_MaxStackSize(int itemId) {
 	if (itemId >= 57 && itemId <= 61) return 1; /* Hoes */
 	if (itemId == ITEM_BOW)        return 1;
 	if (itemId == ITEM_FLINT_STEEL) return 1;
+	/* Buckets: not stackable */
+	if (itemId == ITEM_BUCKET)       return 1;
+	if (itemId == ITEM_WATER_BUCKET) return 1;
+	if (itemId == ITEM_LAVA_BUCKET)  return 1;
 	/* Food: not stackable */
 	if (itemId == 51) return 1; /* Mushroom Stew */
 	if (itemId == 52) return 1; /* Raw Pork */
@@ -601,6 +610,10 @@ static const struct CraftRecipe craftRecipes[] = {
 	/* Bowl: 3 Planks in V shape (3x2) -> 4 Bowls */
 	{ 3, 2, { CB(BLOCK_WOOD), 0, CB(BLOCK_WOOD),
 	           0, CB(BLOCK_WOOD), 0, 0,0,0 }, BLOCK_AIR, ITEM_BOWL, 4 },
+
+	/* Bucket: 3 Iron Ingots in V shape (3x2) -> 1 Bucket */
+	{ 3, 2, { CI(ITEM_IRON_INGOT), 0, CI(ITEM_IRON_INGOT),
+	           0, CI(ITEM_IRON_INGOT), 0, 0,0,0 }, BLOCK_AIR, ITEM_BUCKET, 1 },
 
 	/* Bread: 3 Wheat in a row (3x1) */
 	{ 3, 1, { CI(ITEM_WHEAT), CI(ITEM_WHEAT), CI(ITEM_WHEAT), 0,0,0,0,0,0 }, BLOCK_AIR, ITEM_BREAD, 1 },

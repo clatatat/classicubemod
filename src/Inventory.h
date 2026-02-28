@@ -64,7 +64,7 @@ void Inventory_AddDefault(BlockID block);
 void Inventory_Remove(BlockID block);
 
 /* =========================== Item system =========================== */
-#define ITEM_COUNT 65
+#define ITEM_COUNT 68
 #define ITEM_NONE 0
 
 /* Named item IDs */
@@ -112,6 +112,9 @@ void Inventory_Remove(BlockID block);
 #define ITEM_SEEDS         62
 #define ITEM_WHEAT         63
 #define ITEM_BREAD         64
+#define ITEM_BUCKET        65
+#define ITEM_WATER_BUCKET  66
+#define ITEM_LAVA_BUCKET   67
 
 /* Item names indexed by item ID (0 = Air) */
 extern const char* const ItemNames[ITEM_COUNT];

@@ -434,8 +434,7 @@ static void Physics_HandleSnow(int index, BlockID block) {
 		if (neighbor != BLOCK_AIR) return; /* Has support */
 	}
 	
-	/* No support - break the snow */
-	Physics_DropBlock(x, y, z, BLOCK_SNOW);
+	/* No support - snow disappears without dropping (only drops when broken by shovel) */
 	Game_UpdateBlock(x, y, z, BLOCK_AIR);
 	Physics_ActivateNeighbours(x, y, z, index);
 }
@@ -2715,6 +2714,54 @@ static void Physics_HandleMushroom(int index, BlockID block) {
 	}
 }
 
+/* OnActivate handler for flowers (dandelion, rose) - check ground support */
+static void Physics_HandleFlowerActivate(int index, BlockID block) {
+	BlockID below;
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+
+	below = BLOCK_DIRT;
+	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS || below == BLOCK_FARMLAND_DRY || below == BLOCK_FARMLAND_WET) return;
+
+	/* No support - break and drop */
+	Physics_DropBlock(x, y, z, block);
+	Game_UpdateBlock(x, y, z, BLOCK_AIR);
+	Physics_ActivateNeighbours(x, y, z, index);
+}
+
+/* OnActivate handler for mushrooms (red, brown) - check ground support */
+static void Physics_HandleMushroomActivate(int index, BlockID block) {
+	BlockID below;
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+
+	below = BLOCK_STONE;
+	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (below == BLOCK_STONE || below == BLOCK_COBBLE) return;
+
+	/* No support - break and drop */
+	Physics_DropBlock(x, y, z, block);
+	Game_UpdateBlock(x, y, z, BLOCK_AIR);
+	Physics_ActivateNeighbours(x, y, z, index);
+}
+
+/* OnActivate handler for saplings - check ground support */
+static void Physics_HandleSaplingActivate(int index, BlockID block) {
+	BlockID below;
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+
+	below = BLOCK_AIR;
+	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS) return;
+
+	/* No support - break and drop */
+	Physics_DropBlock(x, y, z, block);
+	Game_UpdateBlock(x, y, z, BLOCK_AIR);
+	Physics_ActivateNeighbours(x, y, z, index);
+}
+
 
 /*########################################################################################################################*
 *-----------------------------------------------Finite Liquid Physics-----------------------------------------------------*
@@ -3976,6 +4023,13 @@ void Physics_Init(void) {
 	Physics.OnRandomTick[BLOCK_ROSE]         = Physics_HandleFlower;
 	Physics.OnRandomTick[BLOCK_RED_SHROOM]   = Physics_HandleMushroom;
 	Physics.OnRandomTick[BLOCK_BROWN_SHROOM] = Physics_HandleMushroom;
+
+	/* Flowers, mushrooms, saplings: check ground support on neighbor changes */
+	Physics.OnActivate[BLOCK_DANDELION]    = Physics_HandleFlowerActivate;
+	Physics.OnActivate[BLOCK_ROSE]         = Physics_HandleFlowerActivate;
+	Physics.OnActivate[BLOCK_RED_SHROOM]   = Physics_HandleMushroomActivate;
+	Physics.OnActivate[BLOCK_BROWN_SHROOM] = Physics_HandleMushroomActivate;
+	Physics.OnActivate[BLOCK_SAPLING]      = Physics_HandleSaplingActivate;
 
 	Physics_RegisterLiquidHandlers();
 

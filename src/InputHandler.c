@@ -791,15 +791,25 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 				DropItem_ApplyRandomMomentum(slot);
 			}
 		} else if (old == BLOCK_COAL_ORE) {
-			/* Coal ore drops 1-3 coal items */
-			int count = Random_Next(&mob_rng, 3) + 1;
-			slot = DropItem_FindFreeSlot();
-			if (slot == -1) slot = DropItem_EvictOldest();
-			if (slot != -1) {
-				DropItem_Spawn(slot, dropPos, BLOCK_AIR, true, ITEM_COAL);
-				droppedItemCount[slot] = count;
-				droppedItemPickupDelay[slot] = 0.0f;
-				DropItem_ApplyRandomMomentum(slot);
+			/* Coal ore: gold pickaxe drops coal ore block, otherwise 1-3 coal items */
+			if (toolType == TOOL_PICKAXE && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_COAL_ORE, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else {
+				int count = Random_Next(&mob_rng, 3) + 1;
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_AIR, true, ITEM_COAL);
+					droppedItemCount[slot] = count;
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
 			}
 		} else if (old == BLOCK_DIAMOND_ORE) {
 			/* Diamond ore drops 1 diamond item */
@@ -849,6 +859,25 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 				if (slot == -1) slot = DropItem_EvictOldest();
 				if (slot != -1) {
 					DropItem_Spawn(slot, dropPos, BLOCK_GRASS, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			} else {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_DIRT, false, 0);
+					droppedItemPickupDelay[slot] = 0.0f;
+					DropItem_ApplyRandomMomentum(slot);
+				}
+			}
+		} else if (old == BLOCK_SNOWY_GRASS) {
+			/* Snowy grass: drop snowy grass with golden shovel, otherwise dirt */
+			if (toolType == TOOL_SHOVEL && toolTier == TIER_GOLD) {
+				slot = DropItem_FindFreeSlot();
+				if (slot == -1) slot = DropItem_EvictOldest();
+				if (slot != -1) {
+					DropItem_Spawn(slot, dropPos, BLOCK_SNOWY_GRASS, false, 0);
 					droppedItemPickupDelay[slot] = 0.0f;
 					DropItem_ApplyRandomMomentum(slot);
 				}
@@ -1166,8 +1195,9 @@ static void InputHandler_DeleteBlock(void) {
 	BlockID old;
 	float breakTime;
 
-	/* Try to punch a mob first (empty hand or holding item) */
-	if (Inventory_SelectedBlock == BLOCK_AIR || Hotbar_SelectedItem != ITEM_NONE) {
+	/* Try to punch a mob first (empty hand, holding item, or holding block in survival no-cheats) */
+	if (Inventory_SelectedBlock == BLOCK_AIR || Hotbar_SelectedItem != ITEM_NONE ||
+	    (Game_SurvivalMode && !Player_CheatsEnabled)) {
 		if (Mob_TryPunchMob()) return;
 	}
 
@@ -1400,6 +1430,89 @@ static void InputHandler_PlaceBlock(void) {
 		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_FIRE);
 		{ int ignVol = (int)(Audio_SoundsVolume * 1.5f); if (ignVol > 100) ignVol = 100; Audio_PlayDigSoundRateVolume(SOUND_IGNITE, 100, ignVol); }
 		Item_DamageSelectedTool();
+		return;
+	}
+
+	/* Bucket: pick up water/lava source blocks (only when finite liquids enabled) */
+	if (Hotbar_SelectedItem == ITEM_BUCKET && Physics.FiniteLiquid) {
+		/* Liquids aren't pickable by normal raycasting, so walk along the view ray manually */
+		struct Entity* pe = &Entities.CurPlayer->Base;
+		Vec3 eyePos = Entity_GetEyePosition(pe);
+		Vec3 dir    = Vec3_GetDirVector(pe->Yaw * MATH_DEG2RAD, pe->Pitch * MATH_DEG2RAD);
+		float reach = Entities.CurPlayer->ReachDistance;
+		float t;
+		int prevX = -9999, prevY = -9999, prevZ = -9999;
+
+		for (t = 0.0f; t <= reach; t += 0.1f) {
+			int bx = (int)Math_Floor(eyePos.x + dir.x * t);
+			int by = (int)Math_Floor(eyePos.y + dir.y * t);
+			int bz = (int)Math_Floor(eyePos.z + dir.z * t);
+			BlockID b;
+			cc_bool isWater, isLava;
+
+			/* Skip duplicate cells */
+			if (bx == prevX && by == prevY && bz == prevZ) continue;
+			prevX = bx; prevY = by; prevZ = bz;
+
+			if (!World_Contains(bx, by, bz)) continue;
+			b = World_GetBlock(bx, by, bz);
+
+			/* Stop if we hit a solid block before finding liquid */
+			if (Game_CanPick(b)) break;
+
+			isWater = (b == BLOCK_WATER || b == BLOCK_STILL_WATER);
+			isLava  = (b == BLOCK_LAVA  || b == BLOCK_STILL_LAVA);
+			if (isWater || isLava) {
+				int packIdx = World_Pack(bx, by, bz);
+				if (Physics.FlowLevels && Physics.FlowLevels[packIdx] == 0) {
+					/* Remove the source block (no event to avoid break particles) */
+					Game_ChangeBlock(bx, by, bz, BLOCK_AIR);
+					/* Convert empty bucket to water/lava bucket */
+					Hotbar_SetItem(Inventory.SelectedIndex, isWater ? ITEM_WATER_BUCKET : ITEM_LAVA_BUCKET);
+					return;
+				}
+			}
+		}
+		return;
+	}
+
+	/* Water bucket: place water source (only when finite liquids enabled) */
+	if (Hotbar_SelectedItem == ITEM_WATER_BUCKET && Physics.FiniteLiquid) {
+		pos = Game_SelectedPos.translatedPos;
+		if (!Game_SelectedPos.valid || !World_Contains(pos.x, pos.y, pos.z)) return;
+
+		old = World_GetBlock(pos.x, pos.y, pos.z);
+		if (Game_CanPick(old)) return;
+
+		Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_WATER);
+		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_WATER);
+		/* Set flow level to 0 (source) */
+		if (Physics.FlowLevels) {
+			int packIdx = World_Pack(pos.x, pos.y, pos.z);
+			Physics.FlowLevels[packIdx] = 0;
+		}
+		/* Convert water bucket back to empty bucket */
+		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_BUCKET);
+		return;
+	}
+
+	/* Lava bucket: place lava source (only when finite liquids enabled) */
+	if (Hotbar_SelectedItem == ITEM_LAVA_BUCKET && Physics.FiniteLiquid) {
+		pos = Game_SelectedPos.translatedPos;
+		if (!Game_SelectedPos.valid || !World_Contains(pos.x, pos.y, pos.z)) return;
+
+		old = World_GetBlock(pos.x, pos.y, pos.z);
+		if (Game_CanPick(old)) return;
+
+		Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_LAVA);
+		Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_LAVA);
+		/* Set flow level to 0 (source) */
+		if (Physics.FlowLevels) {
+			int packIdx = World_Pack(pos.x, pos.y, pos.z);
+			Physics.FlowLevels[packIdx] = 0;
+		}
+		/* Convert lava bucket back to empty bucket */
+		Hotbar_SetItem(Inventory.SelectedIndex, ITEM_BUCKET);
 		return;
 	}
 
@@ -5198,9 +5311,13 @@ void Mob_RemoveAllMobs(void) {
 static cc_bool Mob_TryPunchMob(void) {
 	struct Entity* p = &Entities.CurPlayer->Base;
 	int targetId, damage, itemId;
+	cc_bool holdingBlock = (Inventory_SelectedBlock != BLOCK_AIR && Hotbar_SelectedItem == ITEM_NONE);
 
-	/* Can attack with empty hand or while holding an item (not a block) */
-	if (Inventory_SelectedBlock != BLOCK_AIR && Hotbar_SelectedItem == ITEM_NONE) return false;
+	/* In survival with cheats disabled, allow punching mobs even with a block in hand */
+	/* Otherwise, can only attack with empty hand or while holding an item (not a block) */
+	if (holdingBlock) {
+		if (!(Game_SurvivalMode && !Player_CheatsEnabled)) return false;
+	}
 
 	targetId = Entities_GetClosest(p);
 	if (targetId < 0 || !Mob_IsMob(targetId)) return false;
@@ -5221,19 +5338,26 @@ static cc_bool Mob_TryPunchMob(void) {
 	HeldBlockRenderer_ClickAnim(true);
 
 	/* Determine damage from held item */
-	itemId = Hotbar_SelectedItem;
-	if (itemId > ITEM_NONE && itemId < ITEM_COUNT) {
-		damage = ItemDamage[itemId];
-		if (damage <= 0) damage = ITEM_BARE_HAND_DAMAGE;
+	if (holdingBlock) {
+		/* Punching with a block in hand always does 1 damage */
+		damage = 1;
 	} else {
-		/* Creative mode: instant kill with bare hand */
-		damage = Game_SurvivalMode ? ITEM_BARE_HAND_DAMAGE : 100;
+		itemId = Hotbar_SelectedItem;
+		if (itemId > ITEM_NONE && itemId < ITEM_COUNT) {
+			damage = ItemDamage[itemId];
+			if (damage <= 0) damage = ITEM_BARE_HAND_DAMAGE;
+		} else {
+			/* Creative mode: instant kill with bare hand */
+			damage = Game_SurvivalMode ? ITEM_BARE_HAND_DAMAGE : 100;
+		}
 	}
 
 	Mob_DamageMob(targetId, damage, true);
 	/* Swords lose 1 durability per hit landed */
-	{ int _t, _r; GetToolInfo(Hotbar_SelectedItem, &_t, &_r);
-	  if (_t == TOOL_SWORD) Item_DamageSelectedTool(); }
+	if (!holdingBlock) {
+		int _t, _r; GetToolInfo(Hotbar_SelectedItem, &_t, &_r);
+		if (_t == TOOL_SWORD) Item_DamageSelectedTool();
+	}
 	return true;
 }
 

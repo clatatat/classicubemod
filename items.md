@@ -65,3 +65,6 @@ ID      Item Name            Texture (items.png)
 62      Seeds                9                      1
 63      Wheat                25                     1
 64      Bread                41                     1
+65      Bucket               74                     1
+66      Water Bucket         75                     1
+67      Lava Bucket          76                     1
