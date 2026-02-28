@@ -2445,11 +2445,12 @@ static void Physics_HandleDirt(int index, BlockID block) {
 
 	if (!Gen_Themes[Gen_Theme].dirtToGrass) return;
 
-	/* Don't grow grass if water or lava is above */
+	/* Don't grow grass if water, lava, ice, or glass is above */
 	if (y + 1 < World.Height) {
 		above = World_GetBlock(x, y + 1, z);
 		if (above == BLOCK_WATER || above == BLOCK_STILL_WATER) return;
 		if (above == BLOCK_LAVA  || above == BLOCK_STILL_LAVA)  return;
+		if (above == BLOCK_ICE || above == BLOCK_GLASS) return;
 	}
 
 	if (Lighting.IsLit(x, y, z)) {
@@ -2466,12 +2467,16 @@ static void Physics_HandleGrass(int index, BlockID block) {
 	if (y + 1 < World.Height) {
 		above = World_GetBlock(x, y + 1, z);
 
-		/* Water and lava kill grass immediately */
+		/* Water, lava, and ice kill grass immediately */
 		if (above == BLOCK_WATER || above == BLOCK_STILL_WATER ||
-		    above == BLOCK_LAVA  || above == BLOCK_STILL_LAVA) {
+		    above == BLOCK_LAVA  || above == BLOCK_STILL_LAVA ||
+		    above == BLOCK_ICE) {
 			Game_UpdateBlock(x, y, z, BLOCK_DIRT);
 			return;
 		}
+
+		/* Don't decay under glass (transparent but blocks light growth) */
+		if (above == BLOCK_GLASS) return;
 
 		/* Don't decay under snow, snow blocks, or doors (they're transparent/decorative) */
 		if (above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK) return;
@@ -2523,9 +2528,10 @@ static void Physics_HandleSnowyGrass(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 	if (y + 1 >= World.Height) return;
 	above = World_GetBlock(x, y + 1, z);
-	/* Water and lava kill snowy grass to dirt */
+	/* Water, lava, and ice kill snowy grass to dirt */
 	if (above == BLOCK_WATER || above == BLOCK_STILL_WATER ||
-	    above == BLOCK_LAVA  || above == BLOCK_STILL_LAVA) {
+	    above == BLOCK_LAVA  || above == BLOCK_STILL_LAVA ||
+	    above == BLOCK_ICE) {
 		Game_UpdateBlock(x, y, z, BLOCK_DIRT);
 		return;
 	}

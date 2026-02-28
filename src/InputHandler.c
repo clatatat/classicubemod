@@ -872,12 +872,12 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 				}
 			}
 		} else if (old == BLOCK_SNOWY_GRASS) {
-			/* Snowy grass: drop snowy grass with golden shovel, otherwise dirt */
+			/* Snowy grass is a variant of grass: golden shovel drops grass, otherwise dirt */
 			if (toolType == TOOL_SHOVEL && toolTier == TIER_GOLD) {
 				slot = DropItem_FindFreeSlot();
 				if (slot == -1) slot = DropItem_EvictOldest();
 				if (slot != -1) {
-					DropItem_Spawn(slot, dropPos, BLOCK_SNOWY_GRASS, false, 0);
+					DropItem_Spawn(slot, dropPos, BLOCK_GRASS, false, 0);
 					droppedItemPickupDelay[slot] = 0.0f;
 					DropItem_ApplyRandomMomentum(slot);
 				}
@@ -1731,6 +1731,47 @@ static void InputHandler_PlaceBlock(void) {
 		
 		/* Can only place on solid opaque blocks */
 		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
+	}
+	
+	/* Snow requires a solid block below */
+	if (block == BLOCK_SNOW) {
+		BlockID below;
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
+	}
+	
+	/* Pressure plates require a solid block below */
+	if (block == BLOCK_PRESSURE_PLATE || block == BLOCK_STONE_PLATE) {
+		BlockID below;
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
+	}
+	
+	/* Flowers require dirt or grass below */
+	if (block == BLOCK_DANDELION || block == BLOCK_ROSE) {
+		BlockID below;
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		if (!(below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS ||
+		      below == BLOCK_FARMLAND_DRY || below == BLOCK_FARMLAND_WET)) return;
+	}
+	
+	/* Mushrooms require stone or cobble below */
+	if (block == BLOCK_RED_SHROOM || block == BLOCK_BROWN_SHROOM) {
+		BlockID below;
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		if (!(below == BLOCK_STONE || below == BLOCK_COBBLE)) return;
+	}
+	
+	/* Saplings require dirt or grass below */
+	if (block == BLOCK_SAPLING) {
+		BlockID below;
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		if (!(below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS)) return;
 	}
 	
 	/* Door placement requires space above for door top and determines orientation from player yaw */
