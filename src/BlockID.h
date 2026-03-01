@@ -86,6 +86,7 @@ enum BLOCKID {
 	/* Survival blocks (player-placeable, above CPE range) */
 	BLOCK_SIGN_WALL = 72, /* Wall-mounted wooden sign (orientation from directional cache) */
 	BLOCK_SIGN_FLOOR = 73, /* Floor-mounted sign post (16-angle rotation stored in SignData) */
+	BLOCK_RAIL = 74, /* Minecart rail - connects to adjacent rails, curves at corners */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,

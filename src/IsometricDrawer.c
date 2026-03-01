@@ -76,6 +76,7 @@ static int GetItemTexForBlock(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST)    return 56;
 	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
 	if (block == BLOCK_IRON_DOOR)       return 44;
+	if (block == BLOCK_RAIL)            return 57;
 	return -1;
 }
 

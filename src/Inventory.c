@@ -569,6 +569,11 @@ static const struct CraftRecipe craftRecipes[] = {
 	           CI(ITEM_STICK), CI(ITEM_STICK), CI(ITEM_STICK),
 	           CI(ITEM_STICK), 0,              CI(ITEM_STICK) }, BLOCK_LADDER, ITEM_NONE, 1 },
 
+	/* Rail: 6 Iron Ingots + 1 Stick (3x3) -> 16 Rails */
+	{ 3, 3, { CI(ITEM_IRON_INGOT), 0,              CI(ITEM_IRON_INGOT),
+	           CI(ITEM_IRON_INGOT), CI(ITEM_STICK), CI(ITEM_IRON_INGOT),
+	           CI(ITEM_IRON_INGOT), 0,              CI(ITEM_IRON_INGOT) }, BLOCK_RAIL, ITEM_NONE, 16 },
+
 	/* TNT: Checkerboard of Sulphur and Sand (3x3) */
 	{ 3, 3, { CI(ITEM_SULPHUR), CB(BLOCK_SAND), CI(ITEM_SULPHUR),
 	           CB(BLOCK_SAND), CI(ITEM_SULPHUR), CB(BLOCK_SAND),
@@ -1506,6 +1511,79 @@ void Container_LoadFromFile(const cc_string* path) {
 *#########################################################################################################################*/
 static void OnReset(void) {
 	Inventory_ResetMapping();
+
+	/* Remove door tops and other non-placeable blocks from inventory */
+	Inventory_Remove(BLOCK_DOOR_NS_TOP);
+	Inventory_Remove(BLOCK_DOOR_EW_TOP);
+	Inventory_Remove(BLOCK_DOOR_EW_BOTTOM);
+	Inventory_Remove(BLOCK_LIT_RED_ORE_DUST);
+	Inventory_Remove(BLOCK_RED_ORE_TORCH_OFF);
+	/* Remove all wall torch variants (player places generic torch, code picks variant) */
+	Inventory_Remove(BLOCK_RED_TORCH_ON_S);
+	Inventory_Remove(BLOCK_RED_TORCH_ON_N);
+	Inventory_Remove(BLOCK_RED_TORCH_ON_E);
+	Inventory_Remove(BLOCK_RED_TORCH_ON_W);
+	Inventory_Remove(BLOCK_RED_TORCH_OFF_S);
+	Inventory_Remove(BLOCK_RED_TORCH_OFF_N);
+	Inventory_Remove(BLOCK_RED_TORCH_OFF_E);
+	Inventory_Remove(BLOCK_RED_TORCH_OFF_W);
+	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED);
+	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED_OFF);
+	
+	/* Remove pressed button from inventory (non-placeable, auto-placed by physics) */
+	Inventory_Remove(BLOCK_BUTTON_PRESSED);
+	
+	/* Remove lever ON from inventory (toggled by right-click, not placeable) */
+	Inventory_Remove(BLOCK_LEVER_ON);
+	
+	/* Remove pressed pressure plate from inventory (auto-placed by physics) */
+	Inventory_Remove(BLOCK_PRESSURE_PLATE_PRESSED);
+	
+	/* Remove pressed stone pressure plate from inventory (auto-placed by physics) */
+	Inventory_Remove(BLOCK_STONE_PLATE_PRESSED);
+	
+	/* Remove iron door variants from inventory (auto-placed by physics/redstone) */
+	Inventory_Remove(BLOCK_IRON_DOOR_NS_TOP);
+	Inventory_Remove(BLOCK_IRON_DOOR_EW_BOTTOM);
+	Inventory_Remove(BLOCK_IRON_DOOR_EW_TOP);
+	Inventory_Remove(BLOCK_IRON_DOOR_NS_OPEN_BOTTOM);
+	Inventory_Remove(BLOCK_IRON_DOOR_NS_OPEN_TOP);
+	Inventory_Remove(BLOCK_IRON_DOOR_EW_OPEN_BOTTOM);
+	Inventory_Remove(BLOCK_IRON_DOOR_EW_OPEN_TOP);
+	
+	/* Remove double chest variants from inventory (auto-placed) */
+	Inventory_Remove(BLOCK_DCHEST_S_L);
+	Inventory_Remove(BLOCK_DCHEST_S_R);
+	Inventory_Remove(BLOCK_DCHEST_N_L);
+	Inventory_Remove(BLOCK_DCHEST_N_R);
+	Inventory_Remove(BLOCK_DCHEST_E_L);
+	Inventory_Remove(BLOCK_DCHEST_E_R);
+	Inventory_Remove(BLOCK_DCHEST_W_L);
+	Inventory_Remove(BLOCK_DCHEST_W_R);
+
+	/* Remove shadow ceiling from inventory (auto-placed during hell theme generation) */
+	Inventory_Remove(BLOCK_SHADOW_CEILING);
+
+	/* Remove snowy grass from inventory (auto-placed when snow is on top of grass) */
+	Inventory_Remove(BLOCK_SNOWY_GRASS);
+
+	/* Remove farmland from inventory (created by hoeing dirt/grass) */
+	Inventory_Remove(BLOCK_FARMLAND_DRY);
+	Inventory_Remove(BLOCK_FARMLAND_WET);
+
+	/* Remove wheat stages from inventory (grown on farmland) */
+	{ int i; for (i = BLOCK_WHEAT_0; i <= BLOCK_WHEAT_7; i++) Inventory_Remove(i); }
+
+	/* Add sign blocks to inventory (IDs above CPE range) */
+	Inventory_AddDefault(BLOCK_SIGN_WALL);
+	Inventory_AddDefault(BLOCK_SIGN_FLOOR);
+
+	/* Add portal to inventory */
+	Inventory_AddDefault(BLOCK_PORTAL);
+
+	/* Add survival-mode blocks to inventory (IDs above CPE range) */
+	Inventory_AddDefault(BLOCK_RAIL);
+
 	Inventory.CanChangeSelected = true;
 	Mem_Set(HotbarItems, 0, sizeof(HotbarItems));
 }

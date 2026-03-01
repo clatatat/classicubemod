@@ -40,6 +40,7 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 
 #define IsLeverBlock(b) ((b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON)
 #define IsCropBlock(b)  ((b) >= BLOCK_WHEAT_0 && (b) <= BLOCK_WHEAT_7)
+#define IsRailBlock(b)  ((b) == BLOCK_RAIL)
 
 static BlockID* Builder_Chunk;
 static cc_uint8* Builder_Counts;
@@ -1393,6 +1394,96 @@ static cc_bool HasSnowAbove(int x, int y, int z) {
 	return above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK;
 }
 
+/* UV rotation table for rail YMAX face rendering.
+   4 rotations x 4 vertices, each entry is {u_select, v_select}
+   where 0 = min (u1/v1), 1 = max (u2/v2).
+   Vertex order: NE(x+,z-), NW(x-,z-), SW(x-,z+), SE(x+,z+)
+   Each step rotates the texture image 90 degrees CCW. */
+static const cc_uint8 railUV[4][4][2] = {
+	/* 0°:       N-S straight or S-E curve (default orientation) */
+	{ {1,0}, {0,0}, {0,1}, {1,1} },
+	/* 90° CCW:  E-W straight or N-E curve */
+	{ {1,1}, {1,0}, {0,0}, {0,1} },
+	/* 180°:     N-W curve */
+	{ {0,1}, {1,1}, {1,0}, {0,0} },
+	/* 270° CCW: S-W curve */
+	{ {0,0}, {0,1}, {1,1}, {1,0} },
+};
+
+/* Draws a rail block as a flat quad on the YMAX face with UV rotation
+   based on neighboring rail connections. */
+static void Builder_DrawRail(int index, int x, int y, int z) {
+	struct Builder1DPart* part;
+	struct VertexTextured* v;
+	PackedCol col;
+	int encoded, rotation;
+	TextureLoc loc;
+	float vOrigin, u1, u2, v1, v2;
+	float x1, x2, y2, z1, z2;
+	int count_YMax, lightFlags, offset, baseOffset;
+	
+	count_YMax = Builder_Counts[index + FACE_YMAX];
+	if (!count_YMax) return;
+	
+	/* Get the texture and rotation from rail connection logic */
+	encoded  = Rail_GetTextureAndRotation(x, y, z, FACE_YMAX);
+	loc      = (TextureLoc)(encoded >> 2);
+	rotation = encoded & 3;
+	
+	/* Calculate UV coordinates from atlas */
+	vOrigin = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
+	u1 = 0;
+	u2 = UV2_Scale;
+	v1 = vOrigin;
+	v2 = vOrigin + Atlas1D.InvTileSize * UV2_Scale;
+	
+	/* Calculate world positions */
+	lightFlags = Blocks.LightOffset[Builder_Block];
+	baseOffset = (Blocks.Draw[Builder_Block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
+	
+	x1 = (float)x;
+	x2 = (float)x + 1.0f;
+	y2 = (float)y + Blocks.MaxBB[Builder_Block].y;
+	z1 = (float)z;
+	z2 = (float)z + 1.0f;
+	
+	offset = (lightFlags >> FACE_YMAX) & 1;
+	col    = Lighting.Color_YMax_Fast(x, y + offset, z);
+	
+	part = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
+	v = part->faces.vertices[FACE_YMAX];
+	
+	/* Emit 4 vertices with rotated UVs:
+	   Vertex order matches Drawer_YMax: NE, NW, SW, SE */
+	{
+		float uvals[2], vvals[2];
+		uvals[0] = u1; uvals[1] = u2;
+		vvals[0] = v1; vvals[1] = v2;
+		
+		/* NE corner (x+, z-) */
+		v->x = x2; v->y = y2; v->z = z1; v->Col = col;
+		v->U = uvals[railUV[rotation][0][0]];
+		v->V = vvals[railUV[rotation][0][1]]; v++;
+		
+		/* NW corner (x-, z-) */
+		v->x = x1; v->y = y2; v->z = z1; v->Col = col;
+		v->U = uvals[railUV[rotation][1][0]];
+		v->V = vvals[railUV[rotation][1][1]]; v++;
+		
+		/* SW corner (x-, z+) */
+		v->x = x1; v->y = y2; v->z = z2; v->Col = col;
+		v->U = uvals[railUV[rotation][2][0]];
+		v->V = vvals[railUV[rotation][2][1]]; v++;
+		
+		/* SE corner (x+, z+) */
+		v->x = x2; v->y = y2; v->z = z2; v->Col = col;
+		v->U = uvals[railUV[rotation][3][0]];
+		v->V = vvals[railUV[rotation][3][1]]; v++;
+	}
+	
+	part->faces.vertices[FACE_YMAX] = v;
+}
+
 static cc_bool Normal_CanStretch(BlockID initial, int chunkIndex, int x, int y, int z, Face face) {
 	BlockID cur = Builder_Chunk[chunkIndex];
 
@@ -1500,6 +1591,11 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 
 	if (Builder_IsFiniteLiquid(Builder_Block)) {
 		Builder_RenderFiniteLiquid(index, x, y, z); return;
+	}
+
+	/* Rails use custom rendering with UV rotation for the top face */
+	if (IsRailBlock(Builder_Block)) {
+		Builder_DrawRail(index, x, y, z); return;
 	}
 
 	count_XMin = Builder_Counts[index + FACE_XMIN];
@@ -2099,6 +2195,11 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 		Builder_RenderFiniteLiquid(index, x, y, z); return;
 	}
 
+	/* Rails use custom rendering with UV rotation for the top face */
+	if (IsRailBlock(Builder_Block)) {
+		Builder_DrawRail(index, x, y, z); return;
+	}
+
 	count_XMin = Builder_Counts[index + FACE_XMIN];
 	count_XMax = Builder_Counts[index + FACE_XMAX];
 	count_ZMin = Builder_Counts[index + FACE_ZMIN];
@@ -2486,6 +2587,11 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 
 	if (Builder_IsFiniteLiquid(Builder_Block)) {
 		Builder_RenderFiniteLiquid(index, x, y, z); return;
+	}
+
+	/* Rails use custom rendering with UV rotation for the top face */
+	if (IsRailBlock(Builder_Block)) {
+		Builder_DrawRail(index, x, y, z); return;
 	}
 
 	count_XMin = Builder_Counts[index + FACE_XMIN];

@@ -596,6 +596,8 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block == BLOCK_RED_SHROOM)   return 0.0f;
 	/* Wheat crops */
 	if (block >= BLOCK_WHEAT_0 && block <= BLOCK_WHEAT_7) return 0.0f;
+	/* Rail */
+	if (block == BLOCK_RAIL) return 0.5f;
 
 	if (block == BLOCK_OBSIDIAN)     return 50.0f;
 	if (block == BLOCK_IRON)         return 5.0f;
@@ -1125,6 +1127,7 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 			above == BLOCK_LIT_RED_ORE_DUST ||
 			above == BLOCK_PRESSURE_PLATE || above == BLOCK_PRESSURE_PLATE_PRESSED ||
 			above == BLOCK_STONE_PLATE || above == BLOCK_STONE_PLATE_PRESSED ||
+			above == BLOCK_RAIL ||
 			(above >= BLOCK_WHEAT_0 && above <= BLOCK_WHEAT_7)) {
 			IVec3 abovePos;
 			abovePos.x = pos.x; abovePos.y = pos.y + 1; abovePos.z = pos.z;
@@ -1853,6 +1856,16 @@ static void InputHandler_PlaceBlock(void) {
 		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
 		
 		/* Can only place on solid opaque blocks */
+		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
+	}
+	
+	/* Rails require a solid block below to rest on */
+	if (block == BLOCK_RAIL) {
+		BlockID below;
+		
+		if (!World_Contains(pos.x, pos.y - 1, pos.z)) return;
+		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
+		
 		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
 	}
 	
@@ -3172,6 +3185,7 @@ static int DropItem_GetItemTex(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST)    return 56;
 	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
 	if (block == BLOCK_IRON_DOOR)       return 44;
+	if (block == BLOCK_RAIL)            return 57;
 	return -1;
 }
 

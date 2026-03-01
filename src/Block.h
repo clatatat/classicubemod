@@ -159,5 +159,10 @@ cc_uint8 DirectionalBlock_GetFacing(int x, int y, int z);
    facing: 0=attached z+1, 1=attached z-1, 2=attached x+1, 3=attached x-1, 4=ground, 255=no hint */
 void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
 
+/* Get rail texture and rotation for a specific face at a world position.
+   Returns encoded value: (textureLoc << 2) | rotation
+   rotation: 0=0deg, 1=90CW, 2=180, 3=270CW */
+int Rail_GetTextureAndRotation(int x, int y, int z, Face face);
+
 CC_END_HEADER
 #endif

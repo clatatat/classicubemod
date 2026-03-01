@@ -76,6 +76,7 @@ static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef portal_def = {"Portal", 127, 127, 127, 16, PackedCol_Make(0,0,0,255), 127, BRIT_FULL, true, 100, DRAW_OPAQUE, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
+static const struct SimpleBlockDef rail_def = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
 
 static const struct SimpleBlockDef wheat_stage_defs[8] = {
 	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
@@ -476,6 +477,71 @@ static TextureLoc RedOreDust_GetTexture(int x, int y, int z, Face face, cc_bool 
 	return 84 + texOffset;
 }
 
+/* Helper: check if a block is a rail */
+static cc_bool IsRail(BlockID block) {
+	return block == BLOCK_RAIL;
+}
+
+/* Rail connection pattern and rotation for rendering.
+   rotation: 0=0deg, 1=90CW, 2=180, 3=270CW
+   Returns: texture loc (128=straight, 112=curve) */
+#define RAIL_STRAIGHT 128
+#define RAIL_CURVE    112
+
+/* Rail texture/rotation encoding: high byte = texture, low 2 bits = rotation */
+/* Used by Builder_DrawRail to select texture and UV rotation */
+
+/* Get rail top texture and rotation based on neighboring rail connections.
+   Returns encoded value: (textureLoc << 2) | rotation
+   For non-YMAX faces, just returns 86 (transparent side texture). */
+int Rail_GetTextureAndRotation(int x, int y, int z, Face face) {
+	cc_bool north, south, east, west;
+	
+	/* Only top face varies based on connections */
+	if (face != FACE_YMAX) {
+		return (86 << 2) | 0;
+	}
+	
+	/* Check for rail neighbors in all 4 horizontal directions */
+	north = south = east = west = false;
+	
+	if (World_Contains(x, y, z - 1) && IsRail(World_GetBlock(x, y, z - 1)))
+		north = true;
+	if (World_Contains(x, y, z + 1) && IsRail(World_GetBlock(x, y, z + 1)))
+		south = true;
+	if (World_Contains(x + 1, y, z) && IsRail(World_GetBlock(x + 1, y, z)))
+		east = true;
+	if (World_Contains(x - 1, y, z) && IsRail(World_GetBlock(x - 1, y, z)))
+		west = true;
+	
+	/* Determine texture and rotation based on connection pattern */
+	/* For 3 or 4 connections, prefer curves over straight */
+	
+	/* 4 connections: default to N-S straight (can't curve to all 4) */
+	if (north && south && east && west) return (RAIL_STRAIGHT << 2) | 0;
+	
+	/* 3 connections: pick the curve that makes sense, ignore the odd one out */
+	if (north && south && east) return (RAIL_CURVE << 2) | 1;  /* N-E curve (ignore south) */
+	if (north && south && west) return (RAIL_CURVE << 2) | 2;  /* N-W curve (ignore south) */
+	if (north && east && west)  return (RAIL_CURVE << 2) | 1;  /* N-E curve (ignore west) */
+	if (south && east && west)  return (RAIL_CURVE << 2) | 0;  /* S-E curve (ignore west) */
+	
+	/* 2 connections - straights and curves */
+	if (north && south) return (RAIL_STRAIGHT << 2) | 0;  /* N-S straight, 0 degrees */
+	if (east && west)   return (RAIL_STRAIGHT << 2) | 1;  /* E-W straight, 90 CCW */
+	
+	if (south && east)  return (RAIL_CURVE << 2) | 0;     /* S-E curve, 0 degrees */
+	if (north && east)  return (RAIL_CURVE << 2) | 1;     /* N-E curve, 90 CCW */
+	if (north && west)  return (RAIL_CURVE << 2) | 2;     /* N-W curve, 180 degrees */
+	if (south && west)  return (RAIL_CURVE << 2) | 3;     /* S-W curve, 270 CCW */
+	
+	/* 1 connection - straight rail aligned to the connection */
+	if (east || west) return (RAIL_STRAIGHT << 2) | 1;    /* E-W straight */
+	
+	/* 0 connections or north/south only - default N-S straight */
+	return (RAIL_STRAIGHT << 2) | 0;
+}
+
 /* Calculate which direction a directional block should face based on adjacent blocks */
 static cc_uint8 CalcDirectionalFacing(int x, int y, int z) {
 	cc_bool hasNorth, hasSouth, hasWest, hasEast;
@@ -702,6 +768,14 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 	/* Lit red ore dust uses lit connection-based textures */
 	if (block == BLOCK_LIT_RED_ORE_DUST) {
 		return RedOreDust_GetTexture(x, y, z, face, true);
+	}
+	
+	/* Rail uses connection-based textures with UV rotation (handled in Builder_DrawRail).
+	   For non-YMAX faces, return transparent side texture.
+	   For YMAX, return the straight texture (Builder handles actual selection + rotation). */
+	if (block == BLOCK_RAIL) {
+		if (face != FACE_YMAX) return 86;
+		return RAIL_STRAIGHT; /* Default; Builder_DrawRail overrides this */
 	}
 	
 	if (!directionalFacing_Enabled || !IsDirectionalBlock(block)) {
@@ -1131,9 +1205,11 @@ static void Block_CalcStretch(BlockID block) {
 	/* Redstone dust and torches use position-dependent dynamic rendering, so */
 	/*  adjacent blocks must never be merged into a single stretch */
 	/* Furnaces and chests have unique face textures that differ per-block */
+	/* Rails also use position-dependent textures with UV rotation */
 	if (block == BLOCK_RED_ORE_DUST || block == BLOCK_LIT_RED_ORE_DUST ||
 	    IsAnyTorch(block) || block == BLOCK_FURNACE || block == BLOCK_CHEST ||
-	    block == BLOCK_SIGN_WALL || block == BLOCK_SIGN_FLOOR) {
+	    block == BLOCK_SIGN_WALL || block == BLOCK_SIGN_FLOOR ||
+	    block == BLOCK_RAIL) {
 		Blocks.CanStretch[block] = 0;
 	}
 
@@ -1343,6 +1419,8 @@ void Block_ResetProps(BlockID block) {
 		def = &sign_floor_def;
 	} else if (block == BLOCK_PORTAL) {
 		def = &portal_def;
+	} else if (block == BLOCK_RAIL) {
+		def = &rail_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1887,74 +1965,6 @@ static void OnReset(void) {
 		Blocks.CanDelete[block] = true;
 	}
 	
-	/* Remove door tops and other non-placeable blocks from inventory */
-	Inventory_Remove(BLOCK_DOOR_NS_TOP);
-	Inventory_Remove(BLOCK_DOOR_EW_TOP);
-	Inventory_Remove(BLOCK_DOOR_EW_BOTTOM);
-	Inventory_Remove(BLOCK_LIT_RED_ORE_DUST);
-	Inventory_Remove(BLOCK_RED_ORE_TORCH_OFF);
-	/* Remove all wall torch variants (player places generic torch, code picks variant) */
-	Inventory_Remove(BLOCK_RED_TORCH_ON_S);
-	Inventory_Remove(BLOCK_RED_TORCH_ON_N);
-	Inventory_Remove(BLOCK_RED_TORCH_ON_E);
-	Inventory_Remove(BLOCK_RED_TORCH_ON_W);
-	Inventory_Remove(BLOCK_RED_TORCH_OFF_S);
-	Inventory_Remove(BLOCK_RED_TORCH_OFF_N);
-	Inventory_Remove(BLOCK_RED_TORCH_OFF_E);
-	Inventory_Remove(BLOCK_RED_TORCH_OFF_W);
-	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED);
-	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED_OFF);
-	
-	/* Remove pressed button from inventory (non-placeable, auto-placed by physics) */
-	Inventory_Remove(BLOCK_BUTTON_PRESSED);
-	
-	/* Remove lever ON from inventory (toggled by right-click, not placeable) */
-	Inventory_Remove(BLOCK_LEVER_ON);
-	
-	/* Remove pressed pressure plate from inventory (auto-placed by physics) */
-	Inventory_Remove(BLOCK_PRESSURE_PLATE_PRESSED);
-	
-	/* Remove pressed stone pressure plate from inventory (auto-placed by physics) */
-	Inventory_Remove(BLOCK_STONE_PLATE_PRESSED);
-	
-	/* Remove iron door variants from inventory (auto-placed by physics/redstone) */
-	Inventory_Remove(BLOCK_IRON_DOOR_NS_TOP);
-	Inventory_Remove(BLOCK_IRON_DOOR_EW_BOTTOM);
-	Inventory_Remove(BLOCK_IRON_DOOR_EW_TOP);
-	Inventory_Remove(BLOCK_IRON_DOOR_NS_OPEN_BOTTOM);
-	Inventory_Remove(BLOCK_IRON_DOOR_NS_OPEN_TOP);
-	Inventory_Remove(BLOCK_IRON_DOOR_EW_OPEN_BOTTOM);
-	Inventory_Remove(BLOCK_IRON_DOOR_EW_OPEN_TOP);
-	
-	/* Remove double chest variants from inventory (auto-placed) */
-	Inventory_Remove(BLOCK_DCHEST_S_L);
-	Inventory_Remove(BLOCK_DCHEST_S_R);
-	Inventory_Remove(BLOCK_DCHEST_N_L);
-	Inventory_Remove(BLOCK_DCHEST_N_R);
-	Inventory_Remove(BLOCK_DCHEST_E_L);
-	Inventory_Remove(BLOCK_DCHEST_E_R);
-	Inventory_Remove(BLOCK_DCHEST_W_L);
-	Inventory_Remove(BLOCK_DCHEST_W_R);
-
-	/* Remove shadow ceiling from inventory (auto-placed during hell theme generation) */
-	Inventory_Remove(BLOCK_SHADOW_CEILING);
-
-	/* Remove snowy grass from inventory (auto-placed when snow is on top of grass) */
-	Inventory_Remove(BLOCK_SNOWY_GRASS);
-
-	/* Remove farmland from inventory (created by hoeing dirt/grass) */
-	Inventory_Remove(BLOCK_FARMLAND_DRY);
-	Inventory_Remove(BLOCK_FARMLAND_WET);
-
-	/* Remove wheat stages from inventory (grown on farmland) */
-	{ int i; for (i = BLOCK_WHEAT_0; i <= BLOCK_WHEAT_7; i++) Inventory_Remove(i); }
-
-	/* Remove sign wall block from classic inventory (accessed as survival item ITEM_SIGN) */
-	Inventory_Remove(BLOCK_SIGN_WALL);
-
-	/* Remove portal from inventory (generated in Strange worlds, not placeable) */
-	Inventory_Remove(BLOCK_PORTAL);
-
 	DirectionalCache_Clear();
 }
 
