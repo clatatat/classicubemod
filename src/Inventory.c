@@ -1296,6 +1296,13 @@ void Chest_Open(int x, int y, int z) {
 	block = World_GetBlock(x, y, z);
 	if (Chest_GetPartnerPos(block, x, y, z, &px, &py, &pz)) {
 		idx2 = Chest_GetOrCreate(px, py, pz);
+
+		/* If we clicked on the right half, swap so the left half is
+		   always shown on top for consistent item ordering. */
+		if (block == BLOCK_DCHEST_S_R || block == BLOCK_DCHEST_N_R ||
+			block == BLOCK_DCHEST_E_R || block == BLOCK_DCHEST_W_R) {
+			int tmp = idx; idx = idx2; idx2 = tmp;
+		}
 	}
 
 	Chest_ViewIdx  = idx;
