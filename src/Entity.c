@@ -23,6 +23,8 @@
 #include "Utils.h"
 #include "EntityRenderers.h"
 #include "Protocol.h"
+#include "Generator.h"
+#include "Screens.h"
 
 const char* const NameMode_Names[NAME_MODE_COUNT]   = { "None", "Hovered", "All", "AllHovered", "AllUnscaled" };
 const char* const ShadowMode_Names[SHADOW_MODE_COUNT] = { "None", "SnapToBlock", "Circle", "CircleAll" };
@@ -812,6 +814,23 @@ static void LocalPlayer_Tick(struct Entity* e, float delta) {
 
 	Entity_CheckSkin(&p->Base);
 	SoundComp_Tick(p, wasOnGround);
+
+	/* Portal block contact: generate new Strange world */
+	{
+		int feetX = Math_Floor(e->Position.x);
+		int feetY = Math_Floor(e->Position.y);
+		int feetZ = Math_Floor(e->Position.z);
+		if (World_Contains(feetX, feetY, feetZ)) {
+			BlockID block = World_GetBlock(feetX, feetY, feetZ);
+			if (block == BLOCK_PORTAL) {
+				RNGState portalRnd;
+				int seed;
+				Random_SeedFromCurrentTime(&portalRnd);
+				seed = Random_Next(&portalRnd, Int32_MaxValue);
+				Gen_Start(&StrangeGen, seed, 128, 128, 128);
+			}
+		}
+	}
 }
 
 static void LocalPlayer_RenderModel(struct Entity* e, float delta, float t) {

@@ -75,6 +75,7 @@ static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef portal_def = {"Portal", 127, 127, 127, 16, PackedCol_Make(0,0,0,255), 127, BRIT_FULL, true, 100, DRAW_OPAQUE, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
 
 static const struct SimpleBlockDef wheat_stage_defs[8] = {
 	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
@@ -1340,6 +1341,8 @@ void Block_ResetProps(BlockID block) {
 		def = &sign_wall_def;
 	} else if (block == BLOCK_SIGN_FLOOR) {
 		def = &sign_floor_def;
+	} else if (block == BLOCK_PORTAL) {
+		def = &portal_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1948,6 +1951,9 @@ static void OnReset(void) {
 
 	/* Remove sign wall block from classic inventory (accessed as survival item ITEM_SIGN) */
 	Inventory_Remove(BLOCK_SIGN_WALL);
+
+	/* Remove portal from inventory (generated in Strange worlds, not placeable) */
+	Inventory_Remove(BLOCK_PORTAL);
 
 	DirectionalCache_Clear();
 }

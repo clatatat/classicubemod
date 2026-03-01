@@ -153,6 +153,7 @@ enum BLOCKID {
 	BLOCK_WHEAT_5 = 243,
 	BLOCK_WHEAT_6 = 244,
 	BLOCK_WHEAT_7 = 245, /* Stage 8 - fully grown, drops wheat */
+	BLOCK_PORTAL  = 246, /* Portal block - teleports to new Strange world on contact */
 
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,

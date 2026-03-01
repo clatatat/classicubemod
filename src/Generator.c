@@ -2699,6 +2699,49 @@ static void StrangeGen_FindSpawn(void) {
 	}
 }
 
+/* Place a single portal block at a random air position in the Strange world */
+static void StrangeGen_PlacePortal(void) {
+	int attempts, x, y, z;
+	for (attempts = 0; attempts < 5000; attempts++) {
+		x = Random_Next(&strange_rnd, World.Width);
+		y = 1 + Random_Next(&strange_rnd, World.Height - 2); /* avoid floor/ceiling */
+		z = Random_Next(&strange_rnd, World.Length);
+		if (Gen_Blocks[World_Pack(x, y, z)] == BLOCK_AIR) {
+			Gen_Blocks[World_Pack(x, y, z)] = BLOCK_PORTAL;
+			return;
+		}
+	}
+}
+
+/* Place N portal blocks at random air positions */
+static void StrangeGen_PlacePortals(int count) {
+	int i;
+	for (i = 0; i < count; i++) {
+		StrangeGen_PlacePortal();
+	}
+}
+
+/* Place one portal per dungeon level, searching within that level's Y range */
+static void StrangeGen_PlacePortalPerLevel(void) {
+	int level, levelBaseY, levelTopY;
+	int attempts, x, y, z;
+	for (level = 0; level < strange_numLevels; level++) {
+		levelBaseY = level * STRANGE_LEVEL_SPACING;
+		levelTopY  = levelBaseY + STRANGE_LEVEL_SPACING - 1;
+		if (levelTopY > World.MaxY) levelTopY = World.MaxY;
+		for (attempts = 0; attempts < 5000; attempts++) {
+			x = Random_Next(&strange_rnd, World.Width);
+			y = levelBaseY + 1 + Random_Next(&strange_rnd, levelTopY - levelBaseY - 1);
+			z = Random_Next(&strange_rnd, World.Length);
+			if (y >= 1 && y <= World.MaxY - 1
+				&& Gen_Blocks[World_Pack(x, y, z)] == BLOCK_AIR) {
+				Gen_Blocks[World_Pack(x, y, z)] = BLOCK_PORTAL;
+				break;
+			}
+		}
+	}
+}
+
 static cc_bool StrangeGen_Prepare(int seed) {
 	Random_Seed(&strange_rnd, seed);
 	Gen_SpawnOverride.y = -1.0f;
@@ -2708,8 +2751,8 @@ static cc_bool StrangeGen_Prepare(int seed) {
 	strange_wallBlock = StrangeGen_Materials[
 		Random_Next(&strange_rnd, STRANGE_MATERIAL_COUNT)];
 
-	/* 50% chance to have torches */
-	strange_hasTorches = (Random_Next(&strange_rnd, 2) == 0);
+	/* 75% chance to have torches */
+	strange_hasTorches = (Random_Next(&strange_rnd, 4) != 0);
 
 	/* 50% chance to be furnished if material is oak planks */
 	strange_isFurnished = false;
@@ -2854,28 +2897,17 @@ after_carve:
 	}
 	Gen_CurrentProgress = 0.9f;
 
-	/* Step 4: Queue torches on bookshelf walls inside carved pathways */
+	/* Step 4: Place ground torches every 6 blocks in carved pathways */
 	if (strange_hasTorches) {
 		Gen_CurrentState = "Placing torches";
-		strange_torchCount = 0;
-		{
-			int ty = min(2, World.MaxY - 1); /* top of the 2-tall corridor */
-			for (z = 2; z < World.MaxZ - 1; z += STRANGE_TORCH_SPACING) {
-				for (x = 2; x < World.MaxX - 1; x += STRANGE_TORCH_SPACING) {
-					if (Gen_Blocks[World_Pack(x, ty, z)] != BLOCK_AIR) continue;
-					/* Try each adjacent wall */
-					if (Gen_Blocks[World_Pack(x, ty, z - 1)] == BLOCK_BOOKSHELF)
-						StrangeGen_QueueTorch(x, ty, z, x, ty, z - 1);
-					else if (Gen_Blocks[World_Pack(x, ty, z + 1)] == BLOCK_BOOKSHELF)
-						StrangeGen_QueueTorch(x, ty, z, x, ty, z + 1);
-					else if (Gen_Blocks[World_Pack(x - 1, ty, z)] == BLOCK_BOOKSHELF)
-						StrangeGen_QueueTorch(x, ty, z, x - 1, ty, z);
-					else if (Gen_Blocks[World_Pack(x + 1, ty, z)] == BLOCK_BOOKSHELF)
-						StrangeGen_QueueTorch(x, ty, z, x + 1, ty, z);
-				}
+		for (z = 1; z < World.MaxZ; z += 6) {
+			for (x = 1; x < World.MaxX; x += 6) {
+				if (Gen_Blocks[World_Pack(x, 1, z)] != BLOCK_AIR) continue;
+				/* Floor below must be solid (plank floor) */
+				if (Gen_Blocks[World_Pack(x, 0, z)] != BLOCK_WOOD) continue;
+				Gen_Blocks[World_Pack(x, 1, z)] = BLOCK_TORCH;
 			}
 		}
-		StrangeGen_FlushTorches();
 	}
 	Gen_CurrentProgress = 1.0f;
 
@@ -2913,6 +2945,7 @@ after_carve:
 		}
 	}
 
+	StrangeGen_PlacePortals(4);
 	gen_done = true;
 }
 
@@ -3180,6 +3213,7 @@ static void StrangeGen_GenerateSky(void) {
 		}
 	}
 
+	StrangeGen_PlacePortal();
 	gen_done = true;
 }
 
@@ -3244,6 +3278,9 @@ static void StrangeGen_Generate(void) {
 	/* Step 7: Find spawn point */
 	Gen_CurrentState = "Finding spawn";
 	StrangeGen_FindSpawn();
+
+	/* Step 8: Place one portal per dungeon level */
+	StrangeGen_PlacePortalPerLevel();
 
 	gen_done = true;
 }
