@@ -28,6 +28,7 @@ extern const struct MapGenerator NotchyGen;
 extern const struct MapGenerator FloatingGen;
 extern const struct MapGenerator CavesGen;
 extern const struct MapGenerator EmptyGen;
+extern const struct MapGenerator StrangeGen;
 
 /* Starts generating a map using the given generator */
 void Gen_Start(STRING_REF const struct MapGenerator* gen, int seed,

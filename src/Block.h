@@ -155,6 +155,9 @@ void DirectionalBlock_GetRenderBounds(BlockID block, int x, int y, int z, Vec3* 
 cc_bool IsDirectionalBlock(BlockID block);
 /* Get facing direction for a directional block (0-3 for walls, 4 for ground/torch) */
 cc_uint8 DirectionalBlock_GetFacing(int x, int y, int z);
+/* Set a placement hint for the next regular torch being placed by the player.
+   facing: 0=attached z+1, 1=attached z-1, 2=attached x+1, 3=attached x-1, 4=ground, 255=no hint */
+void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
 
 CC_END_HEADER
 #endif

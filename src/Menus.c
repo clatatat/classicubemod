@@ -1054,9 +1054,9 @@ void EditHotkeyScreen_Show(struct HotkeyData original) {
 *#########################################################################################################################*/
 #define GENLEVEL_NUM_INPUTS 4
 
-static const char* const GenLevel_TypeNames[] = { "Flat", "Normal", "Floating", "Caves", "Empty" };
-static const struct MapGenerator* GenLevel_TypeGens[] = { &FlatgrassGen, &NotchyGen, &FloatingGen, &CavesGen, &EmptyGen };
-#define GENLEVEL_TYPE_COUNT 5
+static const char* const GenLevel_TypeNames[] = { "Flat", "Normal", "Floating", "Caves", "Empty", "Strange" };
+static const struct MapGenerator* GenLevel_TypeGens[] = { &FlatgrassGen, &NotchyGen, &FloatingGen, &CavesGen, &EmptyGen, &StrangeGen };
+#define GENLEVEL_TYPE_COUNT 6
 
 static const char* const GenLevel_ThemeNames[] = { "Normal", "Hell", "Paradise", "Woods", "Desert", "Winter", "Moon", "Jungle", "Plains", "Custom" };
 #define GENLEVEL_THEME_COUNT 10

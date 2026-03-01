@@ -12,6 +12,7 @@
 #include "TexturePack.h"
 #include "ExtMath.h"
 #include "World.h"
+#include "Lighting.h"
 
 /* Pixel dimensions for the pre-rasterized sign texture.
    128 wide x 48 tall = 4 lines of 12px each. */
@@ -216,7 +217,8 @@ static void Sign_RasterizeTexture(struct SignTexEntry* entry, struct SignData* s
 */
 static void Sign_BuildQuad(struct VertexTextured* v,
                            float bx, float by, float bz,
-                           cc_uint8 facing, struct Texture* tex)
+                           cc_uint8 facing, struct Texture* tex,
+                           PackedCol col)
 {
 	/* Swap U so text reads left-to-right from the viewer's perspective.
 	   In CC's coordinate system, +X is screen-LEFT when looking south,
@@ -225,7 +227,6 @@ static void Sign_BuildQuad(struct VertexTextured* v,
 	float v1 = tex->uv.v1, v2 = tex->uv.v2;
 	float yMin = by + SIGN_Y_MIN;
 	float yMax = by + SIGN_Y_MAX;
-	PackedCol col = PACKEDCOL_WHITE;
 
 	switch (facing) {
 		default:
@@ -286,13 +287,13 @@ static void Sign_BuildQuad(struct VertexTextured* v,
    Outputs 24 vertices (6 faces).  Rotation 0 = board faces south (+Z). */
 static void FloorSign_BuildBoardBox(struct VertexTextured* v,
                                      float bx, float by, float bz,
-                                     cc_uint8 rotation, TextureLoc loc)
+                                     cc_uint8 rotation, TextureLoc loc,
+                                     PackedCol col)
 {
 	float cx = bx + 0.5f, cz = bz + 0.5f;
 	float yBot = by + FBOARD_BOT, yTop = by + FBOARD_TOP;
 	float angle = (float)rotation * 22.5f * MATH_DEG2RAD;
 	float cos_a = Math_CosF(angle), sin_a = Math_SinF(angle);
-	PackedCol col = PACKEDCOL_WHITE;
 	float W = FBOARD_HALF_W, D = FBOARD_HALF_D;
 
 	/* Terrain atlas UV base */
@@ -352,13 +353,13 @@ static void FloorSign_BuildBoardBox(struct VertexTextured* v,
    The text quad sits slightly in front of the board to avoid z-fighting. */
 static void FloorSign_BuildTextQuad(struct VertexTextured* v,
                                      float bx, float by, float bz,
-                                     cc_uint8 rotation, struct Texture* tex)
+                                     cc_uint8 rotation, struct Texture* tex,
+                                     PackedCol col)
 {
 	float cx = bx + 0.5f, cz = bz + 0.5f;
 	float yBot = by + FBOARD_BOT, yTop = by + FBOARD_TOP;
 	float angle = (float)rotation * 22.5f * MATH_DEG2RAD;
 	float cos_a = Math_CosF(angle), sin_a = Math_SinF(angle);
-	PackedCol col = PACKEDCOL_WHITE;
 	float u1 = tex->uv.u1, u2 = tex->uv.u2;
 	float v1 = tex->uv.v1, v2 = tex->uv.v2;
 
@@ -392,6 +393,7 @@ void Signs_RenderText(void) {
 	struct SignData* sd;
 	BlockID block;
 	cc_bool hadFog;
+	PackedCol signCol;
 	int i;
 
 	if (!Sign_Count) return;
@@ -422,6 +424,7 @@ void Signs_RenderText(void) {
 		if (!entry->tex.ID) continue;
 
 		block = World_GetBlock(sd->x, sd->y, sd->z);
+		signCol = Lighting.Color(sd->x, sd->y, sd->z);
 
 		if (block == BLOCK_SIGN_FLOOR) {
 			/* --- Floor sign: 3D board box + text overlay (post from standard builder) --- */
@@ -430,7 +433,7 @@ void Signs_RenderText(void) {
 			/* Draw board box with wood plank terrain texture */
 			FloorSign_BuildBoardBox(verts,
 			                        (float)sd->x, (float)sd->y, (float)sd->z,
-			                        sd->rotation, boardLoc);
+			                        sd->rotation, boardLoc, signCol);
 			Gfx_BindTexture(Atlas1D.TexIds[Atlas1D_Index(boardLoc)]);
 			dst = (struct VertexTextured*)Gfx_LockDynamicVb(signs_VB, VERTEX_FORMAT_TEXTURED, FBOARD_VERTS);
 			Mem_Copy(dst, verts, FBOARD_VERTS * sizeof(struct VertexTextured));
@@ -440,7 +443,7 @@ void Signs_RenderText(void) {
 			/* Draw text overlay on front face */
 			FloorSign_BuildTextQuad(verts,
 			                        (float)sd->x, (float)sd->y, (float)sd->z,
-			                        sd->rotation, &entry->tex);
+			                        sd->rotation, &entry->tex, signCol);
 			Gfx_BindTexture(entry->tex.ID);
 			dst = (struct VertexTextured*)Gfx_LockDynamicVb(signs_VB, VERTEX_FORMAT_TEXTURED, 4);
 			dst[0] = verts[0]; dst[1] = verts[1]; dst[2] = verts[2]; dst[3] = verts[3];
@@ -451,7 +454,7 @@ void Signs_RenderText(void) {
 			cc_uint8 facing = DirectionalBlock_GetFacing(sd->x, sd->y, sd->z);
 			Sign_BuildQuad(verts,
 			               (float)sd->x, (float)sd->y, (float)sd->z,
-			               facing, &entry->tex);
+			               facing, &entry->tex, signCol);
 			Gfx_BindTexture(entry->tex.ID);
 			dst = (struct VertexTextured*)Gfx_LockDynamicVb(signs_VB, VERTEX_FORMAT_TEXTURED, 4);
 			dst[0] = verts[0]; dst[1] = verts[1]; dst[2] = verts[2]; dst[3] = verts[3];

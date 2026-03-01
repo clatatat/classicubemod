@@ -1721,8 +1721,54 @@ static void InputHandler_PlaceBlock(void) {
 				/* If no support found, torch cannot be placed */
 			}
 		} else {
-			/* Regular torches and unlit redstone torches: basic support check */
-			if (World_Contains(pos.x - 1, pos.y, pos.z)) {
+			/* Regular torches and unlit redstone torches: use clicked face for orientation */
+			Face torchClickedFace = Game_SelectedPos.closest;
+			switch (torchClickedFace) {
+				case FACE_ZMIN: /* Clicked -Z face, torch attach to z+1 */
+					if (World_Contains(pos.x, pos.y, pos.z + 1)) {
+						neighbor = World_GetBlock(pos.x, pos.y, pos.z + 1);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+							hasSupport = true; DirectionalBlock_SetPlacementHint(0);
+						}
+					}
+					break;
+				case FACE_ZMAX: /* Clicked +Z face, torch attach to z-1 */
+					if (World_Contains(pos.x, pos.y, pos.z - 1)) {
+						neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+							hasSupport = true; DirectionalBlock_SetPlacementHint(1);
+						}
+					}
+					break;
+				case FACE_XMIN: /* Clicked -X face, torch attach to x+1 */
+					if (World_Contains(pos.x + 1, pos.y, pos.z)) {
+						neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+							hasSupport = true; DirectionalBlock_SetPlacementHint(2);
+						}
+					}
+					break;
+				case FACE_XMAX: /* Clicked +X face, torch attach to x-1 */
+					if (World_Contains(pos.x - 1, pos.y, pos.z)) {
+						neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+							hasSupport = true; DirectionalBlock_SetPlacementHint(3);
+						}
+					}
+					break;
+				case FACE_YMAX: /* Clicked top face, ground torch */
+				case FACE_YMIN: /* Clicked bottom face, try ground */
+					if (World_Contains(pos.x, pos.y - 1, pos.z)) {
+						neighbor = World_GetBlock(pos.x, pos.y - 1, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+							hasSupport = true; DirectionalBlock_SetPlacementHint(4);
+						}
+					}
+					break;
+				default: break;
+			}
+			/* Fallback: if clicked face didn't provide support, try any neighbor */
+			if (!hasSupport && World_Contains(pos.x - 1, pos.y, pos.z)) {
 				neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
 				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
 			}

@@ -18,7 +18,7 @@ struct _BlockLists Blocks;
 *-----------------------------------------------Directional block cache---------------------------------------------------*
 *#########################################################################################################################*/
 /* Runtime cache for directional blocks (chests/furnaces) - not saved to disk */
-#define MAX_DIRECTIONAL_BLOCKS 1024
+#define MAX_DIRECTIONAL_BLOCKS 16384
 
 typedef struct DirectionalBlockInfo_ {
 	int x, y, z;
@@ -28,6 +28,7 @@ typedef struct DirectionalBlockInfo_ {
 static DirectionalBlockInfo directionalCache[MAX_DIRECTIONAL_BLOCKS];
 static int directionalCount = 0;
 static cc_bool directionalFacing_Enabled = true;
+static cc_uint8 torch_placement_hint = 255; /* 255 = no hint */
 
 /*########################################################################################################################*
 *---------------------------------------------------Default properties----------------------------------------------------*
@@ -139,7 +140,7 @@ static const struct SimpleBlockDef core_blockDefs[] = {
 { "Gold",             24, 40, 56, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_METAL,  SOUND_METAL  },
 { "Iron",             23, 39, 55, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_METAL,  SOUND_METAL  },
 { "Double slab",       6,  5,  6, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
-{ "Slab",              6,  5,  6,  8, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
+{ "Slab",              6,  5,  6,  8, FOG_NONE ,   0, BRIT_NONE, false, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
 { "Brick",             7,  7,  7, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_STONE,  SOUND_STONE  },
 { "TNT",               9,  8, 10, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS,  SOUND_GRASS  },
 { "Bookshelf",         4, 35,  4, 16, FOG_NONE ,   0, BRIT_NONE,  true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_WOOD,   SOUND_WOOD   },
@@ -640,7 +641,13 @@ static void DirectionalBlock_Update(int x, int y, int z) {
 			DirectionalCache_Set(x, y, z, facing);
 			return;
 		} else {
-			facing = CalcTorchFacing(x, y, z);
+			/* Regular torch: use placement hint if available */
+			if (torch_placement_hint != 255) {
+				facing = torch_placement_hint;
+				torch_placement_hint = 255;
+			} else {
+				facing = CalcTorchFacing(x, y, z);
+			}
 			if (facing == 255) {
 				/* No support - leave in cache with old facing, physics will break it */
 				return;
@@ -1845,6 +1852,10 @@ static void OnBlockChanged(void* obj, IVec3 coords, BlockID old, BlockID now) {
 	if (World_Contains(x, y, z + 1)) DirectionalBlock_Update(x, y, z + 1);
 	if (y > 0 && World_Contains(x, y - 1, z)) DirectionalBlock_Update(x, y - 1, z);
 	if (World_Contains(x, y + 1, z)) DirectionalBlock_Update(x, y + 1, z);
+}
+
+void DirectionalBlock_SetPlacementHint(cc_uint8 facing) {
+	torch_placement_hint = facing;
 }
 
 static void OnNewMap(void* obj) {

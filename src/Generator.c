@@ -2159,6 +2159,1121 @@ const struct MapGenerator EmptyGen = {
 
 
 /*########################################################################################################################*
+*-----------------------------------------------------Strange gen---------------------------------------------------------*
+*#########################################################################################################################*/
+/* "Strange" world: generates dungeon-like rooms and hallways.
+   Multiple dungeon levels are stacked vertically, 25 blocks apart.
+   Completely ignores level themes - uses its own randomly chosen wall material. */
+
+static RNGState strange_rnd;
+static BlockRaw strange_wallBlock; /* material for walls/floor/ceiling */
+static cc_bool strange_hasTorches;  /* 50% chance to place torches on walls */
+static cc_bool strange_isFurnished; /* 50% chance when material is wood */
+
+/* Generation mode for strange worlds */
+#define STRANGE_MODE_DUNGEON 0
+#define STRANGE_MODE_LIBRARY  1
+#define STRANGE_MODE_SKY      2
+static int strange_mode;
+
+/* Sky mode sub-flags */
+static cc_bool strange_skyWalkways;  /* generate walkway layers */
+static cc_bool strange_skyShapes;    /* generate floating shapes */
+
+#define STRANGE_TORCH_SPACING 4  /* place a torch every N blocks along walls */
+
+/* Deferred torch placement: collect candidates, place after all carving */
+struct StrangeTorchCandidate {
+	int x, y, z;       /* position to place torch */
+	int wallX, wallY, wallZ; /* wall block it should lean against */
+};
+#define STRANGE_MAX_TORCHES 32000
+static struct StrangeTorchCandidate strange_torches[STRANGE_MAX_TORCHES];
+static int strange_torchCount;
+
+/* Possible wall materials for strange worlds */
+static const BlockRaw StrangeGen_Materials[] = {
+	BLOCK_BRICK, BLOCK_WOOD, BLOCK_COBBLE, BLOCK_MOSSY_ROCKS,
+	BLOCK_OBSIDIAN, BLOCK_STONE, BLOCK_IRON
+};
+#define STRANGE_MATERIAL_COUNT 7
+
+/* Spacing between dungeon levels (floor-to-floor) */
+#define STRANGE_LEVEL_SPACING 25
+
+/* Room descriptor for dungeon generation */
+struct StrangeRoom {
+	int x, z;          /* top-left corner */
+	int w, d;          /* width (X), depth (Z) */
+	int floorY;        /* Y of the room interior floor */
+	int ceilHeight;    /* interior height (2-20) */
+};
+
+#define STRANGE_MAX_ROOMS 2000
+#define STRANGE_MAX_ROOMS_PER_LEVEL 200
+#define STRANGE_MAX_LEVELS 32
+static struct StrangeRoom strange_rooms[STRANGE_MAX_ROOMS];
+static int strange_roomCount;
+static int strange_levelStartIdx[STRANGE_MAX_LEVELS]; /* first room index per level */
+static int strange_numLevels;
+
+/* Carve out a box of air from (x1,y1,z1) to (x2,y2,z2) inclusive, clamped to world */
+static void StrangeGen_CarveBox(int x1, int y1, int z1, int x2, int y2, int z2) {
+	int x, y, z;
+	x1 = max(x1, 0); y1 = max(y1, 0); z1 = max(z1, 0);
+	x2 = min(x2, World.MaxX); y2 = min(y2, World.MaxY); z2 = min(z2, World.MaxZ);
+	for (y = y1; y <= y2; y++) {
+		for (z = z1; z <= z2; z++) {
+			for (x = x1; x <= x2; x++) {
+				Gen_Blocks[World_Pack(x, y, z)] = BLOCK_AIR;
+			}
+		}
+	}
+}
+
+/* Check if two rooms overlap in XZ (with 1-block wall margin) */
+static cc_bool StrangeGen_RoomsOverlap(const struct StrangeRoom* a, const struct StrangeRoom* b) {
+	int ax2 = a->x + a->w;
+	int az2 = a->z + a->d;
+	int bx2 = b->x + b->w;
+	int bz2 = b->z + b->d;
+	/* Check XZ overlap with 1-block margin */
+	if (ax2 + 1 < b->x || bx2 + 1 < a->x) return false;
+	if (az2 + 1 < b->z || bz2 + 1 < a->z) return false;
+	return true;
+}
+
+static void StrangeGen_PlaceRooms(void) {
+	int level, levelBaseY, levelMaxY;
+	int attempts, i, startIdx, roomsOnLevel;
+	cc_bool overlaps;
+	struct StrangeRoom room;
+	int maxRoomW, maxRoomD, maxCeilH;
+
+	strange_roomCount = 0;
+	strange_numLevels  = 0;
+
+	/* Scale room dimensions to world size */
+	maxRoomW = min(30, World.Width  / 3);
+	maxRoomD = min(30, World.Length / 3);
+	if (maxRoomW < 4) maxRoomW = 4;
+	if (maxRoomD < 4) maxRoomD = 4;
+
+	for (level = 0; level < STRANGE_MAX_LEVELS; level++) {
+		levelBaseY = level * STRANGE_LEVEL_SPACING;
+		/* Need at least floor + 2 air blocks + ceiling within the world */
+		if (levelBaseY + 3 > World.Height) break;
+
+		/* Top of usable space: either next level's floor - 1, or top of world */
+		levelMaxY = (level + 1) * STRANGE_LEVEL_SPACING - 1;
+		if (levelMaxY > World.MaxY) levelMaxY = World.MaxY;
+
+		/* Interior space available: from levelBaseY+1 to levelMaxY-1 */
+		maxCeilH = levelMaxY - levelBaseY - 1;
+		if (maxCeilH < 2) break;
+		if (maxCeilH > 20) maxCeilH = 20;
+
+		strange_levelStartIdx[strange_numLevels] = strange_roomCount;
+		startIdx     = strange_roomCount;
+		roomsOnLevel = 0;
+
+		for (attempts = 0; attempts < 4000 && roomsOnLevel < STRANGE_MAX_ROOMS_PER_LEVEL
+				&& strange_roomCount < STRANGE_MAX_ROOMS; attempts++) {
+			room.w = Random_Range(&strange_rnd, 4, maxRoomW + 1);
+			room.d = Random_Range(&strange_rnd, 4, maxRoomD + 1);
+			room.ceilHeight = Random_Range(&strange_rnd, 2, maxCeilH + 1);
+			room.x = Random_Next(&strange_rnd, World.Width  - room.w - 2) + 1;
+			room.z = Random_Next(&strange_rnd, World.Length - room.d - 2) + 1;
+			room.floorY = levelBaseY + 1; /* interior floor, 1 above the solid floor */
+
+			/* Check for overlap with rooms on THIS level only */
+			overlaps = false;
+			for (i = startIdx; i < strange_roomCount; i++) {
+				if (StrangeGen_RoomsOverlap(&room, &strange_rooms[i])) {
+					overlaps = true;
+					break;
+				}
+			}
+			if (overlaps) continue;
+
+			strange_rooms[strange_roomCount++] = room;
+			roomsOnLevel++;
+			/* Carve the room interior */
+			StrangeGen_CarveBox(room.x, room.floorY, room.z,
+				room.x + room.w - 1, room.floorY + room.ceilHeight - 1, room.z + room.d - 1);
+		}
+
+		strange_numLevels++;
+		Gen_CurrentProgress = (float)(levelBaseY + STRANGE_LEVEL_SPACING) / (float)World.Height;
+	}
+}
+
+/* Check if block at (x,y,z) is a solid wall/floor block (not air or torch) */
+static cc_bool StrangeGen_IsSolid(int x, int y, int z) {
+	BlockRaw b;
+	if (x < 0 || x > World.MaxX || y < 0 || y > World.MaxY || z < 0 || z > World.MaxZ) return false;
+	b = Gen_Blocks[World_Pack(x, y, z)];
+	return b != BLOCK_AIR && b != BLOCK_TORCH;
+}
+
+/* Queue a torch candidate for deferred placement.
+   wallX,wallY,wallZ is the position of the wall the torch should lean against. */
+static void StrangeGen_QueueTorch(int x, int y, int z, int wallX, int wallY, int wallZ) {
+	struct StrangeTorchCandidate* t;
+	if (strange_torchCount >= STRANGE_MAX_TORCHES) return;
+	if (x < 0 || x > World.MaxX || y < 0 || y > World.MaxY || z < 0 || z > World.MaxZ) return;
+	t = &strange_torches[strange_torchCount++];
+	t->x = x; t->y = y; t->z = z;
+	t->wallX = wallX; t->wallY = wallY; t->wallZ = wallZ;
+}
+
+/* Place all queued torches, but only if position is air AND wall is still solid */
+static void StrangeGen_FlushTorches(void) {
+	int i;
+	for (i = 0; i < strange_torchCount; i++) {
+		const struct StrangeTorchCandidate* t = &strange_torches[i];
+		if (Gen_Blocks[World_Pack(t->x, t->y, t->z)] != BLOCK_AIR) continue;
+		if (!StrangeGen_IsSolid(t->wallX, t->wallY, t->wallZ)) continue;
+		Gen_Blocks[World_Pack(t->x, t->y, t->z)] = BLOCK_TORCH;
+	}
+}
+
+/* Queue a torch on a hallway wall at the top of the hallway */
+static void StrangeGen_QueueHallTorch(int x, int y, int z, int hallH, int wallX, int wallZ) {
+	int torchY = y + hallH - 1;
+	if (torchY > World.MaxY) return;
+	StrangeGen_QueueTorch(x, torchY, z, wallX, torchY, wallZ);
+}
+
+/* Carve a horizontal hallway between two rooms (assumed same level) */
+static void StrangeGen_ConnectRooms(int idxA, int idxB) {
+	const struct StrangeRoom* a = &strange_rooms[idxA];
+	const struct StrangeRoom* b = &strange_rooms[idxB];
+	int ax, az, bx, bz;
+	int hallY, hallH, curX, curZ;
+	int stepX, stepZ, stepCount;
+
+	/* Center points of each room */
+	ax = a->x + a->w / 2;
+	az = a->z + a->d / 2;
+	bx = b->x + b->w / 2;
+	bz = b->z + b->d / 2;
+
+	/* Hallway height: random 2-5 */
+	hallH = Random_Range(&strange_rnd, 2, 6);
+	/* Hallway floor at the same level as the rooms */
+	hallY = a->floorY;
+	if (hallY + hallH > World.Height) hallH = World.Height - hallY;
+	if (hallH < 2) hallH = 2;
+
+	/* Carve L-shaped path: first go along X, then along Z */
+	curX = ax; curZ = az;
+	stepX = (bx > ax) ? 1 : -1;
+	stepCount = 0;
+
+	/* Horizontal segment along X */
+	while (curX != bx) {
+		StrangeGen_CarveBox(curX, hallY, curZ,
+			curX, hallY + hallH - 1, curZ + 1);
+		if (strange_hasTorches && (stepCount % STRANGE_TORCH_SPACING) == 0) {
+			/* Queue torch on z-1 wall side of the hallway */
+			StrangeGen_QueueHallTorch(curX, hallY, curZ, hallH, curX, curZ - 1);
+		}
+		curX += stepX;
+		stepCount++;
+	}
+
+	/* Vertical segment along Z */
+	stepZ = (bz > az) ? 1 : -1;
+	stepCount = 0;
+	while (curZ != bz) {
+		StrangeGen_CarveBox(curX, hallY, curZ,
+			curX + 1, hallY + hallH - 1, curZ);
+		if (strange_hasTorches && (stepCount % STRANGE_TORCH_SPACING) == 0) {
+			/* Queue torch on x-1 wall side of the hallway */
+			StrangeGen_QueueHallTorch(curX, hallY, curZ, hallH, curX - 1, curZ);
+		}
+		curZ += stepZ;
+		stepCount++;
+	}
+}
+
+static void StrangeGen_PlaceHallways(void) {
+	int level, startIdx, endIdx, roomsOnLevel, i, a, b;
+
+	for (level = 0; level < strange_numLevels; level++) {
+		startIdx = strange_levelStartIdx[level];
+		endIdx   = (level + 1 < strange_numLevels) ?
+					strange_levelStartIdx[level + 1] : strange_roomCount;
+		roomsOnLevel = endIdx - startIdx;
+		if (roomsOnLevel < 2) continue;
+
+		/* Chain rooms on this level */
+		for (i = startIdx; i < endIdx - 1; i++) {
+			StrangeGen_ConnectRooms(i, i + 1);
+		}
+		/* Extra random connections for loops */
+		for (i = 0; i < roomsOnLevel / 3; i++) {
+			a = startIdx + Random_Next(&strange_rnd, roomsOnLevel);
+			b = startIdx + Random_Next(&strange_rnd, roomsOnLevel);
+			if (a != b) StrangeGen_ConnectRooms(a, b);
+		}
+
+		Gen_CurrentProgress = (float)(level + 1) / (float)strange_numLevels;
+	}
+}
+
+/*########################################################################################################################*
+*-------------------------------------------------Furnished rooms---------------------------------------------------------*
+*#########################################################################################################################*/
+
+/* Furnish one wall side of a room.
+   Room interior positions along the wall: starts at (x0,z0), steps by (dx,dz) for 'len' blocks.
+   wdx,wdz: direction from room interior toward the wall block.
+   facingNS: true if doors on this wall should use NS orientation. */
+static void StrangeGen_FurnishWallSide(
+	int x0, int z0, int dx, int dz, int len,
+	int floorY, int ceilH,
+	int wdx, int wdz, cc_bool facingNS)
+{
+	int i, x, z, wx, wz, bx, bz, roll, wy;
+	cc_bool beyondOpen, placedDoor;
+
+	for (i = 0; i < len; i++) {
+		x = x0 + i * dx;
+		z = z0 + i * dz;
+
+		/* --- Furniture at floor level, inside room against wall --- */
+		if (x >= 0 && x <= World.MaxX && z >= 0 && z <= World.MaxZ
+			&& Gen_Blocks[World_Pack(x, floorY, z)] == BLOCK_AIR) {
+			roll = Random_Next(&strange_rnd, 100);
+			if (roll < 8)       Gen_Blocks[World_Pack(x, floorY, z)] = BLOCK_CHEST;
+			else if (roll < 11) Gen_Blocks[World_Pack(x, floorY, z)] = BLOCK_CRAFT;
+			else if (roll < 14) Gen_Blocks[World_Pack(x, floorY, z)] = BLOCK_FURNACE;
+		}
+
+		/* Skip corner positions for doors/windows */
+		if (i < 1 || i >= len - 1) continue;
+
+		/* Wall block position */
+		wx = x + wdx;
+		wz = z + wdz;
+		if (wx < 0 || wx > World.MaxX || wz < 0 || wz > World.MaxZ) continue;
+
+		placedDoor = false;
+
+		/* --- Door in wall (needs 2 vertical blocks of wall material) --- */
+		if (ceilH >= 2 && floorY + 1 <= World.MaxY
+			&& Gen_Blocks[World_Pack(wx, floorY, wz)] == strange_wallBlock
+			&& Gen_Blocks[World_Pack(wx, floorY + 1, wz)] == strange_wallBlock)
+		{
+			bx = wx + wdx;
+			bz = wz + wdz;
+			beyondOpen = false;
+			if (bx >= 0 && bx <= World.MaxX && bz >= 0 && bz <= World.MaxZ)
+				beyondOpen = (Gen_Blocks[World_Pack(bx, floorY, bz)] == BLOCK_AIR);
+
+			roll = Random_Next(&strange_rnd, 100);
+			if ((beyondOpen && roll < 15) || (!beyondOpen && roll < 1)) {
+				if (facingNS) {
+					Gen_Blocks[World_Pack(wx, floorY, wz)]     = BLOCK_DOOR_NS_BOTTOM;
+					Gen_Blocks[World_Pack(wx, floorY + 1, wz)] = BLOCK_DOOR_NS_TOP;
+				} else {
+					Gen_Blocks[World_Pack(wx, floorY, wz)]     = BLOCK_DOOR_EW_BOTTOM;
+					Gen_Blocks[World_Pack(wx, floorY + 1, wz)] = BLOCK_DOOR_EW_TOP;
+				}
+				placedDoor = true;
+			}
+		}
+
+		/* --- Window in wall at eye level (floorY + 1) --- */
+		wy = floorY + 1;
+		if (!placedDoor && wy <= World.MaxY
+			&& Gen_Blocks[World_Pack(wx, wy, wz)] == strange_wallBlock)
+		{
+			bx = wx + wdx;
+			bz = wz + wdz;
+			beyondOpen = false;
+			if (bx >= 0 && bx <= World.MaxX && bz >= 0 && bz <= World.MaxZ)
+				beyondOpen = (Gen_Blocks[World_Pack(bx, wy, bz)] == BLOCK_AIR);
+
+			roll = Random_Next(&strange_rnd, 100);
+			if ((beyondOpen && roll < 12) || (!beyondOpen && roll < 1)) {
+				Gen_Blocks[World_Pack(wx, wy, wz)] = BLOCK_GLASS;
+			}
+		}
+	}
+}
+
+/* Furnish a single room: chests, crafting tables, furnaces along walls; doors and windows in walls */
+static void StrangeGen_FurnishRoom(const struct StrangeRoom* r) {
+	int floorY = r->floorY;
+	int ceilH  = r->ceilHeight;
+
+	/* North wall: room interior z=r->z, wall at z-1 */
+	StrangeGen_FurnishWallSide(r->x, r->z, 1, 0, r->w,
+		floorY, ceilH, 0, -1, true);
+	/* South wall: room interior z=r->z+d-1, wall at z+d */
+	StrangeGen_FurnishWallSide(r->x, r->z + r->d - 1, 1, 0, r->w,
+		floorY, ceilH, 0, 1, true);
+	/* West wall: room interior x=r->x, wall at x-1 */
+	StrangeGen_FurnishWallSide(r->x, r->z, 0, 1, r->d,
+		floorY, ceilH, -1, 0, false);
+	/* East wall: room interior x=r->x+w-1, wall at x+w */
+	StrangeGen_FurnishWallSide(r->x + r->w - 1, r->z, 0, 1, r->d,
+		floorY, ceilH, 1, 0, false);
+}
+
+/* Furnish rooms on a furnished level (not every room gets furniture) */
+static void StrangeGen_FurnishRooms(void) {
+	int i;
+	for (i = 0; i < strange_roomCount; i++) {
+		/* ~60% of rooms get furnished */
+		if (Random_Next(&strange_rnd, 100) < 40) continue;
+		StrangeGen_FurnishRoom(&strange_rooms[i]);
+		Gen_CurrentProgress = (float)(i + 1) / (float)strange_roomCount;
+	}
+}
+
+/* ---- Vertical connections (ladders / spiral stairs) between levels ---- */
+
+/* Compute the XZ intersection of two room interiors.
+   Returns false if they don't overlap at all. */
+static cc_bool StrangeGen_RoomXZIntersect(
+	const struct StrangeRoom* a, const struct StrangeRoom* b,
+	int* ox1, int* oz1, int* ox2, int* oz2)
+{
+	*ox1 = max(a->x, b->x);
+	*oz1 = max(a->z, b->z);
+	*ox2 = min(a->x + a->w - 1, b->x + b->w - 1);
+	*oz2 = min(a->z + a->d - 1, b->z + b->d - 1);
+	return (*ox1 <= *ox2) && (*oz1 <= *oz2);
+}
+
+/* Place a 1x1 ladder shaft connecting two vertically adjacent rooms.
+   A backing-wall column is placed at lx-1 so the ladder has support. */
+static void StrangeGen_PlaceLadderShaft(
+	const struct StrangeRoom* lower, const struct StrangeRoom* upper,
+	int ox1, int oz1, int ox2, int oz2)
+{
+	int lx, lz, y;
+	/* Place at the first column of the overlap, middle Z */
+	lx = ox1;
+	lz = (oz1 + oz2) / 2;
+	if (lx < 1 || lx > World.MaxX || lz < 0 || lz > World.MaxZ) return;
+
+	/* Ladders from lower room floor up to upper room floor */
+	for (y = lower->floorY; y <= upper->floorY && y <= World.MaxY; y++) {
+		Gen_Blocks[World_Pack(lx, y, lz)] = BLOCK_LADDER;
+		/* Guarantee a backing wall at x-1 so the ladder has support */
+		if (Gen_Blocks[World_Pack(lx - 1, y, lz)] == BLOCK_AIR)
+			Gen_Blocks[World_Pack(lx - 1, y, lz)] = strange_wallBlock;
+	}
+	/* Ensure 2 blocks of headroom above the top rung in the upper room */
+	for (y = upper->floorY + 1; y <= upper->floorY + 2 && y <= World.MaxY; y++) {
+		if (Gen_Blocks[World_Pack(lx, y, lz)] != BLOCK_AIR)
+			Gen_Blocks[World_Pack(lx, y, lz)] = BLOCK_AIR;
+	}
+}
+
+/* Step offsets for a clockwise spiral around a 3x3 shaft perimeter */
+static const int spiral_dx[8] = { 0, 1, 2, 2, 2, 1, 0, 0 };
+static const int spiral_dz[8] = { 0, 0, 0, 1, 2, 2, 2, 1 };
+
+/* Place a 3x3 spiral staircase with centre pillar between two rooms. */
+static void StrangeGen_PlaceSpiralStairs(
+	const struct StrangeRoom* lower, const struct StrangeRoom* upper,
+	int ox1, int oz1, int ox2, int oz2)
+{
+	int sx, sz, y, step, cx, cz;
+	/* Centre the 3x3 shaft inside the overlap rectangle */
+	sx = ox1 + ((ox2 - ox1 + 1 - 3) / 2);
+	sz = oz1 + ((oz2 - oz1 + 1 - 3) / 2);
+	if (sx < 0) sx = 0;
+	if (sz < 0) sz = 0;
+	if (sx + 2 > World.MaxX) sx = World.MaxX - 2;
+	if (sz + 2 > World.MaxZ) sz = World.MaxZ - 2;
+
+	/* Carve the shaft from lower floor to upper floor + 2 headroom */
+	StrangeGen_CarveBox(sx, lower->floorY, sz,
+	                    sx + 2, min(upper->floorY + 2, World.MaxY), sz + 2);
+
+	/* Centre pillar */
+	for (y = lower->floorY; y <= upper->floorY && y <= World.MaxY; y++)
+		Gen_Blocks[World_Pack(sx + 1, y, sz + 1)] = strange_wallBlock;
+
+	/* Spiral steps around the pillar */
+	step = 0;
+	for (y = lower->floorY; y <= upper->floorY && y <= World.MaxY; y++) {
+		cx = sx + spiral_dx[step % 8];
+		cz = sz + spiral_dz[step % 8];
+		Gen_Blocks[World_Pack(cx, y, cz)] = BLOCK_SLAB;
+		step++;
+	}
+}
+
+/* Build vertical connections between rooms that overlap in XZ on adjacent
+   levels.  Only called for furnished dungeon worlds. */
+static void StrangeGen_PlaceVerticalConnections(void) {
+	int lev, i, j;
+	int startL, endL, startU, endU;
+	int ox1, oz1, ox2, oz2, ow, od;
+
+	for (lev = 0; lev < strange_numLevels - 1; lev++) {
+		startL = strange_levelStartIdx[lev];
+		endL   = strange_levelStartIdx[lev + 1];
+		startU = strange_levelStartIdx[lev + 1];
+		endU   = (lev + 2 < strange_numLevels) ?
+		          strange_levelStartIdx[lev + 2] : strange_roomCount;
+
+		for (i = startL; i < endL; i++) {
+			for (j = startU; j < endU; j++) {
+				if (!StrangeGen_RoomXZIntersect(&strange_rooms[i],
+						&strange_rooms[j], &ox1, &oz1, &ox2, &oz2))
+					continue;
+				/* 30 % chance per overlapping pair */
+				if (Random_Next(&strange_rnd, 100) >= 30) continue;
+
+				ow = ox2 - ox1 + 1;
+				od = oz2 - oz1 + 1;
+				/* Spiral staircase needs a 3x3 overlap; 50/50 vs ladder */
+				if (ow >= 3 && od >= 3 && Random_Next(&strange_rnd, 2) == 0) {
+					StrangeGen_PlaceSpiralStairs(
+						&strange_rooms[i], &strange_rooms[j],
+						ox1, oz1, ox2, oz2);
+				} else {
+					StrangeGen_PlaceLadderShaft(
+						&strange_rooms[i], &strange_rooms[j],
+						ox1, oz1, ox2, oz2);
+				}
+			}
+		}
+		Gen_CurrentProgress = (float)(lev + 1) / (float)(strange_numLevels - 1);
+	}
+}
+
+/* Queue torches along the walls of a room at the top of the interior */
+static void StrangeGen_QueueRoomTorches(const struct StrangeRoom* r) {
+	int torchY, i;
+	torchY = r->floorY + r->ceilHeight - 1;
+	if (torchY > World.MaxY) torchY = World.MaxY;
+
+	/* North wall (z = r->z): wall block is at z-1 */
+	for (i = r->x; i < r->x + r->w; i += STRANGE_TORCH_SPACING) {
+		StrangeGen_QueueTorch(i, torchY, r->z, i, torchY, r->z - 1);
+	}
+	/* South wall (z = r->z + r->d - 1): wall block is at z+d */
+	for (i = r->x; i < r->x + r->w; i += STRANGE_TORCH_SPACING) {
+		StrangeGen_QueueTorch(i, torchY, r->z + r->d - 1, i, torchY, r->z + r->d);
+	}
+	/* West wall (x = r->x): wall block is at x-1 */
+	for (i = r->z; i < r->z + r->d; i += STRANGE_TORCH_SPACING) {
+		StrangeGen_QueueTorch(r->x, torchY, i, r->x - 1, torchY, i);
+	}
+	/* East wall (x = r->x + r->w - 1): wall block is at x+w */
+	for (i = r->z; i < r->z + r->d; i += STRANGE_TORCH_SPACING) {
+		StrangeGen_QueueTorch(r->x + r->w - 1, torchY, i, r->x + r->w, torchY, i);
+	}
+}
+
+static void StrangeGen_QueueAllTorches(void) {
+	int i;
+	for (i = 0; i < strange_roomCount; i++) {
+		StrangeGen_QueueRoomTorches(&strange_rooms[i]);
+		Gen_CurrentProgress = (float)(i + 1) / (float)strange_roomCount;
+	}
+}
+
+static void StrangeGen_FindSpawn(void) {
+	/* Spawn in the first room on the bottom level */
+	if (strange_roomCount > 0) {
+		const struct StrangeRoom* r = &strange_rooms[0];
+		Gen_SpawnOverride.x = (float)(r->x + r->w / 2) + 0.5f;
+		Gen_SpawnOverride.y = (float)(r->floorY);
+		Gen_SpawnOverride.z = (float)(r->z + r->d / 2) + 0.5f;
+	} else {
+		/* Fallback: center of the world */
+		Gen_SpawnOverride.x = (float)(World.Width  / 2) + 0.5f;
+		Gen_SpawnOverride.y = (float)(World.Height / 2);
+		Gen_SpawnOverride.z = (float)(World.Length / 2) + 0.5f;
+	}
+}
+
+static cc_bool StrangeGen_Prepare(int seed) {
+	Random_Seed(&strange_rnd, seed);
+	Gen_SpawnOverride.y = -1.0f;
+	strange_torchCount  = 0;
+
+	/* Pick random wall material */
+	strange_wallBlock = StrangeGen_Materials[
+		Random_Next(&strange_rnd, STRANGE_MATERIAL_COUNT)];
+
+	/* 50% chance to have torches */
+	strange_hasTorches = (Random_Next(&strange_rnd, 2) == 0);
+
+	/* 50% chance to be furnished if material is oak planks */
+	strange_isFurnished = false;
+	if (strange_wallBlock == BLOCK_WOOD) {
+		strange_isFurnished = (Random_Next(&strange_rnd, 2) == 0);
+	}
+
+	/* 60% dungeon, 5% library, 35% sky */
+	{
+		int modeRoll = Random_Next(&strange_rnd, 100);
+		if (modeRoll < 60) {
+			strange_mode = STRANGE_MODE_DUNGEON;
+		} else if (modeRoll < 65) {
+			strange_mode = STRANGE_MODE_LIBRARY;
+		} else {
+			strange_mode = STRANGE_MODE_SKY;
+		}
+	}
+
+	/* Sky mode: decide walkways/shapes */
+	strange_skyWalkways = false;
+	strange_skyShapes   = false;
+	if (strange_mode == STRANGE_MODE_SKY) {
+		int skyRoll = Random_Next(&strange_rnd, 4);
+		if (skyRoll < 2) {
+			strange_skyWalkways = true;  /* 50%: walkways only */
+		} else if (skyRoll == 2) {
+			strange_skyShapes = true;    /* 25%: shapes only */
+		} else {
+			strange_skyWalkways = true;  /* 25%: both */
+			strange_skyShapes   = true;
+		}
+	}
+
+	return true;
+}
+
+/*########################################################################################################################*
+*-------------------------------------------------Library maze generation-------------------------------------------------*
+*#########################################################################################################################*/
+
+/* Generate a library-style maze: oak plank floor + ceiling, bookshelf walls, rare chests */
+static void StrangeGen_GenerateLibrary(void) {
+	int x, y, z, idx;
+
+	/* Step 1: Fill world - plank floor, bookshelves, plank ceiling */
+	Gen_CurrentState = "Filling library";
+	Gen_CurrentProgress = 0.0f;
+
+	/* Everything between floor and ceiling is bookshelves */
+	Mem_Set(Gen_Blocks, BLOCK_BOOKSHELF, World.Volume);
+
+	/* Oak plank floor at y=0 */
+	for (z = 0; z <= World.MaxZ; z++)
+		for (x = 0; x <= World.MaxX; x++)
+			Gen_Blocks[World_Pack(x, 0, z)] = BLOCK_WOOD;
+
+	/* Oak plank ceiling at y=MaxY */
+	for (z = 0; z <= World.MaxZ; z++)
+		for (x = 0; x <= World.MaxX; x++)
+			Gen_Blocks[World_Pack(x, World.MaxY, z)] = BLOCK_WOOD;
+
+	Gen_CurrentProgress = 0.2f;
+
+	/* Step 2: Carve pathways through the bookshelves using the walkway
+	   random-walk algorithm.  Each path segment carves a 2-block-tall
+	   corridor (y=1 and y=2) so the player can walk through. */
+	Gen_CurrentState = "Carving pathways";
+	{
+		int numPaths, i, sx, sz, cx, cz, segLen, dir, s, dx, dz;
+		int pathWidth, pw;
+		int maxSX, maxSZ;
+		int carveY1 = 1;
+		int carveY2 = World.MaxY - 1; /* full height: floor to ceiling */
+
+		if (World.Width < 3 || World.Length < 3) goto after_carve;
+
+		maxSX = World.MaxX - 1; if (maxSX < 2) maxSX = 2;
+		maxSZ = World.MaxZ - 1; if (maxSZ < 2) maxSZ = 2;
+
+		numPaths = (World.Width + World.Length) / 4;
+		if (numPaths < 20) numPaths = 20;
+
+		for (i = 0; i < numPaths; i++) {
+			sx = Random_Range(&strange_rnd, 1, maxSX + 1);
+			sz = Random_Range(&strange_rnd, 1, maxSZ + 1);
+			cx = sx; cz = sz;
+
+			{
+				int segs = Random_Range(&strange_rnd, 2, 8);
+				int seg;
+				for (seg = 0; seg < segs; seg++) {
+					segLen = Random_Range(&strange_rnd, 3, 20);
+					dir = Random_Next(&strange_rnd, 4);
+					switch (dir) {
+					case 0: dx = 1;  dz = 0;  break;
+					case 1: dx = -1; dz = 0;  break;
+					case 2: dx = 0;  dz = 1;  break;
+					default: dx = 0; dz = -1; break;
+					}
+					pathWidth = Random_Range(&strange_rnd, 1, 4);
+
+					for (s = 0; s < segLen; s++) {
+						for (pw = 0; pw < pathWidth; pw++) {
+							int px, pz;
+							if (dx != 0) { px = cx; pz = cz + pw; }
+							else          { px = cx + pw; pz = cz; }
+							if (px >= 0 && px <= World.MaxX &&
+								pz >= 0 && pz <= World.MaxZ) {
+								for (y = carveY1; y <= carveY2; y++)
+									Gen_Blocks[World_Pack(px, y, pz)] = BLOCK_AIR;
+							}
+						}
+						cx += dx; cz += dz;
+						if (cx < 1 || cx > World.MaxX - 1 ||
+							cz < 1 || cz > World.MaxZ - 1) break;
+					}
+				}
+			}
+			Gen_CurrentProgress = 0.2f + 0.6f * ((float)(i + 1) / (float)numPaths);
+		}
+	}
+after_carve:
+	Gen_CurrentProgress = 0.8f;
+
+	/* Step 3: Rarely place chests next to bookshelf walls at floor level */
+	Gen_CurrentState = "Placing chests";
+	for (z = 2; z < World.MaxZ - 1; z++) {
+		for (x = 2; x < World.MaxX - 1; x++) {
+			idx = World_Pack(x, 1, z);
+			if (Gen_Blocks[idx] != BLOCK_AIR) continue;
+			/* Check if any horizontal neighbor is a bookshelf */
+			if (Gen_Blocks[World_Pack(x - 1, 1, z)] != BLOCK_BOOKSHELF
+				&& Gen_Blocks[World_Pack(x + 1, 1, z)] != BLOCK_BOOKSHELF
+				&& Gen_Blocks[World_Pack(x, 1, z - 1)] != BLOCK_BOOKSHELF
+				&& Gen_Blocks[World_Pack(x, 1, z + 1)] != BLOCK_BOOKSHELF) continue;
+			/* ~1.5% chance per valid spot */
+			if (Random_Next(&strange_rnd, 200) < 3) {
+				Gen_Blocks[idx] = BLOCK_CHEST;
+			}
+		}
+	}
+	Gen_CurrentProgress = 0.9f;
+
+	/* Step 4: Queue torches on bookshelf walls inside carved pathways */
+	if (strange_hasTorches) {
+		Gen_CurrentState = "Placing torches";
+		strange_torchCount = 0;
+		{
+			int ty = min(2, World.MaxY - 1); /* top of the 2-tall corridor */
+			for (z = 2; z < World.MaxZ - 1; z += STRANGE_TORCH_SPACING) {
+				for (x = 2; x < World.MaxX - 1; x += STRANGE_TORCH_SPACING) {
+					if (Gen_Blocks[World_Pack(x, ty, z)] != BLOCK_AIR) continue;
+					/* Try each adjacent wall */
+					if (Gen_Blocks[World_Pack(x, ty, z - 1)] == BLOCK_BOOKSHELF)
+						StrangeGen_QueueTorch(x, ty, z, x, ty, z - 1);
+					else if (Gen_Blocks[World_Pack(x, ty, z + 1)] == BLOCK_BOOKSHELF)
+						StrangeGen_QueueTorch(x, ty, z, x, ty, z + 1);
+					else if (Gen_Blocks[World_Pack(x - 1, ty, z)] == BLOCK_BOOKSHELF)
+						StrangeGen_QueueTorch(x, ty, z, x - 1, ty, z);
+					else if (Gen_Blocks[World_Pack(x + 1, ty, z)] == BLOCK_BOOKSHELF)
+						StrangeGen_QueueTorch(x, ty, z, x + 1, ty, z);
+				}
+			}
+		}
+		StrangeGen_FlushTorches();
+	}
+	Gen_CurrentProgress = 1.0f;
+
+	/* Step 5: Find spawn - search for open space in a carved pathway */
+	Gen_CurrentState = "Finding spawn";
+	{
+		int sx = World.Width / 2, sz = World.Length / 2;
+		int scanX, scanZ, scanR;
+		cc_bool found = false;
+		/* Spiral outward from center looking for a 1x2 air column */
+		for (scanR = 0; scanR < max(World.Width, World.Length) / 2 && !found; scanR++) {
+			for (scanZ = sz - scanR; scanZ <= sz + scanR && !found; scanZ++) {
+				for (scanX = sx - scanR; scanX <= sx + scanR && !found; scanX++) {
+					if (scanX < 1 || scanX > World.MaxX - 1) continue;
+					if (scanZ < 1 || scanZ > World.MaxZ - 1) continue;
+					if (scanX != sx - scanR && scanX != sx + scanR
+						&& scanZ != sz - scanR && scanZ != sz + scanR) continue;
+					if (Gen_Blocks[World_Pack(scanX, 1, scanZ)] == BLOCK_AIR
+						&& (World.MaxY < 2 || Gen_Blocks[World_Pack(scanX, 2, scanZ)] == BLOCK_AIR)) {
+						Gen_SpawnOverride.x = (float)scanX + 0.5f;
+						Gen_SpawnOverride.y = 1.0f;
+						Gen_SpawnOverride.z = (float)scanZ + 0.5f;
+						found = true;
+					}
+				}
+			}
+		}
+		if (!found) {
+			/* Fallback: carve a spawn pocket */
+			Gen_Blocks[World_Pack(sx, 1, sz)] = BLOCK_AIR;
+			if (World.MaxY >= 2) Gen_Blocks[World_Pack(sx, 2, sz)] = BLOCK_AIR;
+			Gen_SpawnOverride.x = (float)sx + 0.5f;
+			Gen_SpawnOverride.y = 1.0f;
+			Gen_SpawnOverride.z = (float)sz + 0.5f;
+		}
+	}
+
+	gen_done = true;
+}
+
+/*########################################################################################################################*
+*--------------------------------------------------Sky world generation---------------------------------------------------*
+*#########################################################################################################################*/
+
+/* Materials for sky walkways */
+static const BlockRaw SkyGen_WalkwayMaterials[] = {
+	BLOCK_COBBLE, BLOCK_MOSSY_ROCKS, BLOCK_WOOD, BLOCK_OBSIDIAN, BLOCK_STONE, BLOCK_BRICK
+};
+#define SKY_WALKWAY_MATERIAL_COUNT 6
+#define SKY_LAYER_SPACING 25
+
+/* Generate connected walkways on a single layer at the given Y */
+static void SkyGen_GenerateWalkwayLayer(int baseY, BlockRaw material) {
+	int numPaths, i, sx, sz, cx, cz, segLen, dir, s, dx, dz;
+	int pathWidth, pw, y;
+	int maxSX, maxSZ;
+
+	/* Need at least 3-wide world to place walkways */
+	if (World.Width < 3 || World.Length < 3) return;
+
+	maxSX = World.MaxX - 1;
+	maxSZ = World.MaxZ - 1;
+	if (maxSX < 2) maxSX = 2;
+	if (maxSZ < 2) maxSZ = 2;
+
+	numPaths = (World.Width + World.Length) / 4;
+	if (numPaths < 20) numPaths = 20;
+
+	for (i = 0; i < numPaths; i++) {
+		sx = Random_Range(&strange_rnd, 1, maxSX + 1);
+		sz = Random_Range(&strange_rnd, 1, maxSZ + 1);
+		cx = sx; cz = sz;
+
+		/* Each path makes several segments */
+		{
+			int segs = Random_Range(&strange_rnd, 2, 8);
+			int seg;
+			for (seg = 0; seg < segs; seg++) {
+				segLen = Random_Range(&strange_rnd, 3, 20);
+				dir = Random_Next(&strange_rnd, 4);
+				switch (dir) {
+				case 0: dx = 1; dz = 0; break;
+				case 1: dx = -1; dz = 0; break;
+				case 2: dx = 0; dz = 1; break;
+				default: dx = 0; dz = -1; break;
+				}
+				pathWidth = Random_Range(&strange_rnd, 1, 4); /* 1-3 blocks wide */
+
+				for (s = 0; s < segLen; s++) {
+					for (pw = 0; pw < pathWidth; pw++) {
+						int px, pz;
+						if (dx != 0) { px = cx; pz = cz + pw; }
+						else          { px = cx + pw; pz = cz; }
+						if (px >= 0 && px <= World.MaxX && pz >= 0 && pz <= World.MaxZ) {
+							Gen_Blocks[World_Pack(px, baseY, pz)] = material;
+							/* Add fence/railing on edges occasionally */
+						}
+					}
+					cx += dx;
+					cz += dz;
+					if (cx < 1 || cx > World.MaxX - 1 || cz < 1 || cz > World.MaxZ - 1) break;
+				}
+			}
+		}
+	}
+}
+
+static void SkyGen_GenerateWalkways(void) {
+	int layer, layerY, numLayers;
+	BlockRaw mat;
+
+	numLayers = 0;
+	for (layerY = World.Height / 3; layerY < World.Height - 5; layerY += SKY_LAYER_SPACING) {
+		numLayers++;
+	}
+	if (numLayers < 1) numLayers = 1;
+
+	layer = 0;
+	for (layerY = World.Height / 3; layerY < World.Height - 5; layerY += SKY_LAYER_SPACING) {
+		mat = SkyGen_WalkwayMaterials[Random_Next(&strange_rnd, SKY_WALKWAY_MATERIAL_COUNT)];
+		SkyGen_GenerateWalkwayLayer(layerY, mat);
+		layer++;
+		Gen_CurrentProgress = (float)layer / (float)numLayers;
+	}
+}
+
+/* Materials for floating shapes */
+static const BlockRaw SkyGen_ShapeMaterials[] = {
+	BLOCK_STONE, BLOCK_COBBLE, BLOCK_MOSSY_ROCKS, BLOCK_BRICK, BLOCK_WOOD,
+	BLOCK_OBSIDIAN, BLOCK_DIRT, BLOCK_IRON, BLOCK_GOLD, BLOCK_SNOW_BLOCK,
+	BLOCK_DIAMOND_BLOCK
+};
+#define SKY_SHAPE_MATERIAL_COUNT 11
+
+static void SkyGen_GenerateShapes(void) {
+	int numShapes, i, cx, cy, cz, shapeType, r, h;
+	int maxR, minCY, maxCY;
+	int x, y, z, x1, x2, y1, y2, z1, z2;
+	int dx, dy, dz, r2, layerR, layer;
+	BlockRaw mat;
+
+	numShapes = (World.Width + World.Length) / 6;
+	if (numShapes < 10) numShapes = 10;
+	if (numShapes > 80) numShapes = 80;
+
+	/* Guard bounds for Random_Range */
+	maxR = World.Width / 5;
+	if (maxR > 12) maxR = 12;
+	if (maxR < 3)  maxR = 3;
+
+	minCY = World.Height / 4;
+	maxCY = World.Height * 3 / 4;
+	if (maxCY <= minCY) maxCY = minCY + 1;
+
+	for (i = 0; i < numShapes; i++) {
+		cx = Random_Next(&strange_rnd, World.Width);
+		cy = Random_Range(&strange_rnd, minCY, maxCY);
+		cz = Random_Next(&strange_rnd, World.Length);
+		r  = Random_Range(&strange_rnd, 2, maxR + 1);
+		h  = Random_Range(&strange_rnd, 3, r * 2 + 2);
+		mat = SkyGen_ShapeMaterials[Random_Next(&strange_rnd, SKY_SHAPE_MATERIAL_COUNT)];
+		shapeType = Random_Next(&strange_rnd, 4);
+
+		/* Compute bounding box clamped to world */
+		x1 = cx - r; if (x1 < 0) x1 = 0;
+		x2 = cx + r; if (x2 > World.MaxX) x2 = World.MaxX;
+		z1 = cz - r; if (z1 < 0) z1 = 0;
+		z2 = cz + r; if (z2 > World.MaxZ) z2 = World.MaxZ;
+		y1 = cy - r; if (y1 < 0) y1 = 0;
+		y2 = cy + r; if (y2 > World.MaxY) y2 = World.MaxY;
+		r2 = r * r;
+
+		switch (shapeType) {
+		case 0: /* Cube */
+			for (y = y1; y <= y2; y++)
+				for (z = z1; z <= z2; z++)
+					for (x = x1; x <= x2; x++)
+						Gen_Blocks[World_Pack(x, y, z)] = mat;
+			break;
+
+		case 1: /* Sphere */
+			for (y = y1; y <= y2; y++)
+				for (z = z1; z <= z2; z++)
+					for (x = x1; x <= x2; x++) {
+						dx = x - cx; dy = y - cy; dz = z - cz;
+						if (dx*dx + dy*dy + dz*dz <= r2)
+							Gen_Blocks[World_Pack(x, y, z)] = mat;
+					}
+			break;
+
+		case 2: /* Pyramid */
+			y2 = cy + h - 1; if (y2 > World.MaxY) y2 = World.MaxY;
+			for (layer = 0; layer < h; layer++) {
+				y = cy + layer;
+				if (y < 0 || y > World.MaxY) continue;
+				layerR = r - (r * layer) / h;
+				if (layerR < 0) layerR = 0;
+				x1 = cx - layerR; if (x1 < 0) x1 = 0;
+				x2 = cx + layerR; if (x2 > World.MaxX) x2 = World.MaxX;
+				z1 = cz - layerR; if (z1 < 0) z1 = 0;
+				z2 = cz + layerR; if (z2 > World.MaxZ) z2 = World.MaxZ;
+				for (z = z1; z <= z2; z++)
+					for (x = x1; x <= x2; x++)
+						Gen_Blocks[World_Pack(x, y, z)] = mat;
+			}
+			break;
+
+		case 3: /* Cylinder */
+			y1 = cy; if (y1 < 0) y1 = 0;
+			y2 = cy + h - 1; if (y2 > World.MaxY) y2 = World.MaxY;
+			x1 = cx - r; if (x1 < 0) x1 = 0;
+			x2 = cx + r; if (x2 > World.MaxX) x2 = World.MaxX;
+			z1 = cz - r; if (z1 < 0) z1 = 0;
+			z2 = cz + r; if (z2 > World.MaxZ) z2 = World.MaxZ;
+			for (y = y1; y <= y2; y++)
+				for (z = z1; z <= z2; z++)
+					for (x = x1; x <= x2; x++) {
+						dx = x - cx; dz = z - cz;
+						if (dx*dx + dz*dz <= r2)
+							Gen_Blocks[World_Pack(x, y, z)] = mat;
+					}
+			break;
+		}
+
+		Gen_CurrentProgress = (float)(i + 1) / (float)numShapes;
+	}
+}
+
+static void StrangeGen_GenerateSky(void) {
+	/* Step 1: Fill world with air */
+	Gen_CurrentState = "Clearing sky world";
+	Gen_CurrentProgress = 0.0f;
+	Mem_Set(Gen_Blocks, BLOCK_AIR, World.Volume);
+	Gen_CurrentProgress = 1.0f;
+
+	/* Step 2: Walkway layers */
+	if (strange_skyWalkways) {
+		Gen_CurrentState = "Building walkways";
+		Gen_CurrentProgress = 0.0f;
+		SkyGen_GenerateWalkways();
+	}
+
+	/* Step 3: Floating shapes */
+	if (strange_skyShapes) {
+		Gen_CurrentState = "Placing floating shapes";
+		Gen_CurrentProgress = 0.0f;
+		SkyGen_GenerateShapes();
+	}
+
+	/* Step 4: Find spawn - search for a valid 1x2 air column */
+	Gen_CurrentState = "Finding spawn";
+	{
+		int sx = World.Width / 2, sz = World.Length / 2;
+		int scanX, scanZ, scanY, bestY;
+		cc_bool found = false;
+
+		/* For walkways: scan near center on each walkway layer */
+		if (strange_skyWalkways) {
+			int layerY;
+			for (layerY = World.Height / 3; layerY < World.Height - 5 && !found; layerY += SKY_LAYER_SPACING) {
+				for (scanZ = sz - 15; scanZ <= sz + 15 && !found; scanZ++) {
+					for (scanX = sx - 15; scanX <= sx + 15 && !found; scanX++) {
+						if (scanX < 0 || scanX > World.MaxX || scanZ < 0 || scanZ > World.MaxZ) continue;
+						/* Solid ground with 2 air blocks above */
+						if (Gen_Blocks[World_Pack(scanX, layerY, scanZ)] != BLOCK_AIR
+							&& (layerY + 1 > World.MaxY || Gen_Blocks[World_Pack(scanX, layerY + 1, scanZ)] == BLOCK_AIR)
+							&& (layerY + 2 > World.MaxY || Gen_Blocks[World_Pack(scanX, layerY + 2, scanZ)] == BLOCK_AIR)) {
+							Gen_SpawnOverride.x = (float)scanX + 0.5f;
+							Gen_SpawnOverride.y = (float)(layerY + 1);
+							Gen_SpawnOverride.z = (float)scanZ + 0.5f;
+							found = true;
+						}
+					}
+				}
+			}
+		}
+
+		/* For shapes (or walkway fallback): scan downward from top at center */
+		if (!found) {
+			for (scanY = World.MaxY; scanY >= 1 && !found; scanY--) {
+				for (scanZ = sz - 20; scanZ <= sz + 20 && !found; scanZ++) {
+					for (scanX = sx - 20; scanX <= sx + 20 && !found; scanX++) {
+						if (scanX < 0 || scanX > World.MaxX || scanZ < 0 || scanZ > World.MaxZ) continue;
+						if (Gen_Blocks[World_Pack(scanX, scanY, scanZ)] != BLOCK_AIR
+							&& (scanY + 1 > World.MaxY || Gen_Blocks[World_Pack(scanX, scanY + 1, scanZ)] == BLOCK_AIR)
+							&& (scanY + 2 > World.MaxY || Gen_Blocks[World_Pack(scanX, scanY + 2, scanZ)] == BLOCK_AIR)) {
+							Gen_SpawnOverride.x = (float)scanX + 0.5f;
+							Gen_SpawnOverride.y = (float)(scanY + 1);
+							Gen_SpawnOverride.z = (float)scanZ + 0.5f;
+							found = true;
+						}
+					}
+				}
+			}
+		}
+
+		if (!found) {
+			/* Absolute fallback: center of world in air */
+			Gen_SpawnOverride.x = (float)(World.Width / 2) + 0.5f;
+			Gen_SpawnOverride.y = (float)(World.Height / 2);
+			Gen_SpawnOverride.z = (float)(World.Length / 2) + 0.5f;
+		}
+	}
+
+	gen_done = true;
+}
+
+static void StrangeGen_Generate(void) {
+	if (strange_mode == STRANGE_MODE_LIBRARY) {
+		StrangeGen_GenerateLibrary();
+		return;
+	}
+	if (strange_mode == STRANGE_MODE_SKY) {
+		StrangeGen_GenerateSky();
+		return;
+	}
+
+	/* --- Dungeon mode --- */
+	/* Step 1: Fill entire world with the wall block */
+	Gen_CurrentState = "Filling dungeon walls";
+	Gen_CurrentProgress = 0.0f;
+	Mem_Set(Gen_Blocks, strange_wallBlock, World.Volume);
+	Gen_CurrentProgress = 1.0f;
+
+	/* Step 2: Place rooms */
+	Gen_CurrentState = "Carving rooms";
+	Gen_CurrentProgress = 0.0f;
+	StrangeGen_PlaceRooms();
+
+	/* Step 3: Connect rooms with hallways */
+	if (strange_roomCount > 1) {
+		Gen_CurrentState = "Carving hallways";
+		Gen_CurrentProgress = 0.0f;
+		StrangeGen_PlaceHallways();
+	}
+
+	/* Step 4: Furnish rooms (chests, crafting tables, furnaces, doors, windows) */
+	if (strange_isFurnished) {
+		Gen_CurrentState = "Furnishing rooms";
+		Gen_CurrentProgress = 0.0f;
+		StrangeGen_FurnishRooms();
+	}
+
+	/* Step 4b: Connect vertically-overlapping rooms with ladders / stairs */
+	if (strange_isFurnished && strange_numLevels > 1) {
+		Gen_CurrentState = "Building staircases";
+		Gen_CurrentProgress = 0.0f;
+		StrangeGen_PlaceVerticalConnections();
+	}
+
+	/* Step 5: Queue room torches (hallway torches already queued during carving) */
+	if (strange_hasTorches) {
+		Gen_CurrentState = "Queuing torches";
+		Gen_CurrentProgress = 0.0f;
+		StrangeGen_QueueAllTorches();
+	}
+
+	/* Step 6: Flush all torch candidates - only places if wall is still solid */
+	if (strange_hasTorches && strange_torchCount > 0) {
+		Gen_CurrentState = "Placing torches";
+		Gen_CurrentProgress = 0.0f;
+		StrangeGen_FlushTorches();
+		Gen_CurrentProgress = 1.0f;
+	}
+
+	/* Step 7: Find spawn point */
+	Gen_CurrentState = "Finding spawn";
+	StrangeGen_FindSpawn();
+
+	gen_done = true;
+}
+
+static void StrangeGen_Setup(void) {
+	if (strange_mode == STRANGE_MODE_SKY) {
+		/* Sky mode: use floating world appearance */
+		Env_SetEdgeBlock(BLOCK_AIR);
+		Env_SetSidesBlock(BLOCK_AIR);
+		Env_SetCloudsHeight(-16);
+		return;
+	}
+	/* Dungeon/Library: dark underground environment */
+	Env_SetEdgeBlock(BLOCK_BEDROCK);
+	Env_SetSidesBlock(BLOCK_BEDROCK);
+	Env_SetCloudsHeight(-16);
+	Env_SetSkyCol(PackedCol_Make(16, 16, 16, 255));
+	Env_SetFogCol(PackedCol_Make(8, 8, 8, 255));
+	Env_SetCloudsCol(PackedCol_Make(16, 16, 16, 255));
+	Env_SetShadowCol(PackedCol_Make(32, 32, 32, 255));
+}
+
+const struct MapGenerator StrangeGen = {
+	StrangeGen_Prepare,
+	StrangeGen_Generate,
+	StrangeGen_Setup
+};
+
+
+/*########################################################################################################################*
 *----------------------------------------------------Tree generation------------------------------------------------------*
 *#########################################################################################################################*/
 BlockRaw* Tree_Blocks;
