@@ -163,6 +163,11 @@ void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
    Returns encoded value: (textureLoc << 2) | rotation
    rotation: 0=0deg, 1=90CW, 2=180, 3=270CW */
 int Rail_GetTextureAndRotation(int x, int y, int z, Face face);
+/* Decode helpers for Rail_GetTextureAndRotation return value */
+#define RAIL_DECODE_TEX(e)     ((TextureLoc)((e) >> 4))
+#define RAIL_DECODE_ROT(e)     ((e) & 3)
+#define RAIL_DECODE_SLOPED(e)  (((e) >> 2) & 1)
+#define RAIL_DECODE_HIGHEND(e) (((e) >> 3) & 1)
 
 CC_END_HEADER
 #endif

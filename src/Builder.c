@@ -1410,25 +1410,28 @@ static const cc_uint8 railUV[4][4][2] = {
 	{ {0,0}, {0,1}, {1,1}, {1,0} },
 };
 
-/* Draws a rail block as a flat quad on the YMAX face with UV rotation
+/* Draws a rail block as a flat or sloped quad on the YMAX face with UV rotation
    based on neighboring rail connections. */
 static void Builder_DrawRail(int index, int x, int y, int z) {
 	struct Builder1DPart* part;
 	struct VertexTextured* v;
 	PackedCol col;
-	int encoded, rotation;
+	int encoded, rotation, sloped, highEnd;
 	TextureLoc loc;
 	float vOrigin, u1, u2, v1, v2;
-	float x1, x2, y2, z1, z2;
+	float x1, x2, z1, z2;
+	float yNE, yNW, ySW, ySE; /* per-corner Y values for slopes */
 	int count_YMax, lightFlags, offset, baseOffset;
 	
 	count_YMax = Builder_Counts[index + FACE_YMAX];
 	if (!count_YMax) return;
 	
-	/* Get the texture and rotation from rail connection logic */
+	/* Get the texture, rotation, and slope from rail connection logic */
 	encoded  = Rail_GetTextureAndRotation(x, y, z, FACE_YMAX);
-	loc      = (TextureLoc)(encoded >> 2);
-	rotation = encoded & 3;
+	loc      = RAIL_DECODE_TEX(encoded);
+	rotation = RAIL_DECODE_ROT(encoded);
+	sloped   = RAIL_DECODE_SLOPED(encoded);
+	highEnd  = RAIL_DECODE_HIGHEND(encoded);
 	
 	/* Calculate UV coordinates from atlas */
 	vOrigin = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
@@ -1443,9 +1446,37 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 	
 	x1 = (float)x;
 	x2 = (float)x + 1.0f;
-	y2 = (float)y + Blocks.MaxBB[Builder_Block].y;
 	z1 = (float)z;
 	z2 = (float)z + 1.0f;
+	
+	/* Base Y for the flat rail surface */
+	{
+		float yBase = (float)y + Blocks.MaxBB[Builder_Block].y;
+		yNE = yNW = ySW = ySE = yBase;
+		
+		if (sloped) {
+			/* Raise the appropriate edge by 1 block */
+			if (rotation == 0) {
+				/* N-S axis: north is z-, south is z+ */
+				if (highEnd == 0) {
+					/* North end high: NE and NW raised */
+					yNE += 1.0f; yNW += 1.0f;
+				} else {
+					/* South end high: SE and SW raised */
+					ySE += 1.0f; ySW += 1.0f;
+				}
+			} else {
+				/* E-W axis: east is x+, west is x- */
+				if (highEnd == 0) {
+					/* East end high: NE and SE raised */
+					yNE += 1.0f; ySE += 1.0f;
+				} else {
+					/* West end high: NW and SW raised */
+					yNW += 1.0f; ySW += 1.0f;
+				}
+			}
+		}
+	}
 	
 	offset = (lightFlags >> FACE_YMAX) & 1;
 	col    = Lighting.Color_YMax_Fast(x, y + offset, z);
@@ -1453,7 +1484,7 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 	part = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 	v = part->faces.vertices[FACE_YMAX];
 	
-	/* Emit 4 vertices with rotated UVs:
+	/* Emit 4 vertices with rotated UVs and per-corner Y heights:
 	   Vertex order matches Drawer_YMax: NE, NW, SW, SE */
 	{
 		float uvals[2], vvals[2];
@@ -1461,22 +1492,22 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 		vvals[0] = v1; vvals[1] = v2;
 		
 		/* NE corner (x+, z-) */
-		v->x = x2; v->y = y2; v->z = z1; v->Col = col;
+		v->x = x2; v->y = yNE; v->z = z1; v->Col = col;
 		v->U = uvals[railUV[rotation][0][0]];
 		v->V = vvals[railUV[rotation][0][1]]; v++;
 		
 		/* NW corner (x-, z-) */
-		v->x = x1; v->y = y2; v->z = z1; v->Col = col;
+		v->x = x1; v->y = yNW; v->z = z1; v->Col = col;
 		v->U = uvals[railUV[rotation][1][0]];
 		v->V = vvals[railUV[rotation][1][1]]; v++;
 		
 		/* SW corner (x-, z+) */
-		v->x = x1; v->y = y2; v->z = z2; v->Col = col;
+		v->x = x1; v->y = ySW; v->z = z2; v->Col = col;
 		v->U = uvals[railUV[rotation][2][0]];
 		v->V = vvals[railUV[rotation][2][1]]; v++;
 		
 		/* SE corner (x+, z+) */
-		v->x = x2; v->y = y2; v->z = z2; v->Col = col;
+		v->x = x2; v->y = ySE; v->z = z2; v->Col = col;
 		v->U = uvals[railUV[rotation][3][0]];
 		v->V = vvals[railUV[rotation][3][1]]; v++;
 	}

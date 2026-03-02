@@ -41,7 +41,8 @@ static TextureLoc IsometricDrawer_GetTexLoc(BlockID block, Face face) {
 
 static void IsometricDrawer_Flat(BlockID block, float size) {
 	int texIndex;
-	TextureLoc loc = Block_Tex(block, FACE_ZMAX);
+	Face face = (block == BLOCK_RAIL) ? FACE_YMAX : FACE_ZMAX;
+	TextureLoc loc = Block_Tex(block, face);
 	TextureRec rec = Atlas1D_TexRec(loc, 1, &texIndex);
 
 	struct VertexTextured* v;
@@ -76,7 +77,6 @@ static int GetItemTexForBlock(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST)    return 56;
 	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
 	if (block == BLOCK_IRON_DOOR)       return 44;
-	if (block == BLOCK_RAIL)            return 57;
 	return -1;
 }
 
@@ -179,7 +179,7 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 	itemTile = GetItemTexForBlock(block);
 	if (itemTile >= 0) {
 		IsometricDrawer_FlatItem(itemTile, size);
-	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER) {
+	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || block == BLOCK_RAIL) {
 		IsometricDrawer_Flat(block, size);
 	} else {
 		IsometricDrawer_Angled(block, size);

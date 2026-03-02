@@ -488,58 +488,119 @@ static cc_bool IsRail(BlockID block) {
 #define RAIL_STRAIGHT 128
 #define RAIL_CURVE    112
 
-/* Rail texture/rotation encoding: high byte = texture, low 2 bits = rotation */
-/* Used by Builder_DrawRail to select texture and UV rotation */
+/* Rail texture/rotation/slope encoding:
+   bits 0-1: UV rotation (0-3)
+   bit  2:   is sloped (0=flat, 1=sloped)
+   bit  3:   slope high-end (0=north/east high end, 1=south/west high end)
+   bits 4+:  texture location
+   Used by Builder_DrawRail to select texture, UV rotation, and slope. */
+
+/* Encoding helpers */
+#define RAIL_ENCODE(tex, rot, slope, highEnd) \
+	(((tex) << 4) | ((highEnd) << 3) | ((slope) << 2) | (rot))
+#define RAIL_DECODE_TEX(e)     ((TextureLoc)((e) >> 4))
+#define RAIL_DECODE_ROT(e)     ((e) & 3)
+#define RAIL_DECODE_SLOPED(e)  (((e) >> 2) & 1)
+#define RAIL_DECODE_HIGHEND(e) (((e) >> 3) & 1)
+
+/* Check if there's a rail at (x, y, z) or a rail one block up at (x, y+1, z) 
+   sitting on a solid block at (x, y, z). Returns: 0=none, 1=same level, 2=up one */
+static int RailConnectionAt(int x, int y, int z) {
+	/* Same level */
+	if (World_Contains(x, y, z) && IsRail(World_GetBlock(x, y, z)))
+		return 1;
+	/* One block up: rail at (x, y+1, z) on top of solid block at (x, y, z) */
+	if (World_Contains(x, y + 1, z) && IsRail(World_GetBlock(x, y + 1, z)))
+		return 2;
+	return 0;
+}
+
+/* Check if there's a rail one block down at (x, y-1, z) */
+static cc_bool RailBelow(int x, int y, int z) {
+	return World_Contains(x, y - 1, z) && IsRail(World_GetBlock(x, y - 1, z));
+}
 
 /* Get rail top texture and rotation based on neighboring rail connections.
-   Returns encoded value: (textureLoc << 2) | rotation
+   Returns encoded value with texture, rotation, and slope info.
    For non-YMAX faces, just returns 86 (transparent side texture). */
 int Rail_GetTextureAndRotation(int x, int y, int z, Face face) {
+	int north_c, south_c, east_c, west_c;
 	cc_bool north, south, east, west;
+	cc_bool north_up, south_up, east_up, west_up;
+	cc_bool north_down, south_down, east_down, west_down;
+	int connections;
 	
 	/* Only top face varies based on connections */
 	if (face != FACE_YMAX) {
-		return (86 << 2) | 0;
+		return RAIL_ENCODE(86, 0, 0, 0);
 	}
 	
-	/* Check for rail neighbors in all 4 horizontal directions */
-	north = south = east = west = false;
+	/* Check for rail neighbors in all 4 horizontal directions (same level and up) */
+	north_c = RailConnectionAt(x, y, z - 1);
+	south_c = RailConnectionAt(x, y, z + 1);
+	east_c  = RailConnectionAt(x + 1, y, z);
+	west_c  = RailConnectionAt(x - 1, y, z);
 	
-	if (World_Contains(x, y, z - 1) && IsRail(World_GetBlock(x, y, z - 1)))
-		north = true;
-	if (World_Contains(x, y, z + 1) && IsRail(World_GetBlock(x, y, z + 1)))
-		south = true;
-	if (World_Contains(x + 1, y, z) && IsRail(World_GetBlock(x + 1, y, z)))
-		east = true;
-	if (World_Contains(x - 1, y, z) && IsRail(World_GetBlock(x - 1, y, z)))
-		west = true;
+	north = north_c > 0;  north_up = north_c == 2;
+	south = south_c > 0;  south_up = south_c == 2;
+	east  = east_c  > 0;  east_up  = east_c  == 2;
+	west  = west_c  > 0;  west_up  = west_c  == 2;
+	
+	/* Also check for rails one block down (this rail slopes down to meet them) */
+	north_down = RailBelow(x, y, z - 1);
+	south_down = RailBelow(x, y, z + 1);
+	east_down  = RailBelow(x + 1, y, z);
+	west_down  = RailBelow(x - 1, y, z);
+	
+	/* Include below-connections as same-level connections for pattern matching */
+	if (north_down && !north) north = true;
+	if (south_down && !south) south = true;
+	if (east_down && !east)   east = true;
+	if (west_down && !west)   west = true;
+	
+	connections = north + south + east + west;
+	
+	/* Slopes: only for straight (2-connection or 1-connection) rails, 
+	   and only when one neighbor is one block up. Curves never slope. */
+	if (connections <= 2) {
+		/* N-S axis slopes */
+		if (north_up && !east && !west)
+			return RAIL_ENCODE(RAIL_STRAIGHT, 0, 1, 0);  /* slope up to north (north end high) */
+		if (south_up && !east && !west)
+			return RAIL_ENCODE(RAIL_STRAIGHT, 0, 1, 1);  /* slope up to south (south end high) */
+		/* E-W axis slopes */
+		if (east_up && !north && !south)
+			return RAIL_ENCODE(RAIL_STRAIGHT, 1, 1, 0);  /* slope up to east (east end high) */
+		if (west_up && !north && !south)
+			return RAIL_ENCODE(RAIL_STRAIGHT, 1, 1, 1);  /* slope up to west (west end high) */
+	}
 	
 	/* Determine texture and rotation based on connection pattern */
 	/* For 3 or 4 connections, prefer curves over straight */
 	
 	/* 4 connections: default to N-S straight (can't curve to all 4) */
-	if (north && south && east && west) return (RAIL_STRAIGHT << 2) | 0;
+	if (north && south && east && west) return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);
 	
 	/* 3 connections: pick the curve that makes sense, ignore the odd one out */
-	if (north && south && east) return (RAIL_CURVE << 2) | 1;  /* N-E curve (ignore south) */
-	if (north && south && west) return (RAIL_CURVE << 2) | 2;  /* N-W curve (ignore south) */
-	if (north && east && west)  return (RAIL_CURVE << 2) | 1;  /* N-E curve (ignore west) */
-	if (south && east && west)  return (RAIL_CURVE << 2) | 0;  /* S-E curve (ignore west) */
+	if (north && south && east) return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
+	if (north && south && west) return RAIL_ENCODE(RAIL_CURVE, 2, 0, 0);  /* N-W curve */
+	if (north && east && west)  return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
+	if (south && east && west)  return RAIL_ENCODE(RAIL_CURVE, 0, 0, 0);  /* S-E curve */
 	
 	/* 2 connections - straights and curves */
-	if (north && south) return (RAIL_STRAIGHT << 2) | 0;  /* N-S straight, 0 degrees */
-	if (east && west)   return (RAIL_STRAIGHT << 2) | 1;  /* E-W straight, 90 CCW */
+	if (north && south) return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);  /* N-S straight */
+	if (east && west)   return RAIL_ENCODE(RAIL_STRAIGHT, 1, 0, 0);  /* E-W straight */
 	
-	if (south && east)  return (RAIL_CURVE << 2) | 0;     /* S-E curve, 0 degrees */
-	if (north && east)  return (RAIL_CURVE << 2) | 1;     /* N-E curve, 90 CCW */
-	if (north && west)  return (RAIL_CURVE << 2) | 2;     /* N-W curve, 180 degrees */
-	if (south && west)  return (RAIL_CURVE << 2) | 3;     /* S-W curve, 270 CCW */
+	if (south && east)  return RAIL_ENCODE(RAIL_CURVE, 0, 0, 0);  /* S-E curve */
+	if (north && east)  return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
+	if (north && west)  return RAIL_ENCODE(RAIL_CURVE, 2, 0, 0);  /* N-W curve */
+	if (south && west)  return RAIL_ENCODE(RAIL_CURVE, 3, 0, 0);  /* S-W curve */
 	
 	/* 1 connection - straight rail aligned to the connection */
-	if (east || west) return (RAIL_STRAIGHT << 2) | 1;    /* E-W straight */
+	if (east || west) return RAIL_ENCODE(RAIL_STRAIGHT, 1, 0, 0);  /* E-W straight */
 	
 	/* 0 connections or north/south only - default N-S straight */
-	return (RAIL_STRAIGHT << 2) | 0;
+	return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);
 }
 
 /* Calculate which direction a directional block should face based on adjacent blocks */
