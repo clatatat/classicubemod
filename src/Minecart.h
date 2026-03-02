@@ -40,6 +40,8 @@ int Minecart_Spawn(float x, float y, float z);
 void Minecart_Despawn(int slot);
 /* Returns the index of the minecart closest to (x,y,z) within maxDist, or -1. */
 int Minecart_FindClosest(Vec3 pos, float maxDist);
+/* Returns the minecart slot that owns the given entity ID, or -1. */
+int Minecart_FindByEntityId(int entityId);
 /* Attempts to have the current player ride the given minecart. */
 void Minecart_RideCart(int slot);
 /* Dismounts the current player from any minecart they're riding. */

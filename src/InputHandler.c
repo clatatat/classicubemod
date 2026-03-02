@@ -1220,12 +1220,12 @@ static void InputHandler_DeleteBlock(void) {
 		if (Mob_TryPunchMob()) return;
 	}
 
-	/* Try to hit a minecart */
+	/* Try to hit a minecart (use ray-AABB test like mobs, so you must actually aim at it) */
 	{
 		struct LocalPlayer* p = Entities.CurPlayer;
 		if (p) {
-			Vec3 eyePos = Entity_GetEyePosition(&p->Base);
-			int mcSlot = Minecart_FindClosest(eyePos, p->ReachDistance + 0.5f);
+			int targetId = Entities_GetClosest(&p->Base);
+			int mcSlot   = Minecart_FindByEntityId(targetId);
 			if (mcSlot >= 0) {
 				struct Minecart* mc = &Minecarts[mcSlot];
 				mc->timeSinceHit = 10;
@@ -1305,23 +1305,15 @@ static void InputHandler_PlaceBlock(void) {
 	BlockID old, block, targetBlock, otherBlock, newBlock, newOtherBlock;
 	
 	/* ===== Minecart interaction: ride existing cart ===== */
-	/* Check if right-clicking near a minecart entity (regardless of held item) */
+	/* Use ray-AABB test so you must actually aim at the cart to ride it */
 	{
 		struct LocalPlayer* p = Entities.CurPlayer;
 		if (p && Minecart_GetPlayerCart() < 0) {
-			Vec3 eyePos = Entity_GetEyePosition(&p->Base);
-			int slot = Minecart_FindClosest(eyePos, 4.0f);
+			int targetId = Entities_GetClosest(&p->Base);
+			int slot     = Minecart_FindByEntityId(targetId);
 			if (slot >= 0) {
-				/* Check if player is looking at the cart (within reach) */
-				Vec3 cartPos = Minecarts[slot].pos;
-				float dx = cartPos.x - eyePos.x;
-				float dy = cartPos.y - eyePos.y;
-				float dz = cartPos.z - eyePos.z;
-				float dist = Math_SqrtF(dx * dx + dy * dy + dz * dz);
-				if (dist < p->ReachDistance + 0.5f) {
-					Minecart_RideCart(slot);
-					return;
-				}
+				Minecart_RideCart(slot);
+				return;
 			}
 		}
 	}

@@ -341,6 +341,15 @@ int Minecart_FindClosest(Vec3 pos, float maxDist) {
 	return bestSlot;
 }
 
+int Minecart_FindByEntityId(int entityId) {
+	int i;
+	if (entityId < 0) return -1;
+	for (i = 0; i < MAX_MINECARTS; i++) {
+		if (Minecarts[i].active && Minecarts[i].entityId == entityId) return i;
+	}
+	return -1;
+}
+
 
 /*########################################################################################################################*
 *-------------------------------------------------Riding mechanics--------------------------------------------------------*
