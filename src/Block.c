@@ -478,7 +478,7 @@ static TextureLoc RedOreDust_GetTexture(int x, int y, int z, Face face, cc_bool 
 }
 
 /* Helper: check if a block is a rail */
-static cc_bool IsRail(BlockID block) {
+cc_bool IsRail(BlockID block) {
 	return block == BLOCK_RAIL;
 }
 

@@ -36,6 +36,7 @@
 #include "Generator.h"
 #include "Model.h"
 #include "Signs.h"
+#include "Minecart.h"
 
 /* Forward declarations for dropped item functions */
 static int DropItem_FindFreeSlot(void);
@@ -1219,6 +1220,36 @@ static void InputHandler_DeleteBlock(void) {
 		if (Mob_TryPunchMob()) return;
 	}
 
+	/* Try to hit a minecart */
+	{
+		struct LocalPlayer* p = Entities.CurPlayer;
+		if (p) {
+			Vec3 eyePos = Entity_GetEyePosition(&p->Base);
+			int mcSlot = Minecart_FindClosest(eyePos, p->ReachDistance + 0.5f);
+			if (mcSlot >= 0) {
+				struct Minecart* mc = &Minecarts[mcSlot];
+				mc->timeSinceHit = 10;
+				mc->damageTaken += 10.0f;
+				mc->forwardDir = -mc->forwardDir;
+				
+				/* Destroy if enough damage accumulated */
+				if (mc->damageTaken > 40.0f) {
+					/* Drop minecart item */
+					Vec3 dropPos = mc->pos;
+					int dropSlot = DropItem_FindFreeSlot();
+					if (dropSlot == -1) dropSlot = DropItem_EvictOldest();
+					if (dropSlot != -1) {
+						DropItem_Spawn(dropSlot, dropPos, BLOCK_AIR, true, ITEM_MINECART);
+					}
+					Minecart_Despawn(mcSlot);
+				}
+				Audio_PlayDigSound(SOUND_METAL);
+				HeldBlockRenderer_ClickAnim(true);
+				return;
+			}
+		}
+	}
+
 	/* always play delete animations, even if we aren't deleting a block */
 	HeldBlockRenderer_ClickAnim(true);
 
@@ -1272,6 +1303,59 @@ static void InputHandler_DeleteBlock(void) {
 static void InputHandler_PlaceBlock(void) {
 	IVec3 pos, targetPos, otherPos;
 	BlockID old, block, targetBlock, otherBlock, newBlock, newOtherBlock;
+	
+	/* ===== Minecart interaction: ride existing cart ===== */
+	/* Check if right-clicking near a minecart entity (regardless of held item) */
+	{
+		struct LocalPlayer* p = Entities.CurPlayer;
+		if (p && Minecart_GetPlayerCart() < 0) {
+			Vec3 eyePos = Entity_GetEyePosition(&p->Base);
+			int slot = Minecart_FindClosest(eyePos, 4.0f);
+			if (slot >= 0) {
+				/* Check if player is looking at the cart (within reach) */
+				Vec3 cartPos = Minecarts[slot].pos;
+				float dx = cartPos.x - eyePos.x;
+				float dy = cartPos.y - eyePos.y;
+				float dz = cartPos.z - eyePos.z;
+				float dist = Math_SqrtF(dx * dx + dy * dy + dz * dz);
+				if (dist < p->ReachDistance + 0.5f) {
+					Minecart_RideCart(slot);
+					return;
+				}
+			}
+		}
+	}
+	
+	/* ===== Minecart item: place cart on rail ===== */
+	if (Hotbar_SelectedItem == ITEM_MINECART) {
+		targetPos = Game_SelectedPos.pos;
+		if (!Game_SelectedPos.valid || !World_Contains(targetPos.x, targetPos.y, targetPos.z)) return;
+		targetBlock = World_GetBlock(targetPos.x, targetPos.y, targetPos.z);
+		if (IsRail(targetBlock)) {
+			float spawnX = (float)targetPos.x + 0.5f;
+			float spawnY = (float)targetPos.y + 0.0625f;
+			float spawnZ = (float)targetPos.z + 0.5f;
+			int slot = Minecart_Spawn(spawnX, spawnY, spawnZ);
+			if (slot >= 0) {
+				Audio_PlayDigSound(SOUND_METAL);
+				/* Consume item in survival */
+				if (Game_SurvivalMode) {
+					int idx = Inventory.SelectedIndex;
+					int cnt = Hotbar_GetCount(idx);
+					if (cnt > 1) {
+						Hotbar_SetCount(idx, cnt - 1);
+					} else {
+						Hotbar_SetItem(idx, ITEM_NONE);
+						Hotbar_SetCount(idx, 0);
+						Inventory_Set(idx, BLOCK_AIR);
+					}
+					Event_RaiseVoid(&UserEvents.HeldBlockChanged);
+				}
+			}
+			return;
+		}
+		return; /* Minecart item can only be placed on rails */
+	}
 	
 	/* Check if right-clicking on a button or door */
 	targetPos = Game_SelectedPos.pos;
@@ -2204,6 +2288,11 @@ static cc_bool AnyBlockTouches(void);
 void InputHandler_Tick(float delta) {
 	cc_bool left, middle, right;
 	int newStage;
+
+	/* Check for minecart dismount (shift key while riding) */
+	if (Minecart_GetPlayerCart() >= 0 && Input_IsShiftPressed()) {
+		Minecart_DismountPlayer();
+	}
 
 	/* Per-frame breaking progress for survival mode (before delta gate) */
 	left = input_buttonsDown[MOUSE_LEFT];

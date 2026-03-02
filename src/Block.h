@@ -162,6 +162,8 @@ void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
 /* Get rail texture and rotation for a specific face at a world position.
    Returns encoded value: (textureLoc << 2) | rotation
    rotation: 0=0deg, 1=90CW, 2=180, 3=270CW */
+/* Check if a block is a rail */
+cc_bool IsRail(BlockID block);
 int Rail_GetTextureAndRotation(int x, int y, int z, Face face);
 /* Decode helpers for Rail_GetTextureAndRotation return value */
 #define RAIL_DECODE_TEX(e)     ((TextureLoc)((e) >> 4))

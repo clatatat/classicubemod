@@ -43,6 +43,7 @@
 #include "SystemFonts.h"
 #include "Formats.h"
 #include "EntityRenderers.h"
+#include "Minecart.h"
 
 struct _GameData Game;
 static cc_uint64 frameStart;
@@ -508,6 +509,7 @@ static void Game_Load(void) {
 
 	Game_AddComponent(&Animations_Component);
 	Game_AddComponent(&Inventory_Component);
+	Game_AddComponent(&Minecart_Component);
 	Game_AddComponent(&Builder_Component);
 	Game_AddComponent(&MapRenderer_Component);
 	Game_AddComponent(&EnvRenderer_Component);

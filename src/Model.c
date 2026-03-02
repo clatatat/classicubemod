@@ -13,6 +13,7 @@
 #include "Stream.h"
 #include "Options.h"
 #include "InputHandler.h"
+#include "Minecart.h"
 
 struct _ModelsData Models;
 /* NOTE: None of the built in models use more than 12 parts at once, but custom models can use up to 64 parts. */
@@ -2751,6 +2752,7 @@ static void RegisterDefaultModels(void) {
 	Model_RegisterTexture(&skinnedCube_tex);
 	Model_RegisterTexture(&arrow_tex);
 	Model_RegisterTexture(&items_tex);
+	Model_RegisterTexture(&minecart_tex);
 #endif
 
 	HumanoidModel_Register();
@@ -2781,6 +2783,7 @@ static void RegisterDefaultModels(void) {
 	ArrowModel_Register();
 	ItemModel_Register();
 	ToolModel_Register();
+	MinecartModel_Register();
 #endif
 }
 

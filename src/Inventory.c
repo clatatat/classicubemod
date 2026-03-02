@@ -45,7 +45,8 @@ const char* const ItemNames[ITEM_COUNT] = {
 	"Wood Hoe", "Stone Hoe", "Iron Hoe", "Diamond Hoe", "Gold Hoe",
 	"Seeds", "Wheat", "Bread",
 	"Bucket", "Water Bucket", "Lava Bucket",
-	"Sign"
+	"Sign",
+	"Minecart"
 };
 
 const int ItemTextures[ITEM_COUNT] = {
@@ -67,7 +68,8 @@ const int ItemTextures[ITEM_COUNT] = {
 	128, 129, 130, 131, 132,  /* 57-61: Wood Hoe, Stone Hoe, Iron Hoe, Diamond Hoe, Gold Hoe */
 	9, 25, 41,                 /* 62-64: Seeds, Wheat, Bread */
 	74, 75, 76,                /* 65-67: Bucket, Water Bucket, Lava Bucket */
-	42                         /* 68:    Sign */
+	42,                         /* 68:    Sign */
+	135                         /* 69:    Minecart */
 };
 
 const int ItemDamage[ITEM_COUNT] = {
@@ -90,6 +92,7 @@ const int ItemDamage[ITEM_COUNT] = {
 	1, 1, 1,                  /* 62-64: Seeds, Wheat, Bread */
 	1, 1, 1,                  /* 65-67: Bucket, Water Bucket, Lava Bucket */
 	1                          /* 68:    Sign */
+	, 1                         /* 69:    Minecart */
 };
 
 /* Armor defense points per item (matches vanilla Minecraft pre-1.9 values).
@@ -115,6 +118,7 @@ const int ItemArmorPoints[ITEM_COUNT] = {
 	0, 0, 0,                  /* 62-64: Seeds, Wheat, Bread */
 	0, 0, 0,                  /* 65-67: Bucket, Water Bucket, Lava Bucket */
 	0                          /* 68:    Sign */
+	, 0                         /* 69:    Minecart */
 };
 
 /* Max durability per item (0 = no durability / infinite).
@@ -139,6 +143,7 @@ const int ItemMaxDurability[ITEM_COUNT] = {
 	0, 0, 0,                     /* 62-64: Seeds, Wheat, Bread */
 	0, 0, 0                      /* 65-67: Bucket, Water Bucket, Lava Bucket */
 	, 0                          /* 68:    Sign */
+	, 0                          /* 69:    Minecart */
 };
 
 int Item_MaxStackSize(int itemId) {
@@ -159,6 +164,8 @@ int Item_MaxStackSize(int itemId) {
 	if (itemId == ITEM_FLINT_STEEL) return 1;
 	/* Signs: not stackable */
 	if (itemId == ITEM_SIGN) return 1;
+	/* Minecarts: not stackable */
+	if (itemId == ITEM_MINECART) return 1;
 	/* Buckets: not stackable */
 	if (itemId == ITEM_BUCKET)       return 1;
 	if (itemId == ITEM_WATER_BUCKET) return 1;
@@ -634,6 +641,10 @@ static const struct CraftRecipe craftRecipes[] = {
 
 	/* Bread: 3 Wheat in a row (3x1) */
 	{ 3, 1, { CI(ITEM_WHEAT), CI(ITEM_WHEAT), CI(ITEM_WHEAT), 0,0,0,0,0,0 }, BLOCK_AIR, ITEM_BREAD, 1 },
+
+	/* Minecart: 5 Iron Ingots in U shape (3x2) -> 1 Minecart */
+	{ 3, 2, { CI(ITEM_IRON_INGOT), 0,              CI(ITEM_IRON_INGOT),
+	           CI(ITEM_IRON_INGOT), CI(ITEM_IRON_INGOT), CI(ITEM_IRON_INGOT), 0,0,0 }, BLOCK_AIR, ITEM_MINECART, 1 },
 
 	/* ===== De-crafting recipes (block -> 9 items, 1x1) ===== */
 	/* Iron Block -> 9 Iron Ingots */
