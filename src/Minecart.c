@@ -351,150 +351,185 @@ void Minecart_DismountPlayer(void) {
 /*########################################################################################################################*
 *-------------------------------------------------Rail following physics--------------------------------------------------*
 *#########################################################################################################################*/
-/* Snap minecart position to rail line and apply rail-following motion.
-   Closely mirrors Alpha EntityMinecart.i_() */
-static void Minecart_FollowRail(struct Minecart* mc) {
+
+/* Alpha's a() function - smooth rail position interpolation.
+   Returns the smoothly interpolated position along the rail including Y for slopes.
+   This is what makes going up/down hills smooth instead of teleporting at block boundaries. */
+static cc_bool Minecart_GetSmoothPos(float inX, float inY, float inZ,
+                                     float* outX, float* outY, float* outZ) {
+	int bx, by, bz, meta;
+	const int (*m)[3];
+	float p0x, p0y, p0z, p1x, p1y, p1z;
+	float dx, dy, dz, t;
+	
+	bx = (int)Math_Floor(inX);
+	by = (int)Math_Floor(inY);
+	bz = (int)Math_Floor(inZ);
+	
+	/* Alpha: check rail at y-1 */
+	if (World_Contains(bx, by - 1, bz) && IsRail(World_GetBlock(bx, by - 1, bz)))
+		by--;
+	
+	if (!World_Contains(bx, by, bz) || !IsRail(World_GetBlock(bx, by, bz)))
+		return false;
+	
+	meta = GetRailMeta(bx, by, bz);
+	if (meta < 0 || meta > 9) return false;
+	
+	m = railMatrix[meta];
+	
+	/* Endpoint positions INCLUDING Y from matrix (Alpha includes Y!) */
+	p0x = bx + 0.5f + m[0][0] * 0.5f;
+	p0y = by + 0.5f + m[0][1] * 0.5f;
+	p0z = bz + 0.5f + m[0][2] * 0.5f;
+	p1x = bx + 0.5f + m[1][0] * 0.5f;
+	p1y = by + 0.5f + m[1][1] * 0.5f;
+	p1z = bz + 0.5f + m[1][2] * 0.5f;
+	
+	dx = p1x - p0x;
+	dy = (p1y - p0y) * 2.0f;  /* Alpha doubles the Y gradient */
+	dz = p1z - p0z;
+	
+	/* Parametric projection onto rail line (Alpha's exact math) */
+	if (dx == 0.0f) {
+		t = inZ - (float)bz;
+	} else if (dz == 0.0f) {
+		t = inX - (float)bx;
+	} else {
+		float ox = inX - p0x;
+		float oz = inZ - p0z;
+		t = (ox * dx + oz * dz) * 2.0f;
+	}
+	
+	*outX = p0x + dx * t;
+	*outY = p0y + dy * t;
+	*outZ = p0z + dz * t;
+	
+	/* Alpha's Y adjustments for slope direction */
+	if (dy < 0.0f) *outY += 1.0f;
+	if (dy > 0.0f) *outY += 0.5f;
+	
+	return true;
+}
+
+/* Alpha's half-width offset subtracted from smooth Y to get entity posY.
+   In Alpha: setPosition(x, smoothY, z) does posY = smoothY - (width/2).
+   width = 0.98, so offset = 0.49. */
+#define MC_SMOOTH_Y_OFFSET 0.49f
+
+/* On-rail physics - faithful translation of Alpha EntityMinecart.i_() on-rail section.
+   Key differences from our old code:
+   1. Uses a() smooth function for Y interpolation (no more teleporting on hills)
+   2. Rider speed mult only affects movement distance, NOT stored velocity
+   3. Energy conservation uses smooth Y difference, not block-level Y
+   4. Snapping uses Alpha's exact parametric math (no clamping) */
+static void Minecart_OnRailPhysics(struct Minecart* mc) {
 	int blockX, blockY, blockZ, meta;
-	float dx0, dy0, dz0, dx1, dy1, dz1;
-	float railDx, railDz;
-	float dot, speed;
-	float var21, snapX, snapZ;
-	float oldY;
-	int newBlockX, newBlockZ;
+	const int (*m)[3];
+	float smoothBeforeX, smoothBeforeY, smoothBeforeZ;
+	float smoothAfterX, smoothAfterY, smoothAfterZ;
+	cc_bool hadBefore, hadAfter;
+	float dirX, dirZ, dirLen, dot, speed;
+	float p0x, p0z, p1x, p1z, segDx, segDz, t;
+	float moveX, moveZ;
+	int newBX, newBZ;
 	
 	blockX = (int)Math_Floor(mc->pos.x);
 	blockY = (int)Math_Floor(mc->pos.y);
 	blockZ = (int)Math_Floor(mc->pos.z);
 	
-	/* Check for rail at current y or y-1 */
-	{
-		int railY = FindRailY(blockX, blockY, blockZ);
-		if (railY < 0) return; /* Not on a rail */
-		blockY = railY;
-	}
+	/* Check for rail at y-1 (Alpha behavior) */
+	if (World_Contains(blockX, blockY - 1, blockZ) && IsRail(World_GetBlock(blockX, blockY - 1, blockZ)))
+		blockY--;
+	
+	if (!World_Contains(blockX, blockY, blockZ) || !IsRail(World_GetBlock(blockX, blockY, blockZ)))
+		return;
 	
 	meta = GetRailMeta(blockX, blockY, blockZ);
 	if (meta < 0 || meta > 9) return;
 	
-	/* Slopes: set Y to top of slope block */
-	if (meta >= 2 && meta <= 5) {
+	/* Get smooth position BEFORE movement (Alpha's var8) */
+	hadBefore = Minecart_GetSmoothPos(mc->pos.x, mc->pos.y, mc->pos.z,
+	                                  &smoothBeforeX, &smoothBeforeY, &smoothBeforeZ);
+	
+	/* Alpha: posY = blockY (flat) or blockY+1 (slopes) */
+	mc->pos.y = (float)blockY;
+	if (meta >= 2 && meta <= 5)
 		mc->pos.y = (float)(blockY + 1);
-	}
 	
-	/* Get rail direction endpoints */
-	dx0 = (float)railMatrix[meta][0][0];
-	dy0 = (float)railMatrix[meta][0][1];
-	dz0 = (float)railMatrix[meta][0][2];
-	dx1 = (float)railMatrix[meta][1][0];
-	dy1 = (float)railMatrix[meta][1][1];
-	dz1 = (float)railMatrix[meta][1][2];
+	/* Slope gravity push (Alpha's var6 = 1.0/128.0) */
+	if (meta == 2) mc->velocity.x -= MC_SLOPE_PUSH;
+	if (meta == 3) mc->velocity.x += MC_SLOPE_PUSH;
+	if (meta == 4) mc->velocity.z += MC_SLOPE_PUSH;
+	if (meta == 5) mc->velocity.z -= MC_SLOPE_PUSH;
 	
-	/* Rail direction vector */
-	railDx = dx1 - dx0;
-	railDz = dz1 - dz0;
+	m = railMatrix[meta];
 	
-	/* Slope gravity push */
-	if (meta == 2)      mc->velocity.x -= MC_SLOPE_PUSH; /* ascending east: push west */
-	else if (meta == 3) mc->velocity.x += MC_SLOPE_PUSH; /* ascending west: push east */
-	else if (meta == 4) mc->velocity.z += MC_SLOPE_PUSH; /* ascending north: push south */
-	else if (meta == 5) mc->velocity.z -= MC_SLOPE_PUSH; /* ascending south: push north */
+	/* Rail direction from matrix endpoints (Alpha's var11, var13) */
+	dirX = (float)(m[1][0] - m[0][0]);
+	dirZ = (float)(m[1][2] - m[0][2]);
+	dirLen = Math_SqrtF(dirX * dirX + dirZ * dirZ);
 	
-	/* Project motion onto rail direction */
-	dot = mc->velocity.x * railDx + mc->velocity.z * railDz;
+	/* Project motion onto rail direction (Alpha: flip if dot < 0) */
+	dot = mc->velocity.x * dirX + mc->velocity.z * dirZ;
+	if (dot < 0.0f) { dirX = -dirX; dirZ = -dirZ; }
+	
+	/* Redistribute speed along rail (Alpha's var19) */
 	speed = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
+	mc->velocity.x = speed * dirX / dirLen;
+	mc->velocity.z = speed * dirZ / dirLen;
 	
-	if (speed > 0.001f) {
-		/* Redistribute speed along rail direction */
-		if (dot < 0) {
-			railDx = -railDx;
-			railDz = -railDz;
-		}
-		{
-			float len = Math_SqrtF(railDx * railDx + railDz * railDz);
-			if (len > 0.001f) {
-				railDx /= len;
-				railDz /= len;
-			}
-		}
-		mc->velocity.x = railDx * speed;
-		mc->velocity.z = railDz * speed;
+	/* Snap position to rail line (Alpha's parametric projection - NO clamping) */
+	p0x = (float)blockX + 0.5f + m[0][0] * 0.5f;
+	p0z = (float)blockZ + 0.5f + m[0][2] * 0.5f;
+	p1x = (float)blockX + 0.5f + m[1][0] * 0.5f;
+	p1z = (float)blockZ + 0.5f + m[1][2] * 0.5f;
+	segDx = p1x - p0x;
+	segDz = p1z - p0z;
+	
+	if (segDx == 0.0f) {
+		mc->pos.x = (float)blockX + 0.5f;
+		t = mc->pos.z - (float)blockZ;
+	} else if (segDz == 0.0f) {
+		mc->pos.z = (float)blockZ + 0.5f;
+		t = mc->pos.x - (float)blockX;
+	} else {
+		float ox = mc->pos.x - p0x;
+		float oz = mc->pos.z - p0z;
+		t = (ox * segDx + oz * segDz) * 2.0f;
 	}
 	
-	/* Snap position to rail line */
-	snapX = (float)blockX + 0.5f;
-	snapZ = (float)blockZ + 0.5f;
+	mc->pos.x = p0x + segDx * t;
+	mc->pos.z = p0z + segDz * t;
 	
-	/* Calculate parametric position along the rail segment */
-	{
-		float p0x = snapX + dx0 * 0.5f;
-		float p0z = snapZ + dz0 * 0.5f;
-		float segDx = dx1 - dx0;
-		float segDz = dz1 - dz0;
-		float segLen = segDx * segDx + segDz * segDz;
-		
-		if (segLen > 0.001f) {
-			var21 = ((mc->pos.x - p0x) * segDx + (mc->pos.z - p0z) * segDz) / segLen;
-			if (var21 < 0.0f) var21 = 0.0f;
-			if (var21 > 1.0f) var21 = 1.0f;
-			
-			mc->pos.x = p0x + segDx * var21;
-			mc->pos.z = p0z + segDz * var21;
-		} else {
-			/* Purely N-S or E-W - snap the fixed axis */
-			if (dx0 == 0 && dx1 == 0) mc->pos.x = snapX;
-			if (dz0 == 0 && dz1 == 0) mc->pos.z = snapZ;
-		}
-	}
-	
-	/* Rider speed reduction */
+	/* Rider speed reduction: Alpha only affects movement distance, NOT stored velocity.
+	   Alpha: var31 = motionX; if(riddenByEntity) var31 *= 0.75; then d(var31, 0, var33); */
+	moveX = mc->velocity.x;
+	moveZ = mc->velocity.z;
 	if (mc->riderId >= 0) {
-		mc->velocity.x *= MC_RIDER_SPEED_MULT;
-		mc->velocity.z *= MC_RIDER_SPEED_MULT;
+		moveX *= MC_RIDER_SPEED_MULT;
+		moveZ *= MC_RIDER_SPEED_MULT;
 	}
 	
-	/* Clamp to max speed */
-	if (mc->velocity.x > MC_MAX_SPEED) mc->velocity.x = MC_MAX_SPEED;
-	if (mc->velocity.x < -MC_MAX_SPEED) mc->velocity.x = -MC_MAX_SPEED;
-	if (mc->velocity.z > MC_MAX_SPEED) mc->velocity.z = MC_MAX_SPEED;
-	if (mc->velocity.z < -MC_MAX_SPEED) mc->velocity.z = -MC_MAX_SPEED;
+	/* Clamp movement to max speed */
+	if (moveX < -MC_MAX_SPEED) moveX = -MC_MAX_SPEED;
+	if (moveX >  MC_MAX_SPEED) moveX =  MC_MAX_SPEED;
+	if (moveZ < -MC_MAX_SPEED) moveZ = -MC_MAX_SPEED;
+	if (moveZ >  MC_MAX_SPEED) moveZ =  MC_MAX_SPEED;
 	
-	/* Move along rail */
-	oldY = mc->pos.y;
-	mc->pos.x += mc->velocity.x;
-	mc->pos.z += mc->velocity.z;
+	/* Move (Alpha uses d() with collision, we just add directly) */
+	mc->pos.x += moveX;
+	mc->pos.z += moveZ;
 	
-	/* Check if we crossed into a new block - slope height correction */
-	newBlockX = (int)Math_Floor(mc->pos.x);
-	newBlockZ = (int)Math_Floor(mc->pos.z);
+	/* Slope height correction at block boundaries (Alpha's endpoint check) */
+	newBX = (int)Math_Floor(mc->pos.x);
+	newBZ = (int)Math_Floor(mc->pos.z);
+	if (m[0][1] != 0 && newBX - blockX == m[0][0] && newBZ - blockZ == m[0][2])
+		mc->pos.y += (float)m[0][1];
+	else if (m[1][1] != 0 && newBX - blockX == m[1][0] && newBZ - blockZ == m[1][2])
+		mc->pos.y += (float)m[1][1];
 	
-	if (newBlockX != blockX || newBlockZ != blockZ) {
-		/* Check the rail endpoints for dy values */
-		int endX0 = blockX + (int)dx0;
-		int endZ0 = blockZ + (int)dz0;
-		int endX1 = blockX + (int)dx1;
-		int endZ1 = blockZ + (int)dz1;
-		
-		if (newBlockX == endX0 && newBlockZ == endZ0 && dy0 != 0) {
-			mc->pos.y += dy0;
-		} else if (newBlockX == endX1 && newBlockZ == endZ1 && dy1 != 0) {
-			mc->pos.y += dy1;
-		}
-		
-		/* Force direction toward new block */
-		{
-			float ddx = (float)(newBlockX - blockX);
-			float ddz = (float)(newBlockZ - blockZ);
-			float sp = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
-			float len = Math_SqrtF(ddx * ddx + ddz * ddz);
-			
-			if (len > 0.001f && sp > 0.001f) {
-				mc->velocity.x = (ddx / len) * sp;
-				mc->velocity.z = (ddz / len) * sp;
-			}
-		}
-	}
-	
-	/* Apply friction */
+	/* Friction (Alpha applies to stored velocity, not movement amount) */
 	if (mc->riderId >= 0) {
 		mc->velocity.x *= MC_FRICTION_RIDDEN;
 		mc->velocity.z *= MC_FRICTION_RIDDEN;
@@ -502,24 +537,30 @@ static void Minecart_FollowRail(struct Minecart* mc) {
 		mc->velocity.x *= MC_FRICTION_EMPTY;
 		mc->velocity.z *= MC_FRICTION_EMPTY;
 	}
-	
-	/* Zero Y velocity on rail */
 	mc->velocity.y = 0.0f;
 	
-	/* Energy conservation on slopes */
-	{
-		float dY = oldY - mc->pos.y;
-		if (dY != 0.0f) {
-			float sp = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
-			sp += dY * 0.05f;
-			if (sp > 0.001f && sp > 0.0f) {
-				float len = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
-				if (len > 0.001f) {
-					mc->velocity.x = (mc->velocity.x / len) * sp;
-					mc->velocity.z = (mc->velocity.z / len) * sp;
-				}
-			}
+	/* Smooth Y position from Alpha's a() function.
+	   This is the key to smooth hill transitions. */
+	hadAfter = Minecart_GetSmoothPos(mc->pos.x, mc->pos.y, mc->pos.z,
+	                                 &smoothAfterX, &smoothAfterY, &smoothAfterZ);
+	
+	if (hadAfter && hadBefore) {
+		/* Energy conservation: speed boost/loss from elevation change */
+		float dY = (smoothBeforeY - smoothAfterY) * 0.05f;
+		speed = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
+		if (speed > 0.0f) {
+			mc->velocity.x = mc->velocity.x / speed * (speed + dY);
+			mc->velocity.z = mc->velocity.z / speed * (speed + dY);
 		}
+		/* Set Y to smoothly interpolated position (Alpha: b(posX, smoothY, posZ)) */
+		mc->pos.y = smoothAfterY - MC_SMOOTH_Y_OFFSET;
+	}
+	
+	/* Cross-block direction realignment (Alpha: straighten velocity when entering new block) */
+	if (newBX != blockX || newBZ != blockZ) {
+		speed = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
+		mc->velocity.x = speed * (float)(newBX - blockX);
+		mc->velocity.z = speed * (float)(newBZ - blockZ);
 	}
 }
 
@@ -527,6 +568,45 @@ static void Minecart_FollowRail(struct Minecart* mc) {
 /*########################################################################################################################*
 *-------------------------------------------------Minecart-Minecart collision (booster bug)-------------------------------*
 *#########################################################################################################################*/
+
+/* Immediately re-project a cart's velocity onto its current rail direction.
+   This is the key step that makes the booster glitch work: collision adds a
+   perpendicular push component. When we compute speed = sqrt(vx² + vz²),
+   the perpendicular component INCREASES the total speed. Re-projecting that
+   increased speed onto the rail direction converts the push into acceleration.
+   In Alpha this happens naturally on the next tick's rail physics. We do it
+   immediately after collision to ensure the conversion isn't lost. */
+static void Minecart_SnapVelocityToRail(struct Minecart* mc) {
+	int bx, by, bz, meta;
+	float dirX, dirZ, dirLen, dot, speed;
+	
+	bx = (int)Math_Floor(mc->pos.x);
+	by = (int)Math_Floor(mc->pos.y);
+	bz = (int)Math_Floor(mc->pos.z);
+	
+	/* Check rail at y-1 (same as Alpha) */
+	if (World_Contains(bx, by - 1, bz) && IsRail(World_GetBlock(bx, by - 1, bz)))
+		by--;
+	
+	meta = GetRailMeta(bx, by, bz);
+	if (meta < 0 || meta > 9) return;
+	
+	dirX = (float)(railMatrix[meta][1][0] - railMatrix[meta][0][0]);
+	dirZ = (float)(railMatrix[meta][1][2] - railMatrix[meta][0][2]);
+	dirLen = Math_SqrtF(dirX * dirX + dirZ * dirZ);
+	if (dirLen < 0.001f) return;
+	
+	/* Flip direction to match current motion */
+	dot = mc->velocity.x * dirX + mc->velocity.z * dirZ;
+	if (dot < 0.0f) { dirX = -dirX; dirZ = -dirZ; }
+	
+	/* Convert TOTAL speed (including perpendicular push) to rail-aligned speed.
+	   This is the booster mechanism: sqrt(vx² + vz²) > sqrt(rail_component²) */
+	speed = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
+	mc->velocity.x = speed * dirX / dirLen;
+	mc->velocity.z = speed * dirZ / dirLen;
+}
+
 /* Replicates Alpha's EntityMinecart.applyEntityCollision for minecart-minecart pairs.
    This is the famous booster bug: two carts on parallel tracks boost each other. */
 static void Minecart_ApplyBooster(struct Minecart* a, struct Minecart* b) {
@@ -555,37 +635,18 @@ static void Minecart_ApplyBooster(struct Minecart* a, struct Minecart* b) {
 	avgMX = (a->velocity.x + b->velocity.x) * 0.5f;
 	avgMZ = (a->velocity.z + b->velocity.z) * 0.5f;
 	
-	/* Apply: each cart gets average velocity plus/minus push from separation.
-	   This is the booster bug: on parallel tracks, the push is perpendicular
-	   to the rail and gets constrained, but the averaged velocity along the
-	   rail accumulates, causing both carts to accelerate. */
+	/* Apply: each cart gets average velocity plus/minus push from separation */
 	a->velocity.x = avgMX - pushX;
 	a->velocity.z = avgMZ - pushZ;
 	b->velocity.x = avgMX + pushX;
 	b->velocity.z = avgMZ + pushZ;
-}
-
-/* Check all minecart pairs for collisions within expanded bounding boxes */
-static void Minecart_CheckCollisions(void) {
-	int i, j;
-	float dx, dz, dist;
 	
-	for (i = 0; i < MAX_MINECARTS; i++) {
-		if (!Minecarts[i].active) continue;
-		
-		for (j = i + 1; j < MAX_MINECARTS; j++) {
-			if (!Minecarts[j].active) continue;
-			
-			dx = Minecarts[j].pos.x - Minecarts[i].pos.x;
-			dz = Minecarts[j].pos.z - Minecarts[i].pos.z;
-			dist = Math_SqrtF(dx * dx + dz * dz);
-			
-			/* Collision range: entity width (0.98) + padding (0.2) on each side */
-			if (dist < 0.98f + MC_ENTITY_SCAN_PAD * 2.0f) {
-				Minecart_ApplyBooster(&Minecarts[i], &Minecarts[j]);
-			}
-		}
-	}
+	/* Immediately re-project onto rail: this converts the perpendicular push
+	   (which increases total speed via sqrt(vx²+vz²)) into rail-aligned speed.
+	   This is the core booster mechanism - without this, the perpendicular 
+	   component just gets projected out next tick with no net speed gain. */
+	Minecart_SnapVelocityToRail(a);
+	Minecart_SnapVelocityToRail(b);
 }
 
 
@@ -612,13 +673,17 @@ static void Minecart_CheckPlayerPush(struct Minecart* mc) {
 	mc->velocity.z += (dz / dist) * pushStrength;
 }
 
-/* Apply off-rail physics (gravity, friction) */
+/* Apply off-rail physics (Alpha behavior: clamp, ground friction, move, air friction).
+   Note: gravity is applied in Minecart_TickOne before this is called. */
 static void Minecart_OffRailPhysics(struct Minecart* mc) {
 	int blockX, blockY, blockZ;
 	cc_bool onGround;
 	
-	/* Apply gravity */
-	mc->velocity.y -= MC_GRAVITY;
+	/* Clamp to max speed (Alpha does this first) */
+	if (mc->velocity.x < -MC_MAX_SPEED) mc->velocity.x = -MC_MAX_SPEED;
+	if (mc->velocity.x >  MC_MAX_SPEED) mc->velocity.x =  MC_MAX_SPEED;
+	if (mc->velocity.z < -MC_MAX_SPEED) mc->velocity.z = -MC_MAX_SPEED;
+	if (mc->velocity.z >  MC_MAX_SPEED) mc->velocity.z =  MC_MAX_SPEED;
 	
 	/* Simple ground detection */
 	blockX = (int)Math_Floor(mc->pos.x);
@@ -637,17 +702,20 @@ static void Minecart_OffRailPhysics(struct Minecart* mc) {
 		}
 	}
 	
+	/* Alpha: ground friction BEFORE movement */
+	if (onGround) {
+		mc->velocity.x *= MC_OFF_RAIL_GROUND;
+		mc->velocity.y *= MC_OFF_RAIL_GROUND;
+		mc->velocity.z *= MC_OFF_RAIL_GROUND;
+	}
+	
 	/* Move */
 	mc->pos.x += mc->velocity.x;
 	mc->pos.y += mc->velocity.y;
 	mc->pos.z += mc->velocity.z;
 	
-	/* Friction */
-	if (onGround) {
-		mc->velocity.x *= MC_OFF_RAIL_GROUND;
-		mc->velocity.y *= MC_OFF_RAIL_GROUND;
-		mc->velocity.z *= MC_OFF_RAIL_GROUND;
-	} else {
+	/* Alpha: air friction AFTER movement (only when NOT on ground) */
+	if (!onGround) {
 		mc->velocity.x *= MC_OFF_RAIL_AIR;
 		mc->velocity.y *= MC_OFF_RAIL_AIR;
 		mc->velocity.z *= MC_OFF_RAIL_AIR;
@@ -734,20 +802,26 @@ static void Minecart_UpdateVisuals(struct Minecart* mc) {
 	if (mc->damageTaken < 0.0f) mc->damageTaken = 0.0f;
 }
 
-/* Main tick for one minecart */
+/* Main tick for one minecart - matches Alpha EntityMinecart.i_() flow exactly */
 static void Minecart_TickOne(struct Minecart* mc, float delta) {
-	int blockX, blockY, blockZ, railY;
+	int blockX, blockY, blockZ;
 	cc_bool onRail;
+	
+	/* Alpha: gravity always applied BEFORE checking for rail */
+	mc->velocity.y -= MC_GRAVITY;
 	
 	blockX = (int)Math_Floor(mc->pos.x);
 	blockY = (int)Math_Floor(mc->pos.y);
 	blockZ = (int)Math_Floor(mc->pos.z);
 	
-	railY = FindRailY(blockX, blockY, blockZ);
-	onRail = (railY >= 0);
+	/* Alpha: check rail at y-1 */
+	if (World_Contains(blockX, blockY - 1, blockZ) && IsRail(World_GetBlock(blockX, blockY - 1, blockZ)))
+		blockY--;
+	
+	onRail = (World_Contains(blockX, blockY, blockZ) && IsRail(World_GetBlock(blockX, blockY, blockZ)));
 	
 	if (onRail) {
-		Minecart_FollowRail(mc);
+		Minecart_OnRailPhysics(mc);
 	} else {
 		Minecart_OffRailPhysics(mc);
 	}
@@ -763,6 +837,30 @@ static void Minecart_TickOne(struct Minecart* mc, float delta) {
 	
 	Minecart_UpdateVisuals(mc);
 	Minecart_UpdateEntity(mc);
+	
+	/* Alpha: check collisions with other minecarts (part of this entity's tick).
+	   Called AFTER physics and visuals, BEFORE next cart ticks. */
+	{
+		int mySlot = (int)(mc - Minecarts);
+		int j;
+		for (j = 0; j < MAX_MINECARTS; j++) {
+			float dx, dz;
+			if (j == mySlot || !Minecarts[j].active) continue;
+			if (Minecarts[j].entityId == mc->riderId) continue; /* Don't collide with rider */
+			
+			dx = Minecarts[j].pos.x - mc->pos.x;
+			dz = Minecarts[j].pos.z - mc->pos.z;
+			
+			/* AABB-style overlap check: cart width 0.98 + 0.2 expansion each side.
+			   Two carts on adjacent parallel rails (1 block apart) are within range. */
+			if (dx > -1.18f && dx < 1.18f && dz > -1.18f && dz < 1.18f) {
+				float dist = Math_SqrtF(dx * dx + dz * dz);
+				if (dist >= 0.0001f) {
+					Minecart_ApplyBooster(mc, &Minecarts[j]);
+				}
+			}
+		}
+	}
 	
 	/* Despawn if fallen into void */
 	if (mc->pos.y < -64.0f) {
@@ -811,9 +909,6 @@ static void Minecart_ScheduledTick(struct ScheduledTask* task) {
 		if (!Minecarts[i].active) continue;
 		Minecart_TickOne(&Minecarts[i], delta);
 	}
-	
-	/* Check minecart-minecart collisions (booster bug) */
-	Minecart_CheckCollisions();
 	
 	/* Update player riding position */
 	Minecart_UpdateRider();
