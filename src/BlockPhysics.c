@@ -111,6 +111,7 @@ static int physics_flowLevelsSize;
 
 static void Redstone_Reset(void); /* forward declaration */
 static void IronDoor_ScanWorld(void); /* forward declaration */
+static void CurvedRail_ScanWorld(void); /* forward declaration */
 static void TNT_ScanWorld(void); /* forward declaration */
 static void Wheat_ScanWorld(void);  /* forward declaration */
 
@@ -850,6 +851,7 @@ static void Redstone_Reset(void) {
 	redstone_propagating = false;
 	Redstone_AllocVisited();
 	IronDoor_ScanWorld();
+	CurvedRail_ScanWorld();
 	TNT_ScanWorld();
 	Wheat_ScanWorld();
 }
@@ -2281,6 +2283,117 @@ static void Physics_DeleteIronDoor(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 	IronDoor_Unregister(x, y, z);
 	Physics_ActivateNeighbours(x, y, z, index);
+}
+
+/*#########################################################################################################################*
+*-----------------------------------------------Curved rail redstone switching---------------------------------------------*
+*#########################################################################################################################*/
+/* Curved rails at T-junctions switch direction when powered/unpowered.
+   We track all curve rail positions and check power state each tick.
+   Matches Alpha 1.0.6 MinecartTrackLogic.place(isPowered) behavior. */
+
+#define CURVED_RAIL_MAX 128
+
+static struct { int x, y, z; cc_bool wasPowered; } curvedRail_positions[CURVED_RAIL_MAX];
+static int curvedRail_count = 0;
+
+static cc_bool IsCurvedRail(BlockID b) {
+	return b == BLOCK_RAIL_CURVE_SE || b == BLOCK_RAIL_CURVE_SW
+		|| b == BLOCK_RAIL_CURVE_NW || b == BLOCK_RAIL_CURVE_NE;
+}
+
+static void CurvedRail_Register(int x, int y, int z) {
+	int i;
+	for (i = 0; i < curvedRail_count; i++) {
+		if (curvedRail_positions[i].x == x && curvedRail_positions[i].y == y && curvedRail_positions[i].z == z)
+			return;
+	}
+	if (curvedRail_count >= CURVED_RAIL_MAX) return;
+	curvedRail_positions[curvedRail_count].x = x;
+	curvedRail_positions[curvedRail_count].y = y;
+	curvedRail_positions[curvedRail_count].z = z;
+	curvedRail_positions[curvedRail_count].wasPowered = Redstone_BlockReceivesPower(x, y, z);
+	curvedRail_count++;
+}
+
+static void CurvedRail_Unregister(int x, int y, int z) {
+	int i;
+	for (i = 0; i < curvedRail_count; i++) {
+		if (curvedRail_positions[i].x == x && curvedRail_positions[i].y == y && curvedRail_positions[i].z == z) {
+			curvedRail_positions[i] = curvedRail_positions[curvedRail_count - 1];
+			curvedRail_count--;
+			return;
+		}
+	}
+}
+
+static void CurvedRail_ScanWorld(void) {
+	int x, y, z;
+	curvedRail_count = 0;
+	if (!World.Blocks) return;
+	
+	for (y = 0; y < World.Height; y++) {
+		for (z = 0; z < World.Length; z++) {
+			for (x = 0; x < World.Width; x++) {
+				BlockID block = World_GetBlock(x, y, z);
+				if (IsCurvedRail(block)) {
+					CurvedRail_Register(x, y, z);
+				}
+			}
+		}
+	}
+}
+
+/* Each tick, check power state of tracked curved rails.
+   If power changed, re-run Rail_UpdateShape with new power state. */
+static void Redstone_TickCurvedRails(void) {
+	int i;
+	for (i = 0; i < curvedRail_count; i++) {
+		int rx = curvedRail_positions[i].x;
+		int ry = curvedRail_positions[i].y;
+		int rz = curvedRail_positions[i].z;
+		BlockID block;
+		cc_bool powered;
+		
+		if (!World_Contains(rx, ry, rz)) continue;
+		block = World_GetBlock(rx, ry, rz);
+		
+		/* If no longer a curved rail, remove from tracking */
+		if (!IsCurvedRail(block)) {
+			curvedRail_positions[i] = curvedRail_positions[curvedRail_count - 1];
+			curvedRail_count--;
+			i--;
+			continue;
+		}
+		
+		powered = Redstone_BlockReceivesPower(rx, ry, rz);
+		if (powered != curvedRail_positions[i].wasPowered) {
+			curvedRail_positions[i].wasPowered = powered;
+			/* Re-run shape algorithm with new power state - may change curve direction */
+			Rail_UpdateShape(rx, ry, rz, powered);
+			
+			/* After shape change, the block might not be curved anymore, or might be a different curve.
+			   Re-read and update tracking. */
+			block = World_GetBlock(rx, ry, rz);
+			if (!IsCurvedRail(block)) {
+				curvedRail_positions[i] = curvedRail_positions[curvedRail_count - 1];
+				curvedRail_count--;
+				i--;
+			}
+		}
+	}
+}
+
+static void Physics_PlaceCurvedRail(int index, BlockID block) {
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+	CurvedRail_Register(x, y, z);
+}
+
+static void Physics_DeleteCurvedRail(int index, BlockID block) {
+	int x, y, z;
+	World_Unpack(index, x, y, z);
+	CurvedRail_Unregister(x, y, z);
 }
 
 /* Handle redstone torch placement - propagate power to adjacent dust */
@@ -4167,6 +4280,16 @@ void Physics_Init(void) {
 	Physics.OnDelete[BLOCK_IRON_DOOR_NS_OPEN_TOP]     = Physics_DeleteIronDoor;
 	Physics.OnDelete[BLOCK_IRON_DOOR_EW_OPEN_TOP]     = Physics_DeleteIronDoor;
 	
+	/* Curved rail variants - track for redstone power switching */
+	Physics.OnPlace[BLOCK_RAIL_CURVE_SE]  = Physics_PlaceCurvedRail;
+	Physics.OnPlace[BLOCK_RAIL_CURVE_SW]  = Physics_PlaceCurvedRail;
+	Physics.OnPlace[BLOCK_RAIL_CURVE_NW]  = Physics_PlaceCurvedRail;
+	Physics.OnPlace[BLOCK_RAIL_CURVE_NE]  = Physics_PlaceCurvedRail;
+	Physics.OnDelete[BLOCK_RAIL_CURVE_SE] = Physics_DeleteCurvedRail;
+	Physics.OnDelete[BLOCK_RAIL_CURVE_SW] = Physics_DeleteCurvedRail;
+	Physics.OnDelete[BLOCK_RAIL_CURVE_NW] = Physics_DeleteCurvedRail;
+	Physics.OnDelete[BLOCK_RAIL_CURVE_NE] = Physics_DeleteCurvedRail;
+	
 	/* Double chest deletion - revert partner to single chest */
 	Physics.OnDelete[BLOCK_DCHEST_S_L] = Physics_DeleteDoubleChest;
 	Physics.OnDelete[BLOCK_DCHEST_S_R] = Physics_DeleteDoubleChest;
@@ -4205,6 +4328,7 @@ void Physics_Tick(void) {
 	Redstone_TickPressurePlates();
 	Redstone_TickPlateQueue();
 	Redstone_TickIronDoors();
+	Redstone_TickCurvedRails();
 	Redstone_TickTNT();
 	Redstone_TickTNTFuse();
 	Physics_TickFire();

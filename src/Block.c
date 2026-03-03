@@ -11,6 +11,7 @@
 #include "Audio.h"
 #include "World.h"
 #include "BlockPhysics.h"
+#include "MapRenderer.h"
 
 struct _BlockLists Blocks;
 
@@ -76,7 +77,18 @@ static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef portal_def = {"Portal", 127, 127, 127, 16, PackedCol_Make(0,0,0,255), 127, BRIT_FULL, true, 100, DRAW_OPAQUE, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
-static const struct SimpleBlockDef rail_def = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_ns_def = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+/* Rail orientation block defs - each has its own texture, no UV rotation needed.
+   NS=128, EW=144, slopes use their axis texture, curves: SE=112, NE=145, SW=146, NW=147 */
+static const struct SimpleBlockDef rail_ew_def       = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_e_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_w_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_n_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_s_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_se_def = {"Rail", 112, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_sw_def = {"Rail", 146, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_nw_def = {"Rail", 147, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_ne_def = {"Rail", 145, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
 
 static const struct SimpleBlockDef wheat_stage_defs[8] = {
 	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},
@@ -477,130 +489,383 @@ static TextureLoc RedOreDust_GetTexture(int x, int y, int z, Face face, cc_bool 
 	return 84 + texOffset;
 }
 
-/* Helper: check if a block is a rail */
+/* Helper: check if a block is any rail variant */
 cc_bool IsRail(BlockID block) {
-	return block == BLOCK_RAIL;
+	return block == BLOCK_RAIL || 
+	       (block >= BLOCK_RAIL_EW && block <= BLOCK_RAIL_CURVE_NE);
 }
 
-/* Rail connection pattern and rotation for rendering.
-   rotation: 0=0deg, 1=90CW, 2=180, 3=270CW
-   Returns: texture loc (128=straight, 112=curve) */
-#define RAIL_STRAIGHT 128
-#define RAIL_CURVE    112
+/* Convert a rail block ID to Alpha-style metadata (0-9). Returns -1 for non-rail. */
+int Rail_BlockToMeta(BlockID block) {
+	switch (block) {
+		case BLOCK_RAIL:          return 0; /* N-S straight */
+		case BLOCK_RAIL_EW:       return 1;
+		case BLOCK_RAIL_ASC_E:    return 2;
+		case BLOCK_RAIL_ASC_W:    return 3;
+		case BLOCK_RAIL_ASC_N:    return 4;
+		case BLOCK_RAIL_ASC_S:    return 5;
+		case BLOCK_RAIL_CURVE_SE: return 6;
+		case BLOCK_RAIL_CURVE_SW: return 7;
+		case BLOCK_RAIL_CURVE_NW: return 8;
+		case BLOCK_RAIL_CURVE_NE: return 9;
+		default: return -1;
+	}
+}
 
-/* Rail texture/rotation/slope encoding:
-   bits 0-1: UV rotation (0-3)
-   bit  2:   is sloped (0=flat, 1=sloped)
-   bit  3:   slope high-end (0=north/east high end, 1=south/west high end)
-   bits 4+:  texture location
-   Used by Builder_DrawRail to select texture, UV rotation, and slope. */
+/* Convert Alpha-style metadata (0-9) to the corresponding rail block ID. */
+BlockID Rail_MetaToBlock(int meta) {
+	switch (meta) {
+		case 0: return BLOCK_RAIL;
+		case 1: return BLOCK_RAIL_EW;
+		case 2: return BLOCK_RAIL_ASC_E;
+		case 3: return BLOCK_RAIL_ASC_W;
+		case 4: return BLOCK_RAIL_ASC_N;
+		case 5: return BLOCK_RAIL_ASC_S;
+		case 6: return BLOCK_RAIL_CURVE_SE;
+		case 7: return BLOCK_RAIL_CURVE_SW;
+		case 8: return BLOCK_RAIL_CURVE_NW;
+		case 9: return BLOCK_RAIL_CURVE_NE;
+		default: return BLOCK_RAIL;
+	}
+}
 
-/* Encoding helpers */
-#define RAIL_ENCODE(tex, rot, slope, highEnd) \
-	(((tex) << 4) | ((highEnd) << 3) | ((slope) << 2) | (rot))
-#define RAIL_DECODE_TEX(e)     ((TextureLoc)((e) >> 4))
-#define RAIL_DECODE_ROT(e)     ((e) & 3)
-#define RAIL_DECODE_SLOPED(e)  (((e) >> 2) & 1)
-#define RAIL_DECODE_HIGHEND(e) (((e) >> 3) & 1)
+/*########################################################################################################################*
+*--------------------------------------------Rail placement (Alpha algorithm)---------------------------------------------*
+*#########################################################################################################################*/
+/* Matches Alpha MinecartTrackLogic exactly.
+   var2=north(z-1), var3=south(z+1), var4=west(x-1), var5=east(x+1) */
 
-/* Check if there's a rail at (x, y, z) or a rail one block up at (x, y+1, z) 
-   sitting on a solid block at (x, y, z). Returns: 0=none, 1=same level, 2=up one */
-static int RailConnectionAt(int x, int y, int z) {
-	/* Same level */
+/* Check if there's a rail at (x,y,z) or (x,y+1,z) or (x,y-1,z) */
+static cc_bool Rail_IsTrackAt(int x, int y, int z) {
 	if (World_Contains(x, y, z) && IsRail(World_GetBlock(x, y, z)))
-		return 1;
-	/* One block up: rail at (x, y+1, z) on top of solid block at (x, y, z) */
+		return true;
 	if (World_Contains(x, y + 1, z) && IsRail(World_GetBlock(x, y + 1, z)))
-		return 2;
-	return 0;
+		return true;
+	if (World_Contains(x, y - 1, z) && IsRail(World_GetBlock(x, y - 1, z)))
+		return true;
+	return false;
 }
 
-/* Check if there's a rail one block down at (x, y-1, z) */
-static cc_bool RailBelow(int x, int y, int z) {
-	return World_Contains(x, y - 1, z) && IsRail(World_GetBlock(x, y - 1, z));
+/* Get the connected endpoints for a given metadata, matching Alpha's calculateConnectedTracks */
+static void Rail_GetConnections(int meta, int tx, int ty, int tz, int out[2][3]) {
+	switch (meta) {
+		case 0: /* N-S */
+			out[0][0] = tx;   out[0][1] = ty;   out[0][2] = tz-1;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz+1; break;
+		case 1: /* E-W */
+			out[0][0] = tx-1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx+1; out[1][1] = ty;   out[1][2] = tz;   break;
+		case 2: /* asc E */
+			out[0][0] = tx-1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx+1; out[1][1] = ty+1; out[1][2] = tz;   break;
+		case 3: /* asc W */
+			out[0][0] = tx-1; out[0][1] = ty+1; out[0][2] = tz;
+			out[1][0] = tx+1; out[1][1] = ty;   out[1][2] = tz;   break;
+		case 4: /* asc N */
+			out[0][0] = tx;   out[0][1] = ty+1; out[0][2] = tz-1;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz+1; break;
+		case 5: /* asc S */
+			out[0][0] = tx;   out[0][1] = ty;   out[0][2] = tz-1;
+			out[1][0] = tx;   out[1][1] = ty+1; out[1][2] = tz+1; break;
+		case 6: /* SE curve */
+			out[0][0] = tx+1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz+1; break;
+		case 7: /* SW curve */
+			out[0][0] = tx-1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz+1; break;
+		case 8: /* NW curve */
+			out[0][0] = tx-1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz-1; break;
+		case 9: /* NE curve */
+			out[0][0] = tx+1; out[0][1] = ty;   out[0][2] = tz;
+			out[1][0] = tx;   out[1][1] = ty;   out[1][2] = tz-1; break;
+		default:
+			out[0][0] = tx; out[0][1] = ty; out[0][2] = tz-1;
+			out[1][0] = tx; out[1][1] = ty; out[1][2] = tz+1; break;
+	}
 }
 
-/* Get rail top texture and rotation based on neighboring rail connections.
-   Returns encoded value with texture, rotation, and slope info.
-   For non-YMAX faces, just returns 86 (transparent side texture). */
-int Rail_GetTextureAndRotation(int x, int y, int z, Face face) {
-	int north_c, south_c, east_c, west_c;
-	cc_bool north, south, east, west;
-	cc_bool north_up, south_up, east_up, west_up;
-	cc_bool north_down, south_down, east_down, west_down;
-	int connections;
+/* Find a MinecartTrackLogic at the given position (checks y, y+1, y-1) */
+static cc_bool Rail_FindTrackAt(int x, int y, int z, int* outX, int* outY, int* outZ) {
+	if (World_Contains(x, y, z) && IsRail(World_GetBlock(x, y, z))) {
+		*outX = x; *outY = y; *outZ = z; return true;
+	}
+	if (World_Contains(x, y + 1, z) && IsRail(World_GetBlock(x, y + 1, z))) {
+		*outX = x; *outY = y + 1; *outZ = z; return true;
+	}
+	if (World_Contains(x, y - 1, z) && IsRail(World_GetBlock(x, y - 1, z))) {
+		*outX = x; *outY = y - 1; *outZ = z; return true;
+	}
+	return false;
+}
+
+/* Check if a track at (x,y,z) is connected to the track at (tx,ty,tz) - matching Alpha's isConnectedTo */
+static cc_bool Rail_IsConnectedTo(int tx, int ty, int tz, int checkX, int checkZ) {
+	BlockID block;
+	int meta, conn[2][3];
 	
-	/* Only top face varies based on connections */
-	if (face != FACE_YMAX) {
-		return RAIL_ENCODE(86, 0, 0, 0);
+	if (!World_Contains(tx, ty, tz)) return false;
+	block = World_GetBlock(tx, ty, tz);
+	if (!IsRail(block)) return false;
+	
+	meta = Rail_BlockToMeta(block);
+	Rail_GetConnections(meta, tx, ty, tz, conn);
+	
+	/* Alpha only checks x and z, not y */
+	if (conn[0][0] == checkX && conn[0][2] == checkZ) return true;
+	if (conn[1][0] == checkX && conn[1][2] == checkZ) return true;
+	return false;
+}
+
+/* Check if the track at position (nx,ny,nz) can connect back to us at (tx,tz) - Alpha's canConnectFrom */
+static cc_bool Rail_CanConnectFrom(int tx, int ty, int tz, int nx, int ny, int nz) {
+	int fx, fy, fz;
+	if (!Rail_FindTrackAt(nx, ny, nz, &fx, &fy, &fz)) return false;
+	
+	/* The found track must have us in its connection list, OR have room to add us */
+	{
+		BlockID block = World_GetBlock(fx, fy, fz);
+		int meta = Rail_BlockToMeta(block);
+		int conn[2][3], numConn, i;
+		cc_bool isInList = false;
+		
+		Rail_GetConnections(meta, fx, fy, fz, conn);
+		
+		/* Count how many connections point to valid tracks */
+		numConn = 0;
+		for (i = 0; i < 2; i++) {
+			int cx, cy, cz;
+			if (Rail_FindTrackAt(conn[i][0], conn[i][1], conn[i][2], &cx, &cy, &cz)) {
+				if (Rail_IsConnectedTo(cx, cy, cz, fx, fz)) {
+					numConn++;
+				}
+			}
+			if (conn[i][0] == tx && conn[i][2] == tz) isInList = true;
+		}
+		
+		if (isInList) return true;
+		if (numConn >= 2) return false;
+		return true;
+	}
+}
+
+/*########################################################################################################################*
+*-----------------------------------------Alpha connectToNeighbor logic-----------------------------------------------*
+*#########################################################################################################################*/
+/* Connection list structure matching Alpha's ArrayList<ChunkPosition> in MinecartTrackLogic */
+typedef struct {
+	int entries[3][3]; /* up to 3 entries (2 existing + 1 new), each {x, y, z} */
+	int count;
+} RailConnList;
+
+static cc_bool RailConnList_HasXZ(RailConnList* list, int x, int z) {
+	int i;
+	for (i = 0; i < list->count; i++) {
+		if (list->entries[i][0] == x && list->entries[i][2] == z)
+			return true;
+	}
+	return false;
+}
+
+static void RailConnList_Add(RailConnList* list, int x, int y, int z) {
+	if (list->count < 3) {
+		list->entries[list->count][0] = x;
+		list->entries[list->count][1] = y;
+		list->entries[list->count][2] = z;
+		list->count++;
+	}
+}
+
+/* Alpha's refreshConnectedTracks: validate existing connections, removing dead ones */
+static void Rail_RefreshConnList(int tx, int ty, int tz, int meta, RailConnList* list) {
+	int conn[2][3], i;
+	Rail_GetConnections(meta, tx, ty, tz, conn);
+	list->count = 0;
+	
+	for (i = 0; i < 2; i++) {
+		int fx, fy, fz;
+		if (Rail_FindTrackAt(conn[i][0], conn[i][1], conn[i][2], &fx, &fy, &fz)) {
+			/* Check if the track at the endpoint is connected back to us */
+			if (Rail_IsConnectedTo(fx, fy, fz, tx, tz)) {
+				RailConnList_Add(list, fx, fy, fz);
+			}
+		}
+	}
+}
+
+/* Alpha's canConnectTo: check if a track (represented by its refreshed connection list)
+   can accept a new connection from the caller */
+static cc_bool Rail_CanAcceptConnection(RailConnList* list, int callerX, int callerZ) {
+	/* Already connected to caller */
+	if (RailConnList_HasXZ(list, callerX, callerZ)) return true;
+	/* Already has 2 valid connections - full */
+	if (list->count >= 2) return false;
+	/* Has room (0 or 1 connections) */
+	return true;
+}
+
+/* Alpha's connectToNeighbor: reshape a neighbor rail based on its connection list.
+   Unlike Rail_UpdateShape which uses canConnectFrom (world scan), this uses the 
+   connection list (isInTrack) to determine shape. This is the key difference that
+   prevents parallel tracks from incorrectly connecting. */
+static void Rail_ConnectToNeighbor(int nx, int ny, int nz, int callerX, int callerY, int callerZ) {
+	BlockID block, newBlock;
+	int meta, newMeta;
+	RailConnList list;
+	cc_bool hasNorth, hasSouth, hasWest, hasEast;
+	
+	if (!World_Contains(nx, ny, nz)) return;
+	block = World_GetBlock(nx, ny, nz);
+	if (!IsRail(block)) return;
+	
+	meta = Rail_BlockToMeta(block);
+	
+	/* Alpha's refreshConnectedTracks: validate existing connections */
+	Rail_RefreshConnList(nx, ny, nz, meta, &list);
+	
+	/* Alpha's canConnectTo check */
+	if (!Rail_CanAcceptConnection(&list, callerX, callerZ)) return;
+	
+	/* Add the caller to the connection list */
+	RailConnList_Add(&list, callerX, callerY, callerZ);
+	
+	/* Determine new shape from connection list (Alpha's isInTrack checks, NOT canConnectFrom) */
+	hasNorth = RailConnList_HasXZ(&list, nx, nz - 1);
+	hasSouth = RailConnList_HasXZ(&list, nx, nz + 1);
+	hasWest  = RailConnList_HasXZ(&list, nx - 1, nz);
+	hasEast  = RailConnList_HasXZ(&list, nx + 1, nz);
+	
+	newMeta = -1;
+	if (hasNorth || hasSouth) newMeta = 0;
+	if (hasWest || hasEast)   newMeta = 1;
+	
+	if (hasSouth && hasEast && !hasNorth && !hasWest) newMeta = 6;
+	if (hasSouth && hasWest && !hasNorth && !hasEast) newMeta = 7;
+	if (hasNorth && hasWest && !hasSouth && !hasEast) newMeta = 8;
+	if (hasNorth && hasEast && !hasSouth && !hasWest) newMeta = 9;
+	
+	/* Slope detection (uses world, same as Alpha) */
+	if (newMeta == 0) {
+		if (World_Contains(nx, ny + 1, nz - 1) && IsRail(World_GetBlock(nx, ny + 1, nz - 1)))
+			newMeta = 4;
+		if (World_Contains(nx, ny + 1, nz + 1) && IsRail(World_GetBlock(nx, ny + 1, nz + 1)))
+			newMeta = 5;
+	}
+	if (newMeta == 1) {
+		if (World_Contains(nx + 1, ny + 1, nz) && IsRail(World_GetBlock(nx + 1, ny + 1, nz)))
+			newMeta = 2;
+		if (World_Contains(nx - 1, ny + 1, nz) && IsRail(World_GetBlock(nx - 1, ny + 1, nz)))
+			newMeta = 3;
 	}
 	
-	/* Check for rail neighbors in all 4 horizontal directions (same level and up) */
-	north_c = RailConnectionAt(x, y, z - 1);
-	south_c = RailConnectionAt(x, y, z + 1);
-	east_c  = RailConnectionAt(x + 1, y, z);
-	west_c  = RailConnectionAt(x - 1, y, z);
+	if (newMeta < 0) newMeta = 0;
 	
-	north = north_c > 0;  north_up = north_c == 2;
-	south = south_c > 0;  south_up = south_c == 2;
-	east  = east_c  > 0;  east_up  = east_c  == 2;
-	west  = west_c  > 0;  west_up  = west_c  == 2;
+	newBlock = Rail_MetaToBlock(newMeta);
+	if (newBlock != block) {
+		World_SetBlock(nx, ny, nz, newBlock);
+		Lighting.OnBlockChanged(nx, ny, nz, block, newBlock);
+		MapRenderer_OnBlockChanged(nx, ny, nz, newBlock);
+	}
+}
+
+/* Update a single rail's shape based on neighbors - Alpha MinecartTrackLogic.place() */
+void Rail_UpdateShape(int x, int y, int z, cc_bool isPowered) {
+	cc_bool north, south, west, east;
+	int meta;
+	BlockID newBlock, oldBlock;
 	
-	/* Also check for rails one block down (this rail slopes down to meet them) */
-	north_down = RailBelow(x, y, z - 1);
-	south_down = RailBelow(x, y, z + 1);
-	east_down  = RailBelow(x + 1, y, z);
-	west_down  = RailBelow(x - 1, y, z);
+	if (!World_Contains(x, y, z)) return;
+	oldBlock = World_GetBlock(x, y, z);
+	if (!IsRail(oldBlock)) return;
 	
-	/* Include below-connections as same-level connections for pattern matching */
-	if (north_down && !north) north = true;
-	if (south_down && !south) south = true;
-	if (east_down && !east)   east = true;
-	if (west_down && !west)   west = true;
+	/* Check which directions can connect (Alpha's canConnectFrom) */
+	north = Rail_CanConnectFrom(x, y, z, x, y, z - 1);
+	south = Rail_CanConnectFrom(x, y, z, x, y, z + 1);
+	west  = Rail_CanConnectFrom(x, y, z, x - 1, y, z);
+	east  = Rail_CanConnectFrom(x, y, z, x + 1, y, z);
 	
-	connections = north + south + east + west;
+	meta = -1;
 	
-	/* Slopes: only for straight (2-connection or 1-connection) rails, 
-	   and only when one neighbor is one block up. Curves never slope. */
-	if (connections <= 2) {
-		/* N-S axis slopes */
-		if (north_up && !east && !west)
-			return RAIL_ENCODE(RAIL_STRAIGHT, 0, 1, 0);  /* slope up to north (north end high) */
-		if (south_up && !east && !west)
-			return RAIL_ENCODE(RAIL_STRAIGHT, 0, 1, 1);  /* slope up to south (south end high) */
-		/* E-W axis slopes */
-		if (east_up && !north && !south)
-			return RAIL_ENCODE(RAIL_STRAIGHT, 1, 1, 0);  /* slope up to east (east end high) */
-		if (west_up && !north && !south)
-			return RAIL_ENCODE(RAIL_STRAIGHT, 1, 1, 1);  /* slope up to west (west end high) */
+	/* First pass: unique 2-connection patterns (exactly 2 of 4 neighbors) */
+	if ((north || south) && !west && !east) meta = 0; /* N-S */
+	if ((west || east) && !north && !south) meta = 1; /* E-W */
+	
+	if (south && east && !north && !west)   meta = 6; /* SE curve */
+	if (south && west && !north && !east)   meta = 7; /* SW curve */
+	if (north && west && !south && !east)   meta = 8; /* NW curve */
+	if (north && east && !south && !west)   meta = 9; /* NE curve */
+	
+	/* Second pass: ambiguous (3+ connections) - Alpha's power-dependent curve selection */
+	if (meta == -1) {
+		if (north || south) meta = 0;
+		if (west || east)   meta = 1;
+		
+		if (isPowered) {
+			/* Powered: favor SE, SW, NE, NW (last wins) */
+			if (south && east) meta = 6;
+			if (west && south) meta = 7;
+			if (east && north) meta = 9;
+			if (north && west) meta = 8;
+		} else {
+			/* Unpowered: favor NW, NE, SW, SE (last wins) */
+			if (north && west) meta = 8;
+			if (east && north) meta = 9;
+			if (west && south) meta = 7;
+			if (south && east) meta = 6;
+		}
 	}
 	
-	/* Determine texture and rotation based on connection pattern */
-	/* For 3 or 4 connections, prefer curves over straight */
+	/* Slope detection: if we have a straight (meta 0 or 1), check for slope */
+	if (meta == 0) {
+		/* N-S straight: check for rail one block up at north or south */
+		if (World_Contains(x, y + 1, z - 1) && 
+		    IsRail(World_GetBlock(x, y + 1, z - 1)))
+			meta = 4; /* ascending north */
+		if (World_Contains(x, y + 1, z + 1) && 
+		    IsRail(World_GetBlock(x, y + 1, z + 1)))
+			meta = 5; /* ascending south */
+	}
+	if (meta == 1) {
+		/* E-W straight: check for rail one block up at east or west */
+		if (World_Contains(x + 1, y + 1, z) && 
+		    IsRail(World_GetBlock(x + 1, y + 1, z)))
+			meta = 2; /* ascending east */
+		if (World_Contains(x - 1, y + 1, z) && 
+		    IsRail(World_GetBlock(x - 1, y + 1, z)))
+			meta = 3; /* ascending west */
+	}
 	
-	/* 4 connections: default to N-S straight (can't curve to all 4) */
-	if (north && south && east && west) return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);
+	if (meta < 0) meta = 0; /* default N-S */
 	
-	/* 3 connections: pick the curve that makes sense, ignore the odd one out */
-	if (north && south && east) return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
-	if (north && south && west) return RAIL_ENCODE(RAIL_CURVE, 2, 0, 0);  /* N-W curve */
-	if (north && east && west)  return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
-	if (south && east && west)  return RAIL_ENCODE(RAIL_CURVE, 0, 0, 0);  /* S-E curve */
+	newBlock = Rail_MetaToBlock(meta);
+	if (newBlock != oldBlock) {
+		World_SetBlock(x, y, z, newBlock);
+		Lighting.OnBlockChanged(x, y, z, oldBlock, newBlock);
+		MapRenderer_OnBlockChanged(x, y, z, newBlock);
+	}
 	
-	/* 2 connections - straights and curves */
-	if (north && south) return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);  /* N-S straight */
-	if (east && west)   return RAIL_ENCODE(RAIL_STRAIGHT, 1, 0, 0);  /* E-W straight */
-	
-	if (south && east)  return RAIL_ENCODE(RAIL_CURVE, 0, 0, 0);  /* S-E curve */
-	if (north && east)  return RAIL_ENCODE(RAIL_CURVE, 1, 0, 0);  /* N-E curve */
-	if (north && west)  return RAIL_ENCODE(RAIL_CURVE, 2, 0, 0);  /* N-W curve */
-	if (south && west)  return RAIL_ENCODE(RAIL_CURVE, 3, 0, 0);  /* S-W curve */
-	
-	/* 1 connection - straight rail aligned to the connection */
-	if (east || west) return RAIL_ENCODE(RAIL_STRAIGHT, 1, 0, 0);  /* E-W straight */
-	
-	/* 0 connections or north/south only - default N-S straight */
-	return RAIL_ENCODE(RAIL_STRAIGHT, 0, 0, 0);
+	/* Alpha post-place: notify connected neighbors via connectToNeighbor.
+	   This only updates the 2 rails we're connected to, NOT all adjacent rails.
+	   This is what allows parallel tracks (minecart boosters) to work. */
+	{
+		int conn[2][3], i;
+		Rail_GetConnections(meta, x, y, z, conn);
+		for (i = 0; i < 2; i++) {
+			int fx, fy, fz;
+			if (Rail_FindTrackAt(conn[i][0], conn[i][1], conn[i][2], &fx, &fy, &fz)) {
+				Rail_ConnectToNeighbor(fx, fy, fz, x, y, z);
+			}
+		}
+	}
+}
+
+/* Unused - kept for potential future use. In Alpha, onNeighborBlockChange does NOT
+   re-evaluate rail shapes when another rail is placed/broken. Only connectToNeighbor
+   (called from Rail_UpdateShape) updates the specifically connected neighbors. */
+void Rail_UpdateNeighbors(int x, int y, int z) {
+	/* No-op: Alpha doesn't update all neighbors.
+	   Rail_UpdateShape handles connected neighbor updates via connectToNeighbor. */
+	(void)x; (void)y; (void)z;
 }
 
 /* Calculate which direction a directional block should face based on adjacent blocks */
@@ -831,12 +1096,11 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 		return RedOreDust_GetTexture(x, y, z, face, true);
 	}
 	
-	/* Rail uses connection-based textures with UV rotation (handled in Builder_DrawRail).
-	   For non-YMAX faces, return transparent side texture.
-	   For YMAX, return the straight texture (Builder handles actual selection + rotation). */
-	if (block == BLOCK_RAIL) {
+	/* Rail blocks have their textures set in block definitions.
+	   For non-YMAX faces, return transparent side texture. */
+	if (IsRail(block)) {
 		if (face != FACE_YMAX) return 86;
-		return RAIL_STRAIGHT; /* Default; Builder_DrawRail overrides this */
+		return Blocks.Textures[block * FACE_COUNT + face];
 	}
 	
 	if (!directionalFacing_Enabled || !IsDirectionalBlock(block)) {
@@ -1270,7 +1534,7 @@ static void Block_CalcStretch(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST || block == BLOCK_LIT_RED_ORE_DUST ||
 	    IsAnyTorch(block) || block == BLOCK_FURNACE || block == BLOCK_CHEST ||
 	    block == BLOCK_SIGN_WALL || block == BLOCK_SIGN_FLOOR ||
-	    block == BLOCK_RAIL) {
+	    IsRail(block)) {
 		Blocks.CanStretch[block] = 0;
 	}
 
@@ -1481,7 +1745,25 @@ void Block_ResetProps(BlockID block) {
 	} else if (block == BLOCK_PORTAL) {
 		def = &portal_def;
 	} else if (block == BLOCK_RAIL) {
-		def = &rail_def;
+		def = &rail_ns_def;
+	} else if (block == BLOCK_RAIL_EW) {
+		def = &rail_ew_def;
+	} else if (block == BLOCK_RAIL_ASC_E) {
+		def = &rail_asc_e_def;
+	} else if (block == BLOCK_RAIL_ASC_W) {
+		def = &rail_asc_w_def;
+	} else if (block == BLOCK_RAIL_ASC_N) {
+		def = &rail_asc_n_def;
+	} else if (block == BLOCK_RAIL_ASC_S) {
+		def = &rail_asc_s_def;
+	} else if (block == BLOCK_RAIL_CURVE_SE) {
+		def = &rail_curve_se_def;
+	} else if (block == BLOCK_RAIL_CURVE_SW) {
+		def = &rail_curve_sw_def;
+	} else if (block == BLOCK_RAIL_CURVE_NW) {
+		def = &rail_curve_nw_def;
+	} else if (block == BLOCK_RAIL_CURVE_NE) {
+		def = &rail_curve_ne_def;
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}

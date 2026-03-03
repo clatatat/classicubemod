@@ -156,6 +156,19 @@ enum BLOCKID {
 	BLOCK_WHEAT_7 = 245, /* Stage 8 - fully grown, drops wheat */
 	BLOCK_PORTAL  = 246, /* Portal block - teleports to new Strange world on contact */
 
+	/* Rail orientation variants (non-placeable, auto-placed by rail update logic) */
+	/* Alpha metadata: 0=NS, 1=EW, 2=asc_E, 3=asc_W, 4=asc_N, 5=asc_S, 6=SE, 7=SW, 8=NW, 9=NE */
+	/* BLOCK_RAIL (74) is meta 0: N-S straight (also the inventory/craftable item) */
+	BLOCK_RAIL_EW       = 247, /* E-W straight rail (meta 1, tex 144) */
+	BLOCK_RAIL_ASC_E    = 248, /* Ascending East rail (meta 2, tex 128) */
+	BLOCK_RAIL_ASC_W    = 249, /* Ascending West rail (meta 3, tex 128) */
+	BLOCK_RAIL_ASC_N    = 250, /* Ascending North rail (meta 4, tex 128) */
+	BLOCK_RAIL_ASC_S    = 251, /* Ascending South rail (meta 5, tex 128) */
+	BLOCK_RAIL_CURVE_SE = 252, /* SE curve rail (meta 6, tex 112) */
+	BLOCK_RAIL_CURVE_SW = 253, /* SW curve rail (meta 7, tex 146) */
+	BLOCK_RAIL_CURVE_NW = 254, /* NW curve rail (meta 8, tex 147) */
+	BLOCK_RAIL_CURVE_NE = 255, /* NE curve rail (meta 9, tex 145) */
+
 #if defined EXTENDED_BLOCKS
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM

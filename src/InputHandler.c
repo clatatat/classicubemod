@@ -597,8 +597,8 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block == BLOCK_RED_SHROOM)   return 0.0f;
 	/* Wheat crops */
 	if (block >= BLOCK_WHEAT_0 && block <= BLOCK_WHEAT_7) return 0.0f;
-	/* Rail */
-	if (block == BLOCK_RAIL) return 0.5f;
+	/* Rail (all orientations) */
+	if (IsRail(block)) return 0.5f;
 
 	if (block == BLOCK_OBSIDIAN)     return 50.0f;
 	if (block == BLOCK_IRON)         return 5.0f;
@@ -760,6 +760,10 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 	Game_ChangeBlock(pos.x, pos.y, pos.z, BLOCK_AIR);
 	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, BLOCK_AIR);
 	BreakDoorPair(old, pos);
+
+	/* Alpha behavior: breaking a block does NOT cause adjacent rails to re-evaluate.
+	   In Alpha, onNeighborBlockChange only updates rails when canProvidePower() is true
+	   and the rail has exactly 3 adjacent tracks. */
 
 	/* In survival mode, drop the broken block */
 	if (Game_SurvivalMode && old != BLOCK_BEDROCK && old != BLOCK_AIR &&
@@ -1044,6 +1048,8 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					dropBlock = BLOCK_STONE_PLATE;
 				} else if (old == BLOCK_FARMLAND_DRY || old == BLOCK_FARMLAND_WET) {
 					dropBlock = BLOCK_DIRT;
+				} else if (IsRail(old)) {
+					dropBlock = BLOCK_RAIL; /* All rail variants drop as standard rail */
 				} else if (old >= BLOCK_WHEAT_0 && old <= BLOCK_WHEAT_7) {
 					/* Wheat crops: drop seeds and wheat based on growth stage */
 					dropBlock = BLOCK_AIR; /* suppress normal block drop */
@@ -1128,7 +1134,7 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 			above == BLOCK_LIT_RED_ORE_DUST ||
 			above == BLOCK_PRESSURE_PLATE || above == BLOCK_PRESSURE_PLATE_PRESSED ||
 			above == BLOCK_STONE_PLATE || above == BLOCK_STONE_PLATE_PRESSED ||
-			above == BLOCK_RAIL ||
+			IsRail(above) ||
 			(above >= BLOCK_WHEAT_0 && above <= BLOCK_WHEAT_7)) {
 			IVec3 abovePos;
 			abovePos.x = pos.x; abovePos.y = pos.y + 1; abovePos.z = pos.z;
@@ -1228,24 +1234,31 @@ static void InputHandler_DeleteBlock(void) {
 			int mcSlot   = Minecart_FindByEntityId(targetId);
 			if (mcSlot >= 0) {
 				struct Minecart* mc = &Minecarts[mcSlot];
-				mc->timeSinceHit = 10;
-				mc->damageTaken += 10.0f;
-				mc->forwardDir = -mc->forwardDir;
-				
-				/* Destroy if enough damage accumulated */
-				if (mc->damageTaken > 40.0f) {
-					/* Drop minecart item */
-					Vec3 dropPos = mc->pos;
-					int dropSlot = DropItem_FindFreeSlot();
-					if (dropSlot == -1) dropSlot = DropItem_EvictOldest();
-					if (dropSlot != -1) {
-						DropItem_Spawn(dropSlot, dropPos, BLOCK_AIR, true, ITEM_MINECART);
+				/* Range check: must be within reach distance */
+				Vec3 hitEye = Entity_GetEyePosition(&p->Base);
+				float hdx = mc->pos.x - hitEye.x;
+				float hdy = mc->pos.y - hitEye.y;
+				float hdz = mc->pos.z - hitEye.z;
+				if (hdx*hdx + hdy*hdy + hdz*hdz <= (p->ReachDistance + 0.5f) * (p->ReachDistance + 0.5f)) {
+					mc->timeSinceHit = 10;
+					mc->damageTaken += 10.0f;
+					mc->forwardDir = -mc->forwardDir;
+					
+					/* Destroy if enough damage accumulated */
+					if (mc->damageTaken > 40.0f) {
+						/* Drop minecart item */
+						Vec3 dropPos = mc->pos;
+						int dropSlot = DropItem_FindFreeSlot();
+						if (dropSlot == -1) dropSlot = DropItem_EvictOldest();
+						if (dropSlot != -1) {
+							DropItem_Spawn(dropSlot, dropPos, BLOCK_AIR, true, ITEM_MINECART);
+						}
+						Minecart_Despawn(mcSlot);
 					}
-					Minecart_Despawn(mcSlot);
+					Audio_PlayDigSound(SOUND_METAL);
+					HeldBlockRenderer_ClickAnim(true);
+					return;
 				}
-				Audio_PlayDigSound(SOUND_METAL);
-				HeldBlockRenderer_ClickAnim(true);
-				return;
 			}
 		}
 	}
@@ -1305,15 +1318,25 @@ static void InputHandler_PlaceBlock(void) {
 	BlockID old, block, targetBlock, otherBlock, newBlock, newOtherBlock;
 	
 	/* ===== Minecart interaction: ride existing cart ===== */
-	/* Use ray-AABB test so you must actually aim at the cart to ride it */
+	/* Must aim crosshair directly at cart (ray-AABB test), be within reach distance,
+	   and not be holding a placeable block (so right-click building isn't intercepted) */
 	{
 		struct LocalPlayer* p = Entities.CurPlayer;
-		if (p && Minecart_GetPlayerCart() < 0) {
+		cc_bool holdingBlock = (Inventory_SelectedBlock != BLOCK_AIR && Hotbar_SelectedItem == ITEM_NONE);
+		if (p && Minecart_GetPlayerCart() < 0 && !holdingBlock) {
 			int targetId = Entities_GetClosest(&p->Base);
 			int slot     = Minecart_FindByEntityId(targetId);
 			if (slot >= 0) {
-				Minecart_RideCart(slot);
-				return;
+				/* Range check: must be within reach distance */
+				Vec3 eyePos = Entity_GetEyePosition(&p->Base);
+				float dx = Minecarts[slot].pos.x - eyePos.x;
+				float dy = Minecarts[slot].pos.y - eyePos.y;
+				float dz = Minecarts[slot].pos.z - eyePos.z;
+				if (dx*dx + dy*dy + dz*dz <= p->ReachDistance * p->ReachDistance) {
+					Minecart_RideCart(slot);
+					Chat_Add1("&eYou are now riding a minecart. Press &fSHIFT&e to dismount.", NULL);
+					return;
+				}
 			}
 		}
 	}
@@ -1943,6 +1966,7 @@ static void InputHandler_PlaceBlock(void) {
 		below = World_GetBlock(pos.x, pos.y - 1, pos.z);
 		
 		if (Blocks.Draw[below] != DRAW_OPAQUE) return;
+		/* Rail will be placed as BLOCK_RAIL (N-S) then immediately updated */
 	}
 	
 	/* Snow requires a solid block below */
@@ -2082,6 +2106,13 @@ static void InputHandler_PlaceBlock(void) {
 
 	Game_ChangeBlock(pos.x, pos.y, pos.z, block);
 	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, block);
+
+	/* After placing a rail, update its shape. Rail_UpdateShape internally calls
+	   connectToNeighbor on only its connected neighbors (Alpha behavior).
+	   This allows parallel tracks (minecart boosters) to work. */
+	if (block == BLOCK_RAIL) {
+		Rail_UpdateShape(pos.x, pos.y, pos.z, false);
+	}
 
 	/* In survival mode, consume one block from the hotbar stack */
 	if (Game_SurvivalMode && Hotbar_SelectedItem == ITEM_NONE) {
@@ -3266,7 +3297,7 @@ static int DropItem_GetItemTex(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST)    return 56;
 	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
 	if (block == BLOCK_IRON_DOOR)       return 44;
-	if (block == BLOCK_RAIL)            return 57;
+	if (IsRail(block))                  return 57;
 	return -1;
 }
 

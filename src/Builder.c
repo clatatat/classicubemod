@@ -40,7 +40,7 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 
 #define IsLeverBlock(b) ((b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON)
 #define IsCropBlock(b)  ((b) >= BLOCK_WHEAT_0 && (b) <= BLOCK_WHEAT_7)
-#define IsRailBlock(b)  ((b) == BLOCK_RAIL)
+#define IsRailBlock(b)  ((b) == BLOCK_RAIL || ((b) >= BLOCK_RAIL_EW && (b) <= BLOCK_RAIL_CURVE_NE))
 
 static BlockID* Builder_Chunk;
 static cc_uint8* Builder_Counts;
@@ -247,6 +247,19 @@ static void PrepareChunk(int x1, int y1, int z1) {
 				/* Note sprites are drawn using DrawSprite and not with any of the DrawXFace. */
 				if (Blocks.Draw[b] == DRAW_SPRITE) {
 					if (IsCropBlock(b)) { AddCropSpriteVertices(b); } else { AddSpriteVertices(b); }
+					continue;
+				}
+				
+				/* Rails only use YMAX face (drawn via Builder_DrawRail).
+				   Zero all other face counts to prevent uninitialized vertex data.
+				   counts buffer is pre-filled with 1, so we must explicitly zero them. */
+				if (IsRailBlock(b)) {
+					Builder_Counts[index + FACE_XMIN] = 0;
+					Builder_Counts[index + FACE_XMAX] = 0;
+					Builder_Counts[index + FACE_ZMIN] = 0;
+					Builder_Counts[index + FACE_ZMAX] = 0;
+					Builder_Counts[index + FACE_YMIN] = 0;
+					AddVertices(b, FACE_YMAX);
 					continue;
 				}
 				
@@ -1394,44 +1407,25 @@ static cc_bool HasSnowAbove(int x, int y, int z) {
 	return above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK;
 }
 
-/* UV rotation table for rail YMAX face rendering.
-   4 rotations x 4 vertices, each entry is {u_select, v_select}
-   where 0 = min (u1/v1), 1 = max (u2/v2).
-   Vertex order: NE(x+,z-), NW(x-,z-), SW(x-,z+), SE(x+,z+)
-   Each step rotates the texture image 90 degrees CCW. */
-static const cc_uint8 railUV[4][4][2] = {
-	/* 0°:       N-S straight or S-E curve (default orientation) */
-	{ {1,0}, {0,0}, {0,1}, {1,1} },
-	/* 90° CCW:  E-W straight or N-E curve */
-	{ {1,1}, {1,0}, {0,0}, {0,1} },
-	/* 180°:     N-W curve */
-	{ {0,1}, {1,1}, {1,0}, {0,0} },
-	/* 270° CCW: S-W curve */
-	{ {0,0}, {0,1}, {1,1}, {1,0} },
-};
-
-/* Draws a rail block as a flat or sloped quad on the YMAX face with UV rotation
-   based on neighboring rail connections. */
+/* Draws a rail block as a flat or sloped quad on the YMAX face.
+   Each rail orientation is its own block ID with its own texture.
+   No UV rotation needed - textures are pre-oriented in terrain.png. */
 static void Builder_DrawRail(int index, int x, int y, int z) {
 	struct Builder1DPart* part;
 	struct VertexTextured* v;
 	PackedCol col;
-	int encoded, rotation, sloped, highEnd;
 	TextureLoc loc;
 	float vOrigin, u1, u2, v1, v2;
 	float x1, x2, z1, z2;
-	float yNE, yNW, ySW, ySE; /* per-corner Y values for slopes */
+	float yNE, yNW, ySW, ySE;
 	int count_YMax, lightFlags, offset, baseOffset;
+	BlockID block = Builder_Block;
 	
 	count_YMax = Builder_Counts[index + FACE_YMAX];
 	if (!count_YMax) return;
 	
-	/* Get the texture, rotation, and slope from rail connection logic */
-	encoded  = Rail_GetTextureAndRotation(x, y, z, FACE_YMAX);
-	loc      = RAIL_DECODE_TEX(encoded);
-	rotation = RAIL_DECODE_ROT(encoded);
-	sloped   = RAIL_DECODE_SLOPED(encoded);
-	highEnd  = RAIL_DECODE_HIGHEND(encoded);
+	/* Each block type has the correct texture in its definition */
+	loc = Block_Tex(block, FACE_YMAX);
 	
 	/* Calculate UV coordinates from atlas */
 	vOrigin = Atlas1D_RowId(loc) * Atlas1D.InvTileSize;
@@ -1441,8 +1435,8 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 	v2 = vOrigin + Atlas1D.InvTileSize * UV2_Scale;
 	
 	/* Calculate world positions */
-	lightFlags = Blocks.LightOffset[Builder_Block];
-	baseOffset = (Blocks.Draw[Builder_Block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
+	lightFlags = Blocks.LightOffset[block];
+	baseOffset = (Blocks.Draw[block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
 	
 	x1 = (float)x;
 	x2 = (float)x + 1.0f;
@@ -1451,30 +1445,20 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 	
 	/* Base Y for the flat rail surface */
 	{
-		float yBase = (float)y + Blocks.MaxBB[Builder_Block].y;
+		float yBase = (float)y + Blocks.MaxBB[block].y;
 		yNE = yNW = ySW = ySE = yBase;
 		
-		if (sloped) {
-			/* Raise the appropriate edge by 1 block */
-			if (rotation == 0) {
-				/* N-S axis: north is z-, south is z+ */
-				if (highEnd == 0) {
-					/* North end high: NE and NW raised */
-					yNE += 1.0f; yNW += 1.0f;
-				} else {
-					/* South end high: SE and SW raised */
-					ySE += 1.0f; ySW += 1.0f;
-				}
-			} else {
-				/* E-W axis: east is x+, west is x- */
-				if (highEnd == 0) {
-					/* East end high: NE and SE raised */
-					yNE += 1.0f; ySE += 1.0f;
-				} else {
-					/* West end high: NW and SW raised */
-					yNW += 1.0f; ySW += 1.0f;
-				}
-			}
+		/* Slopes: raise the appropriate edge by 1 block based on block ID */
+		switch (block) {
+			case BLOCK_RAIL_ASC_E: /* ascending east: east edge (x+) raised */
+				yNE += 1.0f; ySE += 1.0f; break;
+			case BLOCK_RAIL_ASC_W: /* ascending west: west edge (x-) raised */
+				yNW += 1.0f; ySW += 1.0f; break;
+			case BLOCK_RAIL_ASC_N: /* ascending north: north edge (z-) raised */
+				yNE += 1.0f; yNW += 1.0f; break;
+			case BLOCK_RAIL_ASC_S: /* ascending south: south edge (z+) raised */
+				ySE += 1.0f; ySW += 1.0f; break;
+			default: break;
 		}
 	}
 	
@@ -1484,33 +1468,23 @@ static void Builder_DrawRail(int index, int x, int y, int z) {
 	part = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
 	v = part->faces.vertices[FACE_YMAX];
 	
-	/* Emit 4 vertices with rotated UVs and per-corner Y heights:
-	   Vertex order matches Drawer_YMax: NE, NW, SW, SE */
-	{
-		float uvals[2], vvals[2];
-		uvals[0] = u1; uvals[1] = u2;
-		vvals[0] = v1; vvals[1] = v2;
-		
-		/* NE corner (x+, z-) */
-		v->x = x2; v->y = yNE; v->z = z1; v->Col = col;
-		v->U = uvals[railUV[rotation][0][0]];
-		v->V = vvals[railUV[rotation][0][1]]; v++;
-		
-		/* NW corner (x-, z-) */
-		v->x = x1; v->y = yNW; v->z = z1; v->Col = col;
-		v->U = uvals[railUV[rotation][1][0]];
-		v->V = vvals[railUV[rotation][1][1]]; v++;
-		
-		/* SW corner (x-, z+) */
-		v->x = x1; v->y = ySW; v->z = z2; v->Col = col;
-		v->U = uvals[railUV[rotation][2][0]];
-		v->V = vvals[railUV[rotation][2][1]]; v++;
-		
-		/* SE corner (x+, z+) */
-		v->x = x2; v->y = ySE; v->z = z2; v->Col = col;
-		v->U = uvals[railUV[rotation][3][0]];
-		v->V = vvals[railUV[rotation][3][1]]; v++;
-	}
+	/* Emit 4 vertices - no UV rotation, textures are pre-oriented.
+	   Vertex order: NE, NW, SW, SE (matching Drawer_YMax) */
+	/* NE corner (x+, z-) */
+	v->x = x2; v->y = yNE; v->z = z1; v->Col = col;
+	v->U = u2; v->V = v1; v++;
+	
+	/* NW corner (x-, z-) */
+	v->x = x1; v->y = yNW; v->z = z1; v->Col = col;
+	v->U = u1; v->V = v1; v++;
+	
+	/* SW corner (x-, z+) */
+	v->x = x1; v->y = ySW; v->z = z2; v->Col = col;
+	v->U = u1; v->V = v2; v++;
+	
+	/* SE corner (x+, z+) */
+	v->x = x2; v->y = ySE; v->z = z2; v->Col = col;
+	v->U = u2; v->V = v2; v++;
 	
 	part->faces.vertices[FACE_YMAX] = v;
 }

@@ -57,43 +57,13 @@ static const int railMatrix[10][2][3] = {
 *----------------------------------------------------Rail metadata--------------------------------------------------------*
 *#########################################################################################################################*/
 /* Determine the Alpha-style rail metadata for a given rail block position.
-   This maps our connection-based rail system to Alpha's 0-9 metadata values. */
+   Now simply reads the block ID and converts to meta 0-9. */
 static int GetRailMeta(int x, int y, int z) {
-	int encoded, rotation, sloped, highEnd;
-	
+	BlockID block;
 	if (!World_Contains(x, y, z)) return -1;
-	if (!IsRail(World_GetBlock(x, y, z))) return -1;
-	
-	encoded  = Rail_GetTextureAndRotation(x, y, z, FACE_YMAX);
-	rotation = RAIL_DECODE_ROT(encoded);
-	sloped   = RAIL_DECODE_SLOPED(encoded);
-	highEnd  = RAIL_DECODE_HIGHEND(encoded);
-	
-	if (sloped) {
-		if (rotation == 0) {
-			/* N-S axis slope */
-			return highEnd == 0 ? 4 : 5; /* 4=asc_N (north end high), 5=asc_S (south end high) */
-		} else {
-			/* E-W axis slope */
-			return highEnd == 0 ? 2 : 3; /* 2=asc_E (east end high), 3=asc_W (west end high) */
-		}
-	}
-	
-	/* Flat or curve - determine from texture */
-	{
-		TextureLoc tex = RAIL_DECODE_TEX(encoded);
-		if (tex == 112) {
-			/* Curve texture */
-			switch (rotation) {
-				case 0: return 6; /* S-E curve */
-				case 1: return 9; /* N-E curve */
-				case 2: return 8; /* N-W curve */
-				case 3: return 7; /* S-W curve */
-			}
-		}
-		/* Straight */
-		return rotation == 0 ? 0 : 1; /* 0=N-S, 1=E-W */
-	}
+	block = World_GetBlock(x, y, z);
+	if (!IsRail(block)) return -1;
+	return Rail_BlockToMeta(block);
 }
 
 /* Try to find a rail at (x,y,z) or (x,y-1,z). Returns the y level of the rail, or -1. */
@@ -801,7 +771,9 @@ static void Minecart_TickOne(struct Minecart* mc, float delta) {
 	}
 }
 
-/* Update player position to follow riding cart */
+/* Update player position to follow riding cart.
+   This is a backup sync in case LocalPlayer_Tick's riding
+   path doesn't fully cover all edge cases. */
 static void Minecart_UpdateRider(void) {
 	struct LocalPlayer* p;
 	struct Minecart* mc;
@@ -818,8 +790,12 @@ static void Minecart_UpdateRider(void) {
 	
 	/* Position player at cart position + ride offset */
 	p->Base.Position.x = mc->pos.x;
-	p->Base.Position.y = mc->pos.y + MC_RIDE_OFFSET;
+	p->Base.Position.y = mc->pos.y + 0.0625f;
 	p->Base.Position.z = mc->pos.z;
+	
+	/* Sync interpolation state so rendering is smooth */
+	p->Base.prev.pos = p->Base.Position;
+	p->Base.next.pos = p->Base.Position;
 	
 	/* Kill player velocity (cart controls movement) */
 	p->Base.Velocity = Vec3_Create3(0,0,0);

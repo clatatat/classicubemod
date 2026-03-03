@@ -25,6 +25,7 @@
 #include "Protocol.h"
 #include "Generator.h"
 #include "Screens.h"
+#include "Minecart.h"
 
 const char* const NameMode_Names[NAME_MODE_COUNT]   = { "None", "Hovered", "All", "AllHovered", "AllUnscaled" };
 const char* const ShadowMode_Names[SHADOW_MODE_COUNT] = { "None", "SnapToBlock", "Circle", "CircleAll" };
@@ -772,6 +773,32 @@ static void LocalPlayer_Tick(struct Entity* e, float delta) {
 	Vec3 headingVelocity;
 
 	if (!World.Loaded) return;
+
+	/* When riding a minecart, skip all player physics.
+	   The cart controls position; player can only look around. */
+	if (Minecart_GetPlayerCart() >= 0) {
+		int cartSlot = Minecart_GetPlayerCart();
+		if (cartSlot >= 0 && cartSlot < MAX_MINECARTS && Minecarts[cartSlot].active) {
+			struct Minecart* mc = &Minecarts[cartSlot];
+			Vec3 ridePos;
+			ridePos.x = mc->pos.x;
+			ridePos.y = mc->pos.y + 0.0625f; /* sit on cart floor (1/16 above cart origin) */
+			ridePos.z = mc->pos.z;
+
+			e->Position   = ridePos;
+			e->prev.pos   = ridePos;
+			e->next.pos   = ridePos;
+			e->Velocity   = Vec3_Create3(0,0,0);
+			e->OnGround   = true;
+
+			LocalInterpComp_AdvanceState(&p->Interp, e);
+			Entity_CheckSkin(&p->Base);
+			AnimatedComp_Update(e, ridePos, ridePos, delta);
+			TiltComp_Update(p, &p->Tilt, delta);
+			return;
+		}
+	}
+
 	p->Collisions.StepSize = hacks->FullBlockStep && hacks->Enabled && hacks->CanSpeed ? 1.0f : 0.5f;
 	p->OldVelocity = e->Velocity;
 	wasOnGround    = e->OnGround;

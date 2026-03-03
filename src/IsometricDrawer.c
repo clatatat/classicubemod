@@ -41,7 +41,7 @@ static TextureLoc IsometricDrawer_GetTexLoc(BlockID block, Face face) {
 
 static void IsometricDrawer_Flat(BlockID block, float size) {
 	int texIndex;
-	Face face = (block == BLOCK_RAIL) ? FACE_YMAX : FACE_ZMAX;
+	Face face = IsRail(block) ? FACE_YMAX : FACE_ZMAX;
 	TextureLoc loc = Block_Tex(block, face);
 	TextureRec rec = Atlas1D_TexRec(loc, 1, &texIndex);
 
@@ -179,7 +179,7 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 	itemTile = GetItemTexForBlock(block);
 	if (itemTile >= 0) {
 		IsometricDrawer_FlatItem(itemTile, size);
-	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || block == BLOCK_RAIL) {
+	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || IsRail(block)) {
 		IsometricDrawer_Flat(block, size);
 	} else {
 		IsometricDrawer_Angled(block, size);

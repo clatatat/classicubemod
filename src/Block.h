@@ -162,14 +162,17 @@ void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
 /* Get rail texture and rotation for a specific face at a world position.
    Returns encoded value: (textureLoc << 2) | rotation
    rotation: 0=0deg, 1=90CW, 2=180, 3=270CW */
-/* Check if a block is a rail */
+/* Check if a block is any rail variant */
 cc_bool IsRail(BlockID block);
-int Rail_GetTextureAndRotation(int x, int y, int z, Face face);
-/* Decode helpers for Rail_GetTextureAndRotation return value */
-#define RAIL_DECODE_TEX(e)     ((TextureLoc)((e) >> 4))
-#define RAIL_DECODE_ROT(e)     ((e) & 3)
-#define RAIL_DECODE_SLOPED(e)  (((e) >> 2) & 1)
-#define RAIL_DECODE_HIGHEND(e) (((e) >> 3) & 1)
+/* Get the Alpha-style metadata (0-9) for a rail block ID. Returns -1 for non-rail blocks. */
+int Rail_BlockToMeta(BlockID block);
+/* Get the rail block ID for an Alpha-style metadata value (0-9). */
+BlockID Rail_MetaToBlock(int meta);
+/* Update a rail's orientation based on neighbor connections (Alpha algorithm).
+   Call after placing/breaking a rail or any block adjacent to a rail. */
+void Rail_UpdateShape(int x, int y, int z, cc_bool isPowered);
+/* Check 6 adjacent positions for rails and update their shape. */
+void Rail_UpdateNeighbors(int x, int y, int z);
 
 CC_END_HEADER
 #endif
