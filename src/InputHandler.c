@@ -6914,7 +6914,7 @@ void WorldSettings_LoadFromFile(const cc_string* path) {
 /*########################################################################################################################*
 *-------------------------------------------------Entity save/load-------------------------------------------------*
 *#########################################################################################################################*/
-#define ENTITY_SAVE_VERSION 1
+#define ENTITY_SAVE_VERSION 2
 
 void Entities_SaveToFile(const cc_string* path) {
 	cc_uint8 buf[64];
@@ -6988,6 +6988,30 @@ void Entities_SaveToFile(const cc_string* path) {
 		Stream_Write(&stream, buf, 39);
 	}
 
+	/* Count active minecarts */
+	{
+		int numCarts = 0;
+		for (i = 0; i < MAX_MINECARTS; i++) {
+			if (Minecarts[i].active) numCarts++;
+		}
+		Stream_Write(&stream, (cc_uint8*)&numCarts, 4);
+
+		/* Write each active minecart */
+		/* posXYZ(12), velXYZ(12), yaw(4), pitch(4) = 32 bytes */
+		for (i = 0; i < MAX_MINECARTS; i++) {
+			if (!Minecarts[i].active) continue;
+			Mem_Copy(buf + 0,  &Minecarts[i].pos.x, 4);
+			Mem_Copy(buf + 4,  &Minecarts[i].pos.y, 4);
+			Mem_Copy(buf + 8,  &Minecarts[i].pos.z, 4);
+			Mem_Copy(buf + 12, &Minecarts[i].velocity.x, 4);
+			Mem_Copy(buf + 16, &Minecarts[i].velocity.y, 4);
+			Mem_Copy(buf + 20, &Minecarts[i].velocity.z, 4);
+			Mem_Copy(buf + 24, &Minecarts[i].yaw, 4);
+			Mem_Copy(buf + 28, &Minecarts[i].pitch, 4);
+			Stream_Write(&stream, buf, 32);
+		}
+	}
+
 	stream.Close(&stream);
 }
 
@@ -7001,6 +7025,7 @@ void Entities_LoadFromFile(const cc_string* path) {
 	Vec3 pos;
 	BlockID block;
 	float lifetime;
+	int saveVersion;
 
 	Platform_EncodePath(&raw, path);
 	res = Stream_OpenPath(&stream, &raw);
@@ -7008,7 +7033,8 @@ void Entities_LoadFromFile(const cc_string* path) {
 
 	/* Header */
 	Stream_Read(&stream, buf, 4);
-	if (buf[0] != ENTITY_SAVE_VERSION) { stream.Close(&stream); return; }
+	saveVersion = buf[0];
+	if (saveVersion < 1 || saveVersion > ENTITY_SAVE_VERSION) { stream.Close(&stream); return; }
 
 	/* Clear existing mob state */
 	for (i = 0; i < MAX_NET_PLAYERS; i++) {
@@ -7096,6 +7122,36 @@ void Entities_LoadFromFile(const cc_string* path) {
 		Mem_Copy(&droppedItemVelocityX[slot], buf + 27, 4);
 		Mem_Copy(&droppedItemVelocityY[slot], buf + 31, 4);
 		Mem_Copy(&droppedItemVelocityZ[slot], buf + 35, 4);
+	}
+
+	/* Read minecarts (version 2+) */
+	if (saveVersion >= 2) {
+		int numCarts;
+		Vec3 cartPos;
+
+		/* Clear existing minecarts first */
+		for (i = 0; i < MAX_MINECARTS; i++) {
+			if (Minecarts[i].active) Minecart_Despawn(i);
+		}
+
+		Stream_Read(&stream, (cc_uint8*)&numCarts, 4);
+		for (i = 0; i < numCarts; i++) {
+			Stream_Read(&stream, buf, 32);
+			Mem_Copy(&cartPos.x, buf + 0,  4);
+			Mem_Copy(&cartPos.y, buf + 4,  4);
+			Mem_Copy(&cartPos.z, buf + 8,  4);
+
+			slot = Minecart_Spawn(cartPos.x, cartPos.y, cartPos.z);
+			if (slot == -1) continue;
+
+			/* Restore velocity, yaw, pitch */
+			Mem_Copy(&Minecarts[slot].velocity.x, buf + 12, 4);
+			Mem_Copy(&Minecarts[slot].velocity.y, buf + 16, 4);
+			Mem_Copy(&Minecarts[slot].velocity.z, buf + 20, 4);
+			Mem_Copy(&Minecarts[slot].yaw,        buf + 24, 4);
+			Mem_Copy(&Minecarts[slot].pitch,       buf + 28, 4);
+			Minecarts[slot].prevPos = Minecarts[slot].pos;
+		}
 	}
 
 	stream.Close(&stream);

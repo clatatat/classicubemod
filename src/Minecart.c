@@ -20,7 +20,7 @@
 
 struct Minecart Minecarts[MAX_MINECARTS];
 
-/* Physics constants matching Minecraft Alpha 1.0.6 */
+/* Physics constants matching Minecraft Alpha 1.2.6 */
 #define MC_GRAVITY          0.04f
 #define MC_MAX_SPEED        0.4f
 #define MC_SLOPE_PUSH       (1.0f / 128.0f)
@@ -31,6 +31,12 @@ struct Minecart Minecarts[MAX_MINECARTS];
 #define MC_OFF_RAIL_AIR     0.95f
 #define MC_PUSH_FACTOR      0.1f
 #define MC_ENTITY_SCAN_PAD  0.2f
+
+/* Minecart hitbox half-widths for block collision (Alpha: setSize(0.98, 0.7)) */
+#define MC_HALF_WIDTH  0.49f   /* 0.98 / 2 */
+#define MC_HEIGHT      0.7f
+/* Max Y-distance for player push interaction (cart height + player height margin) */
+#define MC_PUSH_Y_RANGE 2.0f
 
 /* Ride height offset: rider sits 0.3 blocks below cart origin (from Alpha: 0.0 - 0.3) */
 #define MC_RIDE_OFFSET     -0.3f
@@ -258,6 +264,9 @@ int Minecart_Spawn(float x, float y, float z) {
 	Minecarts[slot].pos.y       = y;
 	Minecarts[slot].pos.z       = z;
 	Minecarts[slot].velocity    = Vec3_Create3(0,0,0);
+	Minecarts[slot].prevPos.x   = x;
+	Minecarts[slot].prevPos.y   = y;
+	Minecarts[slot].prevPos.z   = z;
 	Minecarts[slot].yaw         = 0.0f;
 	Minecarts[slot].pitch       = 0.0f;
 	Minecarts[slot].entityId    = eid;
@@ -412,10 +421,11 @@ static cc_bool Minecart_GetSmoothPos(float inX, float inY, float inZ,
 	return true;
 }
 
-/* Alpha's half-width offset subtracted from smooth Y to get entity posY.
-   In Alpha: setPosition(x, smoothY, z) does posY = smoothY - (width/2).
-   width = 0.98, so offset = 0.49. */
-#define MC_SMOOTH_Y_OFFSET 0.49f
+/* Offset from Alpha's smooth Y to CC's entity feet position.
+   In Alpha: posY = smoothY (setPosition stores y directly), and feet = posY - yOffset.
+   yOffset = height / 2 = 0.7 / 2 = 0.35. CC positions are at feet, so:
+   CC_pos.y = smoothY - yOffset = smoothY - 0.35 */
+#define MC_SMOOTH_Y_OFFSET 0.35f
 
 /* On-rail physics - faithful translation of Alpha EntityMinecart.i_() on-rail section.
    Key differences from our old code:
@@ -517,9 +527,66 @@ static void Minecart_OnRailPhysics(struct Minecart* mc) {
 	if (moveZ < -MC_MAX_SPEED) moveZ = -MC_MAX_SPEED;
 	if (moveZ >  MC_MAX_SPEED) moveZ =  MC_MAX_SPEED;
 	
-	/* Move (Alpha uses d() with collision, we just add directly) */
-	mc->pos.x += moveX;
-	mc->pos.z += moveZ;
+	/* Move with horizontal block collision (Alpha's d()/moveEntity checks AABB vs world).
+	   We check each axis independently so sliding along walls works naturally. */
+	{
+		float newX = mc->pos.x + moveX;
+		float newZ = mc->pos.z + moveZ;
+		float baseY = mc->pos.y;  /* feet Y of cart */
+		int checkY;
+		
+		/* Check X axis: sample blocks the cart would overlap at new X position */
+		if (moveX != 0.0f) {
+			float edgeX = (moveX > 0) ? (newX + MC_HALF_WIDTH) : (newX - MC_HALF_WIDTH);
+			int bx = (int)Math_Floor(edgeX);
+			int bzMin = (int)Math_Floor(mc->pos.z - MC_HALF_WIDTH);
+			int bzMax = (int)Math_Floor(mc->pos.z + MC_HALF_WIDTH);
+			cc_bool blocked = false;
+			int bz2;
+			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
+				for (bz2 = bzMin; bz2 <= bzMax; bz2++) {
+					if (World_Contains(bx, checkY, bz2) &&
+						Blocks.Collide[World_GetBlock(bx, checkY, bz2)] == COLLIDE_SOLID) {
+						blocked = true; break;
+					}
+				}
+				if (blocked) break;
+			}
+			if (blocked) {
+				/* Snap to block edge and kill X velocity */
+				if (moveX > 0) newX = (float)bx - MC_HALF_WIDTH - 0.001f;
+				else           newX = (float)(bx + 1) + MC_HALF_WIDTH + 0.001f;
+				mc->velocity.x = 0.0f;
+			}
+		}
+		
+		/* Check Z axis: sample blocks the cart would overlap at new Z position */
+		if (moveZ != 0.0f) {
+			float edgeZ = (moveZ > 0) ? (newZ + MC_HALF_WIDTH) : (newZ - MC_HALF_WIDTH);
+			int bz = (int)Math_Floor(edgeZ);
+			int bxMin = (int)Math_Floor(newX - MC_HALF_WIDTH);
+			int bxMax = (int)Math_Floor(newX + MC_HALF_WIDTH);
+			cc_bool blocked = false;
+			int bx2;
+			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
+				for (bx2 = bxMin; bx2 <= bxMax; bx2++) {
+					if (World_Contains(bx2, checkY, bz) &&
+						Blocks.Collide[World_GetBlock(bx2, checkY, bz)] == COLLIDE_SOLID) {
+						blocked = true; break;
+					}
+				}
+				if (blocked) break;
+			}
+			if (blocked) {
+				if (moveZ > 0) newZ = (float)bz - MC_HALF_WIDTH - 0.001f;
+				else           newZ = (float)(bz + 1) + MC_HALF_WIDTH + 0.001f;
+				mc->velocity.z = 0.0f;
+			}
+		}
+		
+		mc->pos.x = newX;
+		mc->pos.z = newZ;
+	}
 	
 	/* Slope height correction at block boundaries (Alpha's endpoint check) */
 	newBX = (int)Math_Floor(mc->pos.x);
@@ -569,46 +636,18 @@ static void Minecart_OnRailPhysics(struct Minecart* mc) {
 *-------------------------------------------------Minecart-Minecart collision (booster bug)-------------------------------*
 *#########################################################################################################################*/
 
-/* Immediately re-project a cart's velocity onto its current rail direction.
-   This is the key step that makes the booster glitch work: collision adds a
-   perpendicular push component. When we compute speed = sqrt(vx² + vz²),
-   the perpendicular component INCREASES the total speed. Re-projecting that
-   increased speed onto the rail direction converts the push into acceleration.
-   In Alpha this happens naturally on the next tick's rail physics. We do it
-   immediately after collision to ensure the conversion isn't lost. */
-static void Minecart_SnapVelocityToRail(struct Minecart* mc) {
-	int bx, by, bz, meta;
-	float dirX, dirZ, dirLen, dot, speed;
-	
-	bx = (int)Math_Floor(mc->pos.x);
-	by = (int)Math_Floor(mc->pos.y);
-	bz = (int)Math_Floor(mc->pos.z);
-	
-	/* Check rail at y-1 (same as Alpha) */
-	if (World_Contains(bx, by - 1, bz) && IsRail(World_GetBlock(bx, by - 1, bz)))
-		by--;
-	
-	meta = GetRailMeta(bx, by, bz);
-	if (meta < 0 || meta > 9) return;
-	
-	dirX = (float)(railMatrix[meta][1][0] - railMatrix[meta][0][0]);
-	dirZ = (float)(railMatrix[meta][1][2] - railMatrix[meta][0][2]);
-	dirLen = Math_SqrtF(dirX * dirX + dirZ * dirZ);
-	if (dirLen < 0.001f) return;
-	
-	/* Flip direction to match current motion */
-	dot = mc->velocity.x * dirX + mc->velocity.z * dirZ;
-	if (dot < 0.0f) { dirX = -dirX; dirZ = -dirZ; }
-	
-	/* Convert TOTAL speed (including perpendicular push) to rail-aligned speed.
-	   This is the booster mechanism: sqrt(vx² + vz²) > sqrt(rail_component²) */
-	speed = Math_SqrtF(mc->velocity.x * mc->velocity.x + mc->velocity.z * mc->velocity.z);
-	mc->velocity.x = speed * dirX / dirLen;
-	mc->velocity.z = speed * dirZ / dirLen;
-}
-
-/* Replicates Alpha's EntityMinecart.applyEntityCollision for minecart-minecart pairs.
-   This is the famous booster bug: two carts on parallel tracks boost each other. */
+/* Replicates Alpha 1.2.6's EntityMinecart.applyEntityCollision for minecart-minecart pairs.
+   This is the famous booster bug: two carts on parallel tracks boost each other.
+   
+   The key difference from Alpha 1.0.6 (where boosters DON'T work) is the 0.2 damping:
+   - 1.0.6: motionX = 0; addVelocity(avg - push) → result = avg - push
+   - 1.2.6: motionX *= 0.2; addVelocity(avg - push) → result = 0.2*old + avg - push
+   
+   With 1.2.6's formula, each cart retains 20% of its original velocity plus the
+   averaged velocity (which itself includes the original). The velocity coefficients
+   sum to >1.0 (0.7*self + 0.5*other = 1.2), creating energy amplification each
+   collision. This plus the perpendicular push (which gets re-projected onto the
+   rail direction next tick via sqrt(vx²+vz²)) is what makes boosters work. */
 static void Minecart_ApplyBooster(struct Minecart* a, struct Minecart* b) {
 	float dx, dz, dist, invDist, pushX, pushZ;
 	float avgMX, avgMZ;
@@ -631,22 +670,24 @@ static void Minecart_ApplyBooster(struct Minecart* a, struct Minecart* b) {
 	pushX = dx * invDist * MC_PUSH_FACTOR * 0.5f;
 	pushZ = dz * invDist * MC_PUSH_FACTOR * 0.5f;
 	
-	/* Average both carts' velocities */
+	/* Average both carts' velocities (Alpha 1.2.6: var10/var12 after /= 2) */
 	avgMX = (a->velocity.x + b->velocity.x) * 0.5f;
 	avgMZ = (a->velocity.z + b->velocity.z) * 0.5f;
 	
-	/* Apply: each cart gets average velocity plus/minus push from separation */
-	a->velocity.x = avgMX - pushX;
-	a->velocity.z = avgMZ - pushZ;
-	b->velocity.x = avgMX + pushX;
-	b->velocity.z = avgMZ + pushZ;
+	/* Alpha 1.2.6 collision: dampen existing velocity to 20%, then add average +/- push.
+	   The 0.2 retention means each cart keeps some of its original velocity on top of
+	   the averaged velocity, causing total system energy to INCREASE with each collision.
+	   The perpendicular push component gets converted to rail-aligned speed next tick
+	   when OnRailPhysics re-projects velocity via sqrt(vx² + vz²). */
+	a->velocity.x *= 0.2f;
+	a->velocity.z *= 0.2f;
+	a->velocity.x += avgMX - pushX;
+	a->velocity.z += avgMZ - pushZ;
 	
-	/* Immediately re-project onto rail: this converts the perpendicular push
-	   (which increases total speed via sqrt(vx²+vz²)) into rail-aligned speed.
-	   This is the core booster mechanism - without this, the perpendicular 
-	   component just gets projected out next tick with no net speed gain. */
-	Minecart_SnapVelocityToRail(a);
-	Minecart_SnapVelocityToRail(b);
+	b->velocity.x *= 0.2f;
+	b->velocity.z *= 0.2f;
+	b->velocity.x += avgMX + pushX;
+	b->velocity.z += avgMZ + pushZ;
 }
 
 
@@ -656,10 +697,15 @@ static void Minecart_ApplyBooster(struct Minecart* a, struct Minecart* b) {
 /* When a player walks into a minecart, push it */
 static void Minecart_CheckPlayerPush(struct Minecart* mc) {
 	struct LocalPlayer* p = Entities.CurPlayer;
-	float dx, dz, dist, pushStrength;
+	float dx, dy, dz, dist, pushStrength;
 	
 	if (!p) return;
 	if (mc->riderId >= 0) return; /* Don't push occupied carts */
+	
+	/* Check Y proximity: player must be roughly at cart height.
+	   Player feet Y vs cart Y: reject if too far above or below. */
+	dy = p->Base.Position.y - mc->pos.y;
+	if (dy < -MC_PUSH_Y_RANGE || dy > MC_PUSH_Y_RANGE) return;
 	
 	dx = mc->pos.x - p->Base.Position.x;
 	dz = mc->pos.z - p->Base.Position.z;
@@ -709,10 +755,65 @@ static void Minecart_OffRailPhysics(struct Minecart* mc) {
 		mc->velocity.z *= MC_OFF_RAIL_GROUND;
 	}
 	
-	/* Move */
-	mc->pos.x += mc->velocity.x;
+	/* Move with horizontal block collision */
+	{
+		float newX = mc->pos.x + mc->velocity.x;
+		float newZ = mc->pos.z + mc->velocity.z;
+		float baseY = mc->pos.y;
+		int checkY;
+		
+		/* Check X axis */
+		if (mc->velocity.x != 0.0f) {
+			float edgeX = (mc->velocity.x > 0) ? (newX + MC_HALF_WIDTH) : (newX - MC_HALF_WIDTH);
+			int bx = (int)Math_Floor(edgeX);
+			int bzMin = (int)Math_Floor(mc->pos.z - MC_HALF_WIDTH);
+			int bzMax = (int)Math_Floor(mc->pos.z + MC_HALF_WIDTH);
+			cc_bool blocked = false;
+			int bz2;
+			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
+				for (bz2 = bzMin; bz2 <= bzMax; bz2++) {
+					if (World_Contains(bx, checkY, bz2) &&
+						Blocks.Collide[World_GetBlock(bx, checkY, bz2)] == COLLIDE_SOLID) {
+						blocked = true; break;
+					}
+				}
+				if (blocked) break;
+			}
+			if (blocked) {
+				if (mc->velocity.x > 0) newX = (float)bx - MC_HALF_WIDTH - 0.001f;
+				else                    newX = (float)(bx + 1) + MC_HALF_WIDTH + 0.001f;
+				mc->velocity.x = 0.0f;
+			}
+		}
+		
+		/* Check Z axis */
+		if (mc->velocity.z != 0.0f) {
+			float edgeZ = (mc->velocity.z > 0) ? (newZ + MC_HALF_WIDTH) : (newZ - MC_HALF_WIDTH);
+			int bz = (int)Math_Floor(edgeZ);
+			int bxMin = (int)Math_Floor(newX - MC_HALF_WIDTH);
+			int bxMax = (int)Math_Floor(newX + MC_HALF_WIDTH);
+			cc_bool blocked = false;
+			int bx2;
+			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
+				for (bx2 = bxMin; bx2 <= bxMax; bx2++) {
+					if (World_Contains(bx2, checkY, bz) &&
+						Blocks.Collide[World_GetBlock(bx2, checkY, bz)] == COLLIDE_SOLID) {
+						blocked = true; break;
+					}
+				}
+				if (blocked) break;
+			}
+			if (blocked) {
+				if (mc->velocity.z > 0) newZ = (float)bz - MC_HALF_WIDTH - 0.001f;
+				else                    newZ = (float)(bz + 1) + MC_HALF_WIDTH + 0.001f;
+				mc->velocity.z = 0.0f;
+			}
+		}
+		
+		mc->pos.x = newX;
+		mc->pos.z = newZ;
+	}
 	mc->pos.y += mc->velocity.y;
-	mc->pos.z += mc->velocity.z;
 	
 	/* Alpha: air friction AFTER movement (only when NOT on ground) */
 	if (!onGround) {
@@ -747,30 +848,39 @@ static void Minecart_UpdateEntity(struct Minecart* mc) {
 }
 
 static void Minecart_UpdateVisuals(struct Minecart* mc) {
-	float speed, deltaX, deltaZ, newYaw, yawDiff;
+	float newYaw, yawDiff;
 	
-	deltaX = mc->velocity.x;
-	deltaZ = mc->velocity.z;
-	speed = deltaX * deltaX + deltaZ * deltaZ;
-	
-	/* Update yaw based on motion direction.
-	   NOTE: CC's Math_Atan2f(x,y) computes atan2(y,x) (params swapped vs standard C).
-	   So Math_Atan2f(deltaX, deltaZ) = atan2(deltaZ, deltaX), which gives the standard
-	   math angle from +X axis, correctly aligning model's X (long) axis with velocity. */
-	if (speed > 0.001f) {
-		newYaw = Math_Atan2f(deltaX, deltaZ) * MATH_RAD2DEG;
-		
-		/* Alpha reverse detection: if yaw changed by >= 170 degrees, flip */
-		yawDiff = newYaw - mc->yaw;
-		while (yawDiff >= 180.0f) yawDiff -= 360.0f;
-		while (yawDiff < -180.0f) yawDiff += 360.0f;
-		
-		if (yawDiff >= 170.0f || yawDiff <= -170.0f) {
-			newYaw += 180.0f;
-			mc->isInReverse = !mc->isInReverse;
+	/* Alpha: yaw is computed from actual displacement (prevPos - pos), NOT velocity.
+	   Alpha uses: atan2(prevPosZ - posZ, prevPosX - posX) which gives the angle
+	   pointing BACKWARD along the movement direction. The isInReverse flag then
+	   flips it 180 degrees on the first tick, resulting in forward-facing yaw.
+	   
+	   We use the CC equivalent: the displacement direction itself via
+	   atan2(pos - prevPos) to get the forward direction, then apply the same
+	   reverse detection logic. */
+	{
+		float dX = mc->prevPos.x - mc->pos.x;
+		float dZ = mc->prevPos.z - mc->pos.z;
+		if (dX * dX + dZ * dZ > 0.001f) {
+			/* Alpha: atan2(prevZ-posZ, prevX-posX) * 180/PI
+			   CC's Math_Atan2f(x,y) = atan2(y,x), so Math_Atan2f(dX,dZ) = atan2(dZ,dX) */
+			newYaw = Math_Atan2f(dX, dZ) * MATH_RAD2DEG;
+			if (mc->isInReverse) {
+				newYaw += 180.0f;
+			}
+			
+			/* Alpha reverse detection: if yaw changed by >= 170 degrees, flip */
+			yawDiff = newYaw - mc->yaw;
+			while (yawDiff >= 180.0f) yawDiff -= 360.0f;
+			while (yawDiff < -180.0f) yawDiff += 360.0f;
+			
+			if (yawDiff < -170.0f || yawDiff >= 170.0f) {
+				newYaw += 180.0f;
+				mc->isInReverse = !mc->isInReverse;
+			}
+			
+			mc->yaw = newYaw;
 		}
-		
-		mc->yaw = newYaw;
 	}
 	
 	/* Calculate pitch for slopes */
@@ -802,10 +912,13 @@ static void Minecart_UpdateVisuals(struct Minecart* mc) {
 	if (mc->damageTaken < 0.0f) mc->damageTaken = 0.0f;
 }
 
-/* Main tick for one minecart - matches Alpha EntityMinecart.i_() flow exactly */
+/* Main tick for one minecart - matches Alpha EntityMinecart.onUpdate() flow exactly */
 static void Minecart_TickOne(struct Minecart* mc, float delta) {
 	int blockX, blockY, blockZ;
 	cc_bool onRail;
+	
+	/* Alpha: save previous position at start of tick (for yaw from displacement) */
+	mc->prevPos = mc->pos;
 	
 	/* Alpha: gravity always applied BEFORE checking for rail */
 	mc->velocity.y -= MC_GRAVITY;
@@ -831,9 +944,8 @@ static void Minecart_TickOne(struct Minecart* mc, float delta) {
 		Minecart_CheckPlayerPush(mc);
 	}
 	
-	/* Kill very small velocities */
-	if (mc->velocity.x > -0.0001f && mc->velocity.x < 0.0001f) mc->velocity.x = 0;
-	if (mc->velocity.z > -0.0001f && mc->velocity.z < 0.0001f) mc->velocity.z = 0;
+	/* Alpha does NOT have a velocity kill threshold.
+	   Velocities decay naturally through friction (0.96 per tick). */
 	
 	Minecart_UpdateVisuals(mc);
 	Minecart_UpdateEntity(mc);
@@ -844,19 +956,25 @@ static void Minecart_TickOne(struct Minecart* mc, float delta) {
 		int mySlot = (int)(mc - Minecarts);
 		int j;
 		for (j = 0; j < MAX_MINECARTS; j++) {
-			float dx, dz;
 			if (j == mySlot || !Minecarts[j].active) continue;
 			if (Minecarts[j].entityId == mc->riderId) continue; /* Don't collide with rider */
 			
-			dx = Minecarts[j].pos.x - mc->pos.x;
-			dz = Minecarts[j].pos.z - mc->pos.z;
-			
-			/* AABB-style overlap check: cart width 0.98 + 0.2 expansion each side.
-			   Two carts on adjacent parallel rails (1 block apart) are within range. */
-			if (dx > -1.18f && dx < 1.18f && dz > -1.18f && dz < 1.18f) {
-				float dist = Math_SqrtF(dx * dx + dz * dz);
-				if (dist >= 0.0001f) {
-					Minecart_ApplyBooster(mc, &Minecarts[j]);
+			{
+				float dx = Minecarts[j].pos.x - mc->pos.x;
+				float dy = Minecarts[j].pos.y - mc->pos.y;
+				float dz = Minecarts[j].pos.z - mc->pos.z;
+				float distSq;
+				
+				/* AABB overlap check matching Alpha's getEntitiesWithinAABBExcludingEntity.
+				   X/Z: cart half-width 0.49 + 0.2 expansion + other cart's 0.49 = 1.18.
+				   Y: cart height 0.7, no expansion. Two carts overlap when |dy| < 0.7. */
+				if (dx > -1.18f && dx < 1.18f && dz > -1.18f && dz < 1.18f &&
+					dy > -MC_HEIGHT && dy < MC_HEIGHT) {
+					distSq = dx * dx + dz * dz;
+					/* Alpha checks dist² >= 1.0E-4F before proceeding */
+					if (distSq >= 1.0E-4f) {
+						Minecart_ApplyBooster(mc, &Minecarts[j]);
+					}
 				}
 			}
 		}
@@ -938,8 +1056,19 @@ static void Minecart_OnReset(void) {
 	playerRidingCart = -1;
 }
 
+static void Minecart_OnNewMap(void) {
+	int i;
+	for (i = 0; i < MAX_MINECARTS; i++) {
+		if (Minecarts[i].active) {
+			Minecart_Despawn(i);
+		}
+	}
+	playerRidingCart = -1;
+}
+
 struct IGameComponent Minecart_Component = {
-	Minecart_OnInit,  /* Init  */
-	NULL,             /* Free  */
-	Minecart_OnReset, /* Reset */
+	Minecart_OnInit,    /* Init  */
+	NULL,               /* Free  */
+	Minecart_OnReset,   /* Reset */
+	Minecart_OnNewMap,  /* OnNewMap */
 };

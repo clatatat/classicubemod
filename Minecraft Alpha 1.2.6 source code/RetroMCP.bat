@@ -1,0 +1,1 @@
+java -jar RetroMCP-Java-GUI.jar

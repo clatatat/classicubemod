@@ -4,7 +4,7 @@
 #include "Vectors.h"
 CC_BEGIN_HEADER
 
-/* Minecart entity system - simulates Minecraft Alpha 1.0.6 minecart behavior.
+/* Minecart entity system - simulates Minecraft Alpha 1.2.6 minecart behavior.
    Copyright 2014-2025 ClassiCube | Licensed under BSD-3 */
 
 struct IGameComponent;
@@ -20,8 +20,9 @@ extern struct IGameComponent Minecart_Component;
 /* Minecart state */
 struct Minecart {
 	cc_bool active;
-	Vec3 pos;            /* World position (center of cart) */
+	Vec3 pos;            /* World position (feet of cart) */
 	Vec3 velocity;       /* Motion per tick */
+	Vec3 prevPos;        /* Position at start of tick (for yaw from displacement) */
 	float yaw;           /* Visual rotation */
 	float pitch;         /* Visual tilt (for slopes) */
 	int entityId;        /* Entity slot in Entities.List for rendering */
