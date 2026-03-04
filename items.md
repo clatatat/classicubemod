@@ -69,3 +69,4 @@ ID      Item Name            Texture (items.png)
 66      Water Bucket         75                     1
 67      Lava Bucket          76                     1
 68      Sign                 42                     1
+69      Minecart             135                    1
