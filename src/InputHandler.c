@@ -559,6 +559,8 @@ static cc_bool Block_IsInstaMine(BlockID block) {
 /* Check if the held tool can get drops from this block */
 static cc_bool Block_CanGetDrops(BlockID block, int toolType, int toolTier) {
 	int minTier;
+	/* Rails always drop regardless of tool */
+	if (IsRail(block)) return true;
 	/* Insta-mine blocks never require a tool for drops */
 	if (Block_IsInstaMine(block)) return true;
 	minTier = Block_MinPickaxeTier(block);
@@ -654,6 +656,12 @@ static float CalcBreakTime(BlockID block) {
 
 	GetToolInfo(Hotbar_SelectedItem, &toolType, &toolTier);
 	preferred = Block_PreferredTool(block);
+
+	/* Rails: break like planks by hand, like stone with a pickaxe, always drop */
+	if (IsRail(block)) {
+		if (toolType == TOOL_PICKAXE) return 1.3f / tierSpeed[toolTier];
+		return 2.0f;
+	}
 
 	/* Stone/metal without a pickaxe takes as long as obsidian with iron pickaxe (25s) */
 	if (Block_RequiresTool(block) && toolType != preferred) return 25.0f;

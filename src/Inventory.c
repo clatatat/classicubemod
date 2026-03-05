@@ -921,6 +921,8 @@ static const struct SmeltRecipe smeltRecipes[] = {
 	{ true, BLOCK_SAND, true, BLOCK_GLASS, ITEM_NONE, 1 },
 	/* Cobblestone -> Stone */
 	{ true, BLOCK_COBBLE, true, BLOCK_STONE, ITEM_NONE, 1 },
+	/* Dirt -> Bricks */
+	{ true, BLOCK_DIRT, true, BLOCK_BRICK, ITEM_NONE, 1 },
 	/* Raw Pork -> Cooked Pork */
 	{ false, 52, false, BLOCK_AIR, 53, 1 },
 };

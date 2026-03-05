@@ -80,6 +80,7 @@ int     Game_MobLightSensitivity;
 int     Game_MobHealthMultiplier;
 int     Game_MobDamageMultiplier;
 int     Player_Health = PLAYER_MAX_HEALTH;
+int     Player_Air    = PLAYER_MAX_AIR;
 cc_bool Game_Anaglyph3D;
 
 cc_bool Game_ViewBobbing, Game_HideGui;
@@ -342,8 +343,9 @@ static void HandleOnNewMapLoaded(void* obj) {
 	for (comp = comps_head; comp; comp = comp->next) {
 		if (comp->OnNewMapLoaded) comp->OnNewMapLoaded();
 	}
-	/* Reset player health when a new map is loaded */
+	/* Reset player health and air when a new map is loaded */
 	Player_Health = PLAYER_MAX_HEALTH;
+	Player_Air    = PLAYER_MAX_AIR;
 	Player_CheatsEnabled = false;
 	/* Disable hacks in survival mode by default */
 	if (Game_SurvivalMode) {

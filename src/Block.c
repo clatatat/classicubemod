@@ -77,18 +77,18 @@ static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef portal_def = {"Portal", 127, 127, 127, 16, PackedCol_Make(0,0,0,255), 127, BRIT_FULL, true, 100, DRAW_OPAQUE, COLLIDE_NONE, SOUND_NONE, SOUND_NONE};
-static const struct SimpleBlockDef rail_ns_def = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_ns_def = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
 /* Rail orientation block defs - each has its own texture, no UV rotation needed.
    NS=128, EW=144, slopes use their axis texture, curves: SE=112, NE=145, SW=146, NW=147 */
-static const struct SimpleBlockDef rail_ew_def       = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_asc_e_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_asc_w_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_asc_n_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_asc_s_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_curve_se_def = {"Rail", 112, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_curve_sw_def = {"Rail", 146, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_curve_nw_def = {"Rail", 147, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
-static const struct SimpleBlockDef rail_curve_ne_def = {"Rail", 145, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_ew_def       = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_e_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_w_def    = {"Rail", 144, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_n_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_asc_s_def    = {"Rail", 128, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_se_def = {"Rail", 112, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_sw_def = {"Rail", 146, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_nw_def = {"Rail", 147, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef rail_curve_ne_def = {"Rail", 145, 86, 86, 1, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_METAL, SOUND_METAL};
 
 static const struct SimpleBlockDef wheat_stage_defs[8] = {
 	{"Wheat Stage 1", 133, 133, 133, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_GRASS, SOUND_NONE},

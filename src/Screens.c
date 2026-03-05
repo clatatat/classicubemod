@@ -81,8 +81,13 @@ static struct HUDScreen {
 	int lastFov;
 	int lastX, lastY, lastZ;
 	int lastHealth;
-	int prevHealth;       /* health before last damage, for flash animation */
-	float damageFlashTimer; /* countdown for flash effect */
+	int prevHealth;              /* health before last damage, for flash animation */
+	float damageFlashTimer;      /* countdown for flash effect */
+	float unaffectedFlashTimer;  /* brief flash for unaffected hearts on hit */
+	int lastAir;                 /* last rendered air value, for dirty detection */
+	float airDrainAccum;         /* fraction of next air unit to drain */
+	float drownDamageTimer;      /* seconds accumulated toward next drowning damage tick */
+	cc_bool headInWater;         /* whether player head is currently submerged */
 	struct HotbarWidget hotbar;
 } HUDScreen_Instance CC_BIG_VAR;
 
@@ -90,7 +95,7 @@ static struct HUDScreen {
 #define POSITION_VAL_CHARS 11
 /* [PREFIX] [(] [X] [,] [Y] [,] [Z] [)] */
 #define POSITION_HUD_CHARS (1 + 1 + POSITION_VAL_CHARS + 1 + POSITION_VAL_CHARS + 1 + POSITION_VAL_CHARS + 1)
-#define HUD_MAX_VERTICES (4 + TEXTWIDGET_MAX * 2 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4)
+#define HUD_MAX_VERTICES (4 + TEXTWIDGET_MAX * 2 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4 + 10 * 4)
 
 static void HUDScreen_RemakeLine1(struct HUDScreen* s) {
 	cc_string status; char statusBuffer[STRING_SIZE * 2];
@@ -306,7 +311,8 @@ static void HUDScreen_NeedRedrawing(void* obj) {
 	((struct HUDScreen*)obj)->dirty = true;
 }
 
-static int heartsCount; /* Number of heart quads actually built (0 if not survival) */
+static int heartsCount;  /* Number of heart quads actually built (0 if not survival) */
+static int bubblesCount; /* Number of bubble quads actually built (0 if not underwater) */
 static RNGState heartsRng; /* RNG for low-health heart shaking */
 #define LOW_HEALTH_THRESHOLD 4 /* shake when health <= 4 (2 hearts) */
 
@@ -344,8 +350,9 @@ static void HUDScreen_UpdateFPS(struct HUDScreen* s, float delta) {
 	Game.ChunkUpdates = 0;
 }
 
-#define HEART_FLASH_DURATION 0.4f /* seconds for full flash sequence */
-#define HEART_FLASH_COUNT   3     /* number of on/off blinks */
+#define HEART_FLASH_DURATION    0.4f /* seconds for full flash sequence */
+#define HEART_FLASH_COUNT       3    /* number of on/off blinks */
+#define UNAFFECTED_FLASH_DURATION 0.1f /* seconds unaffected hearts show row-1 icon */
 
 static void HUDScreen_Update(void* screen, float delta) {
 	struct HUDScreen* s = (struct HUDScreen*)screen;
@@ -368,7 +375,8 @@ static void HUDScreen_Update(void* screen, float delta) {
 		/* Start flash animation when health decreases */
 		if (Player_Health < s->lastHealth) {
 			s->prevHealth = s->lastHealth;
-			s->damageFlashTimer = HEART_FLASH_DURATION;
+			s->damageFlashTimer     = HEART_FLASH_DURATION;
+			s->unaffectedFlashTimer = UNAFFECTED_FLASH_DURATION;
 		}
 		s->lastHealth = Player_Health;
 		s->dirty = true;
@@ -377,9 +385,61 @@ static void HUDScreen_Update(void* screen, float delta) {
 			DeathScreen_Show();
 		}
 	}
-	/* Tick flash timer and keep rebuilding while flashing */
+	/* Drowning / air mechanics (survival mode, head submerged) */
+	if (Game_SurvivalMode && Player_Health > 0) {
+		struct Entity* e = &Entities.CurPlayer->Base;
+		float eyeY = e->Position.y + Entity_GetEyeHeight(e);
+		int ex = (int)Math_Floor(e->Position.x);
+		int ey = (int)Math_Floor(eyeY);
+		int ez = (int)Math_Floor(e->Position.z);
+		cc_bool inWater = World.Loaded && World_Contains(ex, ey, ez)
+			&& Blocks.ExtendedCollide[World_GetBlock(ex, ey, ez)] == COLLIDE_WATER;
+
+		s->headInWater = inWater;
+		if (inWater) {
+			if (Player_Air > 0) {
+				/* Drain air: 20 units/second (empties in 15s, matching Alpha's 300 ticks at 20 tps) */
+				s->airDrainAccum += delta * 20.0f;
+				while (s->airDrainAccum >= 1.0f) {
+					s->airDrainAccum -= 1.0f;
+					if (Player_Air > 0) Player_Air--;
+				}
+			} else {
+				/* Air gone -- deal 2 damage every 1 second (Alpha: every 20 ticks) */
+				s->drownDamageTimer += delta;
+				if (s->drownDamageTimer >= 1.0f) {
+					s->drownDamageTimer -= 1.0f;
+					Player_Damage(2);
+				}
+			}
+		} else {
+			/* Surfaced -- restore full air instantly */
+			Player_Air          = PLAYER_MAX_AIR;
+			s->airDrainAccum    = 0.0f;
+			s->drownDamageTimer = 0.0f;
+		}
+		/* Rebuild HUD when air level changes (updates bubble display) */
+		if (Player_Air != s->lastAir) {
+			s->lastAir = Player_Air;
+			s->dirty   = true;
+		}
+	} else {
+		s->headInWater      = false;
+		Player_Air          = PLAYER_MAX_AIR;
+		s->airDrainAccum    = 0.0f;
+		s->drownDamageTimer = 0.0f;
+		if (Player_Air != s->lastAir) {
+			s->lastAir = Player_Air;
+			s->dirty   = true;
+		}
+	}
+	/* Tick flash timers and keep rebuilding while flashing */
 	if (s->damageFlashTimer > 0.0f) {
 		s->damageFlashTimer -= delta;
+		s->dirty = true;
+	}
+	if (s->unaffectedFlashTimer > 0.0f) {
+		s->unaffectedFlashTimer -= delta;
 		s->dirty = true;
 	}
 	/* Keep rebuilding when low health so hearts shake */
@@ -402,12 +462,13 @@ static void HUDScreen_Update(void* screen, float delta) {
 #define ICON_HEART_FLASH_HALF 7 /* x=79: pink/white half heart (damage flash) */
 
 /* Calculate UV coordinates for a heart icon tile */
-static void Icon_GetHeartUV(int heartIndex, float* u1, float* v1, float* u2, float* v2) {
+static void Icon_GetHeartUV(int heartIndex, int row, float* u1, float* v1, float* u2, float* v2) {
 	int x = ICON_HEARTS_X + heartIndex * ICON_HEART_SIZE;
+	int y = row * ICON_HEART_SIZE;
 	*u1 = x / 256.0f;
-	*v1 = 0.0f;
+	*v1 = y / 256.0f;
 	*u2 = (x + ICON_HEART_SIZE) / 256.0f;
-	*v2 = ICON_HEART_SIZE / 256.0f;
+	*v2 = (y + ICON_HEART_SIZE) / 256.0f;
 }
 
 static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
@@ -416,7 +477,8 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 	float u1, v1, u2, v2;
 	int i, heartSize, heartSpacing, totalWidth, startX, startY;
 	int health = Player_Health;
-	cc_bool flashing = s->damageFlashTimer > 0.0f;
+	cc_bool flashing          = s->damageFlashTimer > 0.0f;
+	cc_bool unaffectedFlashing = s->unaffectedFlashTimer > 0.0f;
 	cc_bool flashOn  = false;
 	int flashCycle   = 0;
 	int prevHealth = s->prevHealth;
@@ -459,6 +521,7 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 		}
 
 		/* During flash, blink affected hearts between pink and normal/empty */
+		int row = 0;
 		if (flashing) {
 			int prevHp = prevHealth - i * 2;
 			cc_bool affected = (prevHp >= 2 && hp < 2) || (prevHp == 1 && hp <= 0);
@@ -471,10 +534,13 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 					tileIndex = (prevHp >= 2) ? ICON_HEART_FULL : ICON_HEART_HALF;
 				}
 				/* Later "off" phases: keep current (empty) tileIndex as-is */
+			} else if (unaffectedFlashing && hp >= 1) {
+				/* Unaffected hearts with health: briefly show the icon one row below */
+				row = 1;
 			}
 		}
 
-		Icon_GetHeartUV(tileIndex, &u1, &v1, &u2, &v2);
+		Icon_GetHeartUV(tileIndex, row, &u1, &v1, &u2, &v2);
 		tex.x = startX + i * (heartSize + heartSpacing);
 		tex.y = startY;
 
@@ -487,6 +553,48 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 
 		Gfx_Make2DQuad(&tex, PACKEDCOL_WHITE, ptr);
 		heartsCount++;
+	}
+}
+
+static void HUDScreen_BuildBubblesMesh(struct VertexTextured** ptr) {
+	struct HUDScreen* s = &HUDScreen_Instance;
+	struct Texture tex;
+	float u1, v1, u2, v2;
+	int i, heartSize, heartSpacing, startX, startY;
+	int air, fullBubbles, totalBubbles, partBubbles;
+
+	bubblesCount = 0;
+	if (!Game_SurvivalMode) return;
+	if (!s->headInWater) return;
+
+	air = Player_Air;
+	/* Bubble count formula matching Alpha 1.0.6 GuiIngame.java */
+	fullBubbles  = air > 2 ? Math_CeilDiv((air - 2) * 10, 300) : 0;
+	totalBubbles = Math_CeilDiv(air * 10, 300);
+	partBubbles  = totalBubbles - fullBubbles;
+	if (fullBubbles < 0) fullBubbles = 0;
+	if (partBubbles < 0) partBubbles = 0;
+
+	/* Scale and position: one row above hearts */
+	heartSize    = (int)(9.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	heartSpacing = -1;
+	startX = s->hotbar.x;
+	startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY)
+	       - heartSize; /* one row above hearts */
+
+	tex.width  = heartSize;
+	tex.height = heartSize;
+
+	for (i = 0; i < fullBubbles + partBubbles; i++) {
+		/* Full bubble = row 2 index 0 (icons.png x=16,y=18); partial = index 1 (x=25,y=18) */
+		int idx = (i < fullBubbles) ? 0 : 1;
+		Icon_GetHeartUV(idx, 2, &u1, &v1, &u2, &v2);
+		tex.x = startX + i * (heartSize + heartSpacing);
+		tex.y = startY;
+		tex.uv.u1 = u1; tex.uv.v1 = v1;
+		tex.uv.u2 = u2; tex.uv.v2 = v2;
+		Gfx_Make2DQuad(&tex, PACKEDCOL_WHITE, ptr);
+		bubblesCount++;
 	}
 }
 
@@ -521,7 +629,8 @@ static void HUDScreen_BuildMesh(void* screen) {
 		HUDScreen_BuildPosition(s, data);
 	/* Advance ptr past position area to place hearts after it */
 	*ptr = data + POSITION_HUD_CHARS * 4;
-	HUDScreen_BuildHeartsMesh(ptr);
+	HUDScreen_BuildHeartsMesh(ptr);  /* always writes exactly 10 quads in survival mode */
+	HUDScreen_BuildBubblesMesh(ptr); /* writes after hearts; nop in non-survival mode */
 	Gfx_UnlockDynamicVb(s->vb);
 }
 
@@ -560,6 +669,13 @@ static void HUDScreen_Render(void* screen, float delta) {
 			Gfx_BindDynamicVb(s->vb);
 			Gfx_DrawVb_IndexedTris_Range(heartsCount * 4,
 				12 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4, DRAW_HINT_SPRITE);
+		}
+		/* Render air bubbles when submerged (survival mode only) */
+		if (bubblesCount > 0 && Gui.IconsTex && !Gui.HideHotbar && !SurvInv_IsScreenOpen()) {
+			Gfx_BindTexture(Gui.IconsTex);
+			Gfx_BindDynamicVb(s->vb);
+			Gfx_DrawVb_IndexedTris_Range(bubblesCount * 4,
+				12 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4, DRAW_HINT_SPRITE);
 		}
 	}
 

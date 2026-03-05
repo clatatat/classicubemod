@@ -100,6 +100,8 @@ extern int     Game_MobDamageMultiplier;
 /* Player health system (survival mode only) */
 #define PLAYER_MAX_HEALTH 20
 extern int Player_Health; /* 0 to PLAYER_MAX_HEALTH (20 = 10 full hearts) */
+#define PLAYER_MAX_AIR 300
+extern int Player_Air;    /* 0 to PLAYER_MAX_AIR (300 units = 15 seconds) */
 
 extern cc_bool Game_Anaglyph3D;
 extern cc_bool Game_ViewBobbing;

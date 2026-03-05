@@ -986,7 +986,7 @@ void PhysicsComp_PhysicsTick(struct PhysicsComp* comp, Vec3 vel) {
 	inWater = Entity_TouchesAnyWater(entity);
 	if (inWater && !physComp_wasInWater) {
 		int splashRate = 80 + Random_Next(&physComp_rng, 41); /* 80-120 */
-		int splashVol  = (int)(Audio_SoundsVolume * 0.50f);
+		int splashVol  = (int)(Audio_SoundsVolume * 0.25f);
 		Audio_PlayDigSoundRateVolume(SOUND_SPLASH, splashRate, splashVol);
 	}
 	physComp_wasInWater = inWater;
