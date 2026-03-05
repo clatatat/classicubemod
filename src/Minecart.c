@@ -275,6 +275,7 @@ int Minecart_Spawn(float x, float y, float z) {
 	Minecarts[slot].damageTaken  = 0.0f;
 	Minecarts[slot].forwardDir   = 1;
 	Minecarts[slot].isInReverse  = false;
+	Minecarts[slot].onGround     = false;
 	
 	return slot;
 }
@@ -427,6 +428,181 @@ static cc_bool Minecart_GetSmoothPos(float inX, float inY, float inZ,
    CC_pos.y = smoothY - yOffset = smoothY - 0.35 */
 #define MC_SMOOTH_Y_OFFSET 0.35f
 
+/* Maximum block AABBs to consider in one moveEntity call.
+   Sweep volume for a 0.98-wide cart moving 0.4/tick is at most ~3x2x3 blocks = 18.
+   64 is more than enough headroom. */
+#define MC_MAX_BLOCK_AABBS 64
+
+/* Whether a block should provide collision for minecarts.
+   In Alpha, any block that returns a non-null getCollisionBoundingBoxFromPool
+   participates in entity collision. In CC, this includes SOLID-type blocks
+   (COLLIDE_SOLID, COLLIDE_ICE, COLLIDE_SLIPPERY_ICE) and CLIMBABLE blocks
+   (ladders). Liquids, air, and walk-through blocks (torches, flowers) do not. */
+static cc_bool Minecart_BlockCollides(BlockID block) {
+	cc_uint8 c = Blocks.Collide[block];
+	return c >= COLLIDE_SOLID || c == COLLIDE_CLIMB;
+}
+
+/* Alpha-faithful moveEntity: resolve movement against block AABBs using the exact
+   axis-by-axis clipping from Entity.java's moveEntity method.
+   
+   This is the key difference from the old collision code: instead of checking whether
+   a block CELL is solid, we check actual AABB overlap with the block's MinBB/MaxBB
+   collision bounds. This means thin blocks like ladders (2/16 thick) and doors (3/16
+   thick) only block the minecart where their actual collision shape is, not the full
+   block cell.
+   
+   Algorithm (from Alpha):
+   1. Compute entity AABB from position and size
+   2. Expand by movement vector to get sweep volume
+   3. Collect all block AABBs in the sweep volume
+   4. Clip movement per-axis: Y first, then X, then Z
+   5. Update position by clipped movement
+   6. Zero velocity on any axis that was clipped
+
+   Returns: bit flags for which axes were blocked (1=X, 2=Y, 4=Z) */
+static int Minecart_MoveEntity(struct Minecart* mc, float dx, float dy, float dz) {
+	/* Entity AABB corners (feet-based position, same as Alpha after yOffset adjustment) */
+	float eMinX, eMinY, eMinZ, eMaxX, eMaxY, eMaxZ;
+	/* Sweep volume corners */
+	float sMinX, sMinY, sMinZ, sMaxX, sMaxY, sMaxZ;
+	/* Block iteration range */
+	int bxMin, bxMax, byMin, byMax, bzMin, bzMax;
+	int bx, by, bz, i, count;
+	float origDx, origDy, origDz;
+	int blocked;
+	/* Block AABB storage */
+	struct { float minX, minY, minZ, maxX, maxY, maxZ; } aabbs[MC_MAX_BLOCK_AABBS];
+	
+	origDx = dx; origDy = dy; origDz = dz;
+	blocked = 0;
+	count = 0;
+	
+	/* Entity AABB (Alpha: boundingBox from setSize(0.98, 0.7)) */
+	eMinX = mc->pos.x - MC_HALF_WIDTH;
+	eMaxX = mc->pos.x + MC_HALF_WIDTH;
+	eMinY = mc->pos.y;
+	eMaxY = mc->pos.y + MC_HEIGHT;
+	eMinZ = mc->pos.z - MC_HALF_WIDTH;
+	eMaxZ = mc->pos.z + MC_HALF_WIDTH;
+	
+	/* Sweep volume: expand entity AABB by movement (Alpha's addCoord) */
+	sMinX = eMinX + (dx < 0 ? dx : 0);
+	sMaxX = eMaxX + (dx > 0 ? dx : 0);
+	sMinY = eMinY + (dy < 0 ? dy : 0);
+	sMaxY = eMaxY + (dy > 0 ? dy : 0);
+	sMinZ = eMinZ + (dz < 0 ? dz : 0);
+	sMaxZ = eMaxZ + (dz > 0 ? dz : 0);
+	
+	/* Block range (Alpha: floor(min) to floor(max+1), y starts from min-1) */
+	bxMin = (int)Math_Floor(sMinX);
+	bxMax = (int)Math_Floor(sMaxX + 1.0f);
+	byMin = (int)Math_Floor(sMinY) - 1;
+	byMax = (int)Math_Floor(sMaxY + 1.0f);
+	bzMin = (int)Math_Floor(sMinZ);
+	bzMax = (int)Math_Floor(sMaxZ + 1.0f);
+	
+	/* Collect block AABBs (Alpha's getCollidingBoundingBoxes).
+	   For each block in range, compute world-space collision AABB from MinBB/MaxBB
+	   and check intersection with sweep volume. */
+	for (bx = bxMin; bx < bxMax; bx++) {
+		for (bz = bzMin; bz < bzMax; bz++) {
+			for (by = byMin; by < byMax; by++) {
+				BlockID block;
+				float bbMinX, bbMinY, bbMinZ, bbMaxX, bbMaxY, bbMaxZ;
+				
+				if (!World_Contains(bx, by, bz)) continue;
+				block = World_GetBlock(bx, by, bz);
+				if (!Minecart_BlockCollides(block)) continue;
+				
+				/* World-space block collision AABB = block position + MinBB/MaxBB */
+				bbMinX = (float)bx + Blocks.MinBB[block].x;
+				bbMinY = (float)by + Blocks.MinBB[block].y;
+				bbMinZ = (float)bz + Blocks.MinBB[block].z;
+				bbMaxX = (float)bx + Blocks.MaxBB[block].x;
+				bbMaxY = (float)by + Blocks.MaxBB[block].y;
+				bbMaxZ = (float)bz + Blocks.MaxBB[block].z;
+				
+				/* Alpha's intersectsWith check against sweep volume */
+				if (bbMaxX > sMinX && bbMinX < sMaxX &&
+					bbMaxY > sMinY && bbMinY < sMaxY &&
+					bbMaxZ > sMinZ && bbMinZ < sMaxZ) {
+					if (count < MC_MAX_BLOCK_AABBS) {
+						aabbs[count].minX = bbMinX; aabbs[count].minY = bbMinY; aabbs[count].minZ = bbMinZ;
+						aabbs[count].maxX = bbMaxX; aabbs[count].maxY = bbMaxY; aabbs[count].maxZ = bbMaxZ;
+						count++;
+					}
+				}
+			}
+		}
+	}
+	
+	/* Y axis clipping first (Alpha's func_1172_b):
+	   For each block AABB, if entity overlaps on X and Z, restrict Y movement. */
+	for (i = 0; i < count; i++) {
+		if (eMaxX > aabbs[i].minX && eMinX < aabbs[i].maxX &&
+			eMaxZ > aabbs[i].minZ && eMinZ < aabbs[i].maxZ) {
+			float clip;
+			if (dy > 0.0f && eMaxY <= aabbs[i].minY) {
+				clip = aabbs[i].minY - eMaxY;
+				if (clip < dy) dy = clip;
+			}
+			if (dy < 0.0f && eMinY >= aabbs[i].maxY) {
+				clip = aabbs[i].maxY - eMinY;
+				if (clip > dy) dy = clip;
+			}
+		}
+	}
+	eMinY += dy; eMaxY += dy;
+	
+	/* X axis clipping (Alpha's func_1163_a):
+	   For each block AABB, if entity overlaps on Y and Z, restrict X movement. */
+	for (i = 0; i < count; i++) {
+		if (eMaxY > aabbs[i].minY && eMinY < aabbs[i].maxY &&
+			eMaxZ > aabbs[i].minZ && eMinZ < aabbs[i].maxZ) {
+			float clip;
+			if (dx > 0.0f && eMaxX <= aabbs[i].minX) {
+				clip = aabbs[i].minX - eMaxX;
+				if (clip < dx) dx = clip;
+			}
+			if (dx < 0.0f && eMinX >= aabbs[i].maxX) {
+				clip = aabbs[i].maxX - eMinX;
+				if (clip > dx) dx = clip;
+			}
+		}
+	}
+	eMinX += dx; eMaxX += dx;
+	
+	/* Z axis clipping (Alpha's func_1162_c):
+	   For each block AABB, if entity overlaps on X and Y, restrict Z movement. */
+	for (i = 0; i < count; i++) {
+		if (eMaxX > aabbs[i].minX && eMinX < aabbs[i].maxX &&
+			eMaxY > aabbs[i].minY && eMinY < aabbs[i].maxY) {
+			float clip;
+			if (dz > 0.0f && eMaxZ <= aabbs[i].minZ) {
+				clip = aabbs[i].minZ - eMaxZ;
+				if (clip < dz) dz = clip;
+			}
+			if (dz < 0.0f && eMinZ >= aabbs[i].maxZ) {
+				clip = aabbs[i].maxZ - eMinZ;
+				if (clip > dz) dz = clip;
+			}
+		}
+	}
+	
+	/* Update position by clipped movement */
+	mc->pos.x += dx;
+	mc->pos.y += dy;
+	mc->pos.z += dz;
+	
+	/* Alpha: zero velocity on blocked axes (from Entity.moveEntity) */
+	if (origDx != dx) { mc->velocity.x = 0.0f; blocked |= 1; }
+	if (origDy != dy) { mc->velocity.y = 0.0f; blocked |= 2; }
+	if (origDz != dz) { mc->velocity.z = 0.0f; blocked |= 4; }
+	
+	return blocked;
+}
+
 /* On-rail physics - faithful translation of Alpha EntityMinecart.i_() on-rail section.
    Key differences from our old code:
    1. Uses a() smooth function for Y interpolation (no more teleporting on hills)
@@ -527,66 +703,9 @@ static void Minecart_OnRailPhysics(struct Minecart* mc) {
 	if (moveZ < -MC_MAX_SPEED) moveZ = -MC_MAX_SPEED;
 	if (moveZ >  MC_MAX_SPEED) moveZ =  MC_MAX_SPEED;
 	
-	/* Move with horizontal block collision (Alpha's d()/moveEntity checks AABB vs world).
-	   We check each axis independently so sliding along walls works naturally. */
-	{
-		float newX = mc->pos.x + moveX;
-		float newZ = mc->pos.z + moveZ;
-		float baseY = mc->pos.y;  /* feet Y of cart */
-		int checkY;
-		
-		/* Check X axis: sample blocks the cart would overlap at new X position */
-		if (moveX != 0.0f) {
-			float edgeX = (moveX > 0) ? (newX + MC_HALF_WIDTH) : (newX - MC_HALF_WIDTH);
-			int bx = (int)Math_Floor(edgeX);
-			int bzMin = (int)Math_Floor(mc->pos.z - MC_HALF_WIDTH);
-			int bzMax = (int)Math_Floor(mc->pos.z + MC_HALF_WIDTH);
-			cc_bool blocked = false;
-			int bz2;
-			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
-				for (bz2 = bzMin; bz2 <= bzMax; bz2++) {
-					if (World_Contains(bx, checkY, bz2) &&
-						Blocks.Collide[World_GetBlock(bx, checkY, bz2)] == COLLIDE_SOLID) {
-						blocked = true; break;
-					}
-				}
-				if (blocked) break;
-			}
-			if (blocked) {
-				/* Snap to block edge and kill X velocity */
-				if (moveX > 0) newX = (float)bx - MC_HALF_WIDTH - 0.001f;
-				else           newX = (float)(bx + 1) + MC_HALF_WIDTH + 0.001f;
-				mc->velocity.x = 0.0f;
-			}
-		}
-		
-		/* Check Z axis: sample blocks the cart would overlap at new Z position */
-		if (moveZ != 0.0f) {
-			float edgeZ = (moveZ > 0) ? (newZ + MC_HALF_WIDTH) : (newZ - MC_HALF_WIDTH);
-			int bz = (int)Math_Floor(edgeZ);
-			int bxMin = (int)Math_Floor(newX - MC_HALF_WIDTH);
-			int bxMax = (int)Math_Floor(newX + MC_HALF_WIDTH);
-			cc_bool blocked = false;
-			int bx2;
-			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
-				for (bx2 = bxMin; bx2 <= bxMax; bx2++) {
-					if (World_Contains(bx2, checkY, bz) &&
-						Blocks.Collide[World_GetBlock(bx2, checkY, bz)] == COLLIDE_SOLID) {
-						blocked = true; break;
-					}
-				}
-				if (blocked) break;
-			}
-			if (blocked) {
-				if (moveZ > 0) newZ = (float)bz - MC_HALF_WIDTH - 0.001f;
-				else           newZ = (float)(bz + 1) + MC_HALF_WIDTH + 0.001f;
-				mc->velocity.z = 0.0f;
-			}
-		}
-		
-		mc->pos.x = newX;
-		mc->pos.z = newZ;
-	}
+	/* Alpha-faithful block collision via moveEntity (AABB vs actual block collision bounds).
+	   On rail: moveEntity(moveX, 0, moveZ) - horizontal only, Y handled by smooth interp. */
+	Minecart_MoveEntity(mc, moveX, 0.0f, moveZ);
 	
 	/* Slope height correction at block boundaries (Alpha's endpoint check) */
 	newBX = (int)Math_Floor(mc->pos.x);
@@ -719,10 +838,18 @@ static void Minecart_CheckPlayerPush(struct Minecart* mc) {
 	mc->velocity.z += (dz / dist) * pushStrength;
 }
 
-/* Apply off-rail physics (Alpha behavior: clamp, ground friction, move, air friction).
-   Note: gravity is applied in Minecart_TickOne before this is called. */
+/* Apply off-rail physics (Alpha behavior: clamp, ground friction, moveEntity, air friction).
+   Note: gravity is applied in Minecart_TickOne before this is called.
+   
+   Uses the same Alpha-faithful moveEntity that handles all three axes with proper
+   AABB collision against actual block bounds.
+   
+   Ground detection (Alpha): onGround is set inside moveEntity based on whether
+   Y movement was clipped while moving downward. Ground friction uses the PREVIOUS
+   tick's onGround, while air friction uses the CURRENT tick's (updated by moveEntity). */
 static void Minecart_OffRailPhysics(struct Minecart* mc) {
-	int blockX, blockY, blockZ;
+	float origDy;
+	int moveResult;
 	cc_bool onGround;
 	
 	/* Clamp to max speed (Alpha does this first) */
@@ -731,89 +858,22 @@ static void Minecart_OffRailPhysics(struct Minecart* mc) {
 	if (mc->velocity.z < -MC_MAX_SPEED) mc->velocity.z = -MC_MAX_SPEED;
 	if (mc->velocity.z >  MC_MAX_SPEED) mc->velocity.z =  MC_MAX_SPEED;
 	
-	/* Simple ground detection */
-	blockX = (int)Math_Floor(mc->pos.x);
-	blockY = (int)Math_Floor(mc->pos.y - 0.1f);
-	blockZ = (int)Math_Floor(mc->pos.z);
-	
-	onGround = false;
-	if (World_Contains(blockX, blockY, blockZ)) {
-		BlockID below = World_GetBlock(blockX, blockY, blockZ);
-		if (Blocks.Collide[below] == COLLIDE_SOLID) {
-			onGround = true;
-			if (mc->velocity.y < 0) {
-				mc->pos.y = (float)(blockY + 1) + 0.0625f;
-				mc->velocity.y = 0;
-			}
-		}
-	}
-	
-	/* Alpha: ground friction BEFORE movement */
-	if (onGround) {
+	/* Alpha: ground friction BEFORE movement, based on PREVIOUS tick's onGround */
+	if (mc->onGround) {
 		mc->velocity.x *= MC_OFF_RAIL_GROUND;
 		mc->velocity.y *= MC_OFF_RAIL_GROUND;
 		mc->velocity.z *= MC_OFF_RAIL_GROUND;
 	}
 	
-	/* Move with horizontal block collision */
-	{
-		float newX = mc->pos.x + mc->velocity.x;
-		float newZ = mc->pos.z + mc->velocity.z;
-		float baseY = mc->pos.y;
-		int checkY;
-		
-		/* Check X axis */
-		if (mc->velocity.x != 0.0f) {
-			float edgeX = (mc->velocity.x > 0) ? (newX + MC_HALF_WIDTH) : (newX - MC_HALF_WIDTH);
-			int bx = (int)Math_Floor(edgeX);
-			int bzMin = (int)Math_Floor(mc->pos.z - MC_HALF_WIDTH);
-			int bzMax = (int)Math_Floor(mc->pos.z + MC_HALF_WIDTH);
-			cc_bool blocked = false;
-			int bz2;
-			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
-				for (bz2 = bzMin; bz2 <= bzMax; bz2++) {
-					if (World_Contains(bx, checkY, bz2) &&
-						Blocks.Collide[World_GetBlock(bx, checkY, bz2)] == COLLIDE_SOLID) {
-						blocked = true; break;
-					}
-				}
-				if (blocked) break;
-			}
-			if (blocked) {
-				if (mc->velocity.x > 0) newX = (float)bx - MC_HALF_WIDTH - 0.001f;
-				else                    newX = (float)(bx + 1) + MC_HALF_WIDTH + 0.001f;
-				mc->velocity.x = 0.0f;
-			}
-		}
-		
-		/* Check Z axis */
-		if (mc->velocity.z != 0.0f) {
-			float edgeZ = (mc->velocity.z > 0) ? (newZ + MC_HALF_WIDTH) : (newZ - MC_HALF_WIDTH);
-			int bz = (int)Math_Floor(edgeZ);
-			int bxMin = (int)Math_Floor(newX - MC_HALF_WIDTH);
-			int bxMax = (int)Math_Floor(newX + MC_HALF_WIDTH);
-			cc_bool blocked = false;
-			int bx2;
-			for (checkY = (int)Math_Floor(baseY); checkY <= (int)Math_Floor(baseY + MC_HEIGHT - 0.01f); checkY++) {
-				for (bx2 = bxMin; bx2 <= bxMax; bx2++) {
-					if (World_Contains(bx2, checkY, bz) &&
-						Blocks.Collide[World_GetBlock(bx2, checkY, bz)] == COLLIDE_SOLID) {
-						blocked = true; break;
-					}
-				}
-				if (blocked) break;
-			}
-			if (blocked) {
-				if (mc->velocity.z > 0) newZ = (float)bz - MC_HALF_WIDTH - 0.001f;
-				else                    newZ = (float)(bz + 1) + MC_HALF_WIDTH + 0.001f;
-				mc->velocity.z = 0.0f;
-			}
-		}
-		
-		mc->pos.x = newX;
-		mc->pos.z = newZ;
-	}
-	mc->pos.y += mc->velocity.y;
+	/* Alpha-faithful moveEntity with all three axes.
+	   This resolves Y (gravity/ground), X and Z (walls) using actual block AABBs.
+	   Returns bit flags: 1=X blocked, 2=Y blocked, 4=Z blocked. */
+	origDy = mc->velocity.y;
+	moveResult = Minecart_MoveEntity(mc, mc->velocity.x, mc->velocity.y, mc->velocity.z);
+	
+	/* Alpha: onGround = Y was clipped AND original Y motion was downward */
+	onGround = (moveResult & 2) && (origDy < 0.0f);
+	mc->onGround = onGround;
 	
 	/* Alpha: air friction AFTER movement (only when NOT on ground) */
 	if (!onGround) {

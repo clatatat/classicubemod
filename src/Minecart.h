@@ -31,6 +31,7 @@ struct Minecart {
 	float damageTaken;   /* Accumulated damage for wobble amplitude */
 	int forwardDir;      /* 1 or -1, flips on hit */
 	cc_bool isInReverse; /* Whether cart is visually reversed */
+	cc_bool onGround;    /* Whether Y was blocked last tick (for off-rail friction) */
 };
 
 extern struct Minecart Minecarts[MAX_MINECARTS];
