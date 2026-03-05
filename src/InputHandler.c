@@ -3305,14 +3305,19 @@ static int DropItem_GetItemTex(BlockID block) {
 	if (block == BLOCK_RED_ORE_DUST)    return 56;
 	if (block == BLOCK_DOOR_NS_BOTTOM)  return 43;
 	if (block == BLOCK_IRON_DOOR)       return 44;
-	if (IsRail(block))                  return 57;
+	return -1;
+}
+
+/* Returns terrain.png tile index for blocks that should render as 2D terrain sprites, -1 otherwise */
+static int DropItem_GetTerrainTile(BlockID block) {
+	if (IsRail(block))                  return 128; /* straight N-S rail (terrain.png tile 128) */
 	return -1;
 }
 
 static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, int itemId) {
 	struct NetPlayer* np;
 	cc_string modelName;
-	int eid, blockItemTex, itemTile;
+	int eid, blockItemTex, terrainTile, itemTile;
 
 	eid = DropItem_FindFreeEntity();
 	if (eid == -1) return;
@@ -3334,13 +3339,19 @@ static void DropItem_Spawn(int slot, Vec3 pos, BlockID block, cc_bool isItem, in
 		np->Base.uScale = 0.25f;
 		np->Base.vScale = 0.25f;
 	} else if ((blockItemTex = DropItem_GetItemTex(block)) >= 0) {
-		/* Block that renders as 2D item sprite (e.g. redstone, doors) */
+		/* Block that renders as 2D item sprite from items.png (e.g. redstone, doors) */
 		modelName = String_FromReadonly("item");
 		Entity_SetModel(&np->Base, &modelName);
 		np->Base.ModelBlock = blockItemTex;
 		np->Base.ModelScale = Vec3_Create3(1.0f, 1.0f, 1.0f);
 		np->Base.uScale = 0.25f;
 		np->Base.vScale = 0.25f;
+	} else if ((terrainTile = DropItem_GetTerrainTile(block)) >= 0) {
+		/* Block that renders as 2D terrain sprite from terrain.png (e.g. rails) */
+		modelName = String_FromReadonly("terrainitem");
+		Entity_SetModel(&np->Base, &modelName);
+		np->Base.ModelBlock = terrainTile;
+		np->Base.ModelScale = Vec3_Create3(1.0f, 1.0f, 1.0f);
 	} else {
 		/* Set up 3D block model */
 		modelName = String_FromReadonly("block");

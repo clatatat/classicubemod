@@ -2554,6 +2554,50 @@ static void ItemModel_Register(void) {
 
 
 /*########################################################################################################################*
+*------------------------------------------------------TerrainItemModel--------------------------------------------------*
+*#########################################################################################################################*/
+/* Flat billboard sprite that samples a tile from terrain.png via Atlas1D (for e.g. dropped rails) */
+static void TerrainItemModel_MakeParts(void) { } /* parts built dynamically in Draw */
+
+static void TerrainItemModel_Draw(struct Entity* e) {
+	TextureLoc texLoc = (TextureLoc)e->ModelBlock;
+	int texIdx;
+	TextureRec rec = Atlas1D_TexRec(texLoc, 1, &texIdx);
+	struct VertexTextured* v;
+
+	Atlas1D_Bind(texIdx);
+
+	/* Write quad directly -- positions match ItemModel's layout */
+	Model_LockVB(e, ITEM_MAX_VERTICES);
+	v = Models.Vertices;
+	v[0].x = -0.25f; v[0].y = 0.0f;  v[0].z = 0.0f; v[0].U = rec.u1; v[0].V = rec.v2; v[0].Col = PACKEDCOL_WHITE;
+	v[1].x =  0.25f; v[1].y = 0.0f;  v[1].z = 0.0f; v[1].U = rec.u2; v[1].V = rec.v2; v[1].Col = PACKEDCOL_WHITE;
+	v[2].x =  0.25f; v[2].y =  0.5f; v[2].z = 0.0f; v[2].U = rec.u2; v[2].V = rec.v1; v[2].Col = PACKEDCOL_WHITE;
+	v[3].x = -0.25f; v[3].y =  0.5f; v[3].z = 0.0f; v[3].U = rec.u1; v[3].V = rec.v1; v[3].Col = PACKEDCOL_WHITE;
+	Model_UnlockVB();
+	Gfx_DrawVb_IndexedTris(ITEM_MAX_VERTICES);
+}
+
+static struct ModelVertex terrain_item_vertices[ITEM_MAX_VERTICES];
+static struct Model terrain_item_model = {
+	"terrainitem", terrain_item_vertices, NULL,
+	TerrainItemModel_MakeParts, TerrainItemModel_Draw,
+	ItemModel_GetNameY,  ItemModel_GetEyeY,
+	ItemModel_GetSize,   ItemModel_GetBounds
+};
+
+static void TerrainItemModel_Register(void) {
+	Model_Init(&terrain_item_model);
+	terrain_item_model.maxVertices  = ITEM_MAX_VERTICES;
+	terrain_item_model.bobbing      = false;
+	terrain_item_model.pushes       = false;
+	terrain_item_model.usesSkin     = false;
+	terrain_item_model.GetTransform = ItemModel_GetTransform;
+	Model_Register(&terrain_item_model);
+}
+
+
+/*########################################################################################################################*
 *---------------------------------------------------------ArrowModel------------------------------------------------------*
 *#########################################################################################################################*/
 static struct ModelPart arrow_part;
@@ -2782,6 +2826,7 @@ static void RegisterDefaultModels(void) {
 	HoldModel_Register();
 	ArrowModel_Register();
 	ItemModel_Register();
+	TerrainItemModel_Register();
 	ToolModel_Register();
 	MinecartModel_Register();
 #endif
