@@ -75,6 +75,8 @@ static const struct SimpleBlockDef stone_plate_pressed_def = {"Stone Pressure Pl
 static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 #if defined EXTENDED_BLOCKS
 static const struct SimpleBlockDef ladder_variant_def = {"Ladder", 83, 83, 83, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_CLIMB, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef door_variant_def = {"Door", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef iron_door_variant_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
 #endif
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
@@ -1770,6 +1772,10 @@ void Block_ResetProps(BlockID block) {
 #if defined EXTENDED_BLOCKS
 	} else if (block >= BLOCK_LADDER_S && block <= BLOCK_LADDER_W) {
 		def = &ladder_variant_def;
+	} else if (block >= BLOCK_DOOR_D0_BOTTOM && block <= BLOCK_DOOR_D3_OPEN_TOP) {
+		def = &door_variant_def;
+	} else if (block >= BLOCK_IRON_DOOR_D0_BOTTOM && block <= BLOCK_IRON_DOOR_D3_OPEN_TOP) {
+		def = &iron_door_variant_def;
 #endif
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
@@ -1811,6 +1817,37 @@ void Block_ResetProps(BlockID block) {
 		/* Iron doors with EW geometry: thin collision in X (3px thick at edge) */
 		Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
 		Vec3_Set(Blocks.MaxBB[block], 3.0f/16.0f, 1, 1);
+#if defined EXTENDED_BLOCKS
+	} else if ((block >= BLOCK_DOOR_D0_BOTTOM && block <= BLOCK_DOOR_D3_OPEN_TOP) ||
+	           (block >= BLOCK_IRON_DOOR_D0_BOTTOM && block <= BLOCK_IRON_DOOR_D3_OPEN_TOP)) {
+		/* 4-direction door variant: compute wall position from block ID
+		   Dir d: closed wall = (d+3)&3, open wall = d (MC Alpha convention)
+		   Dir values corrected at placement: 0=E, 1=S, 2=W, 3=N
+		   Walls: 0=Z-, 1=X+, 2=Z+, 3=X- */
+		int base = (block >= BLOCK_IRON_DOOR_D0_BOTTOM) ? BLOCK_IRON_DOOR_D0_BOTTOM : BLOCK_DOOR_D0_BOTTOM;
+		int off = block - base;
+		int dir = off / 4;
+		int isOpen = (off % 4) >= 2;
+		int wall = isOpen ? dir : ((dir + 3) & 3);
+		switch (wall) {
+			case 0: /* Z- (north face) */
+				Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
+				Vec3_Set(Blocks.MaxBB[block], 1, 1, 3.0f/16.0f);
+				break;
+			case 1: /* X+ (east face) */
+				Vec3_Set(Blocks.MinBB[block], 13.0f/16.0f, 0, 0);
+				Vec3_Set(Blocks.MaxBB[block], 1, 1, 1);
+				break;
+			case 2: /* Z+ (south face) */
+				Vec3_Set(Blocks.MinBB[block], 0, 0, 13.0f/16.0f);
+				Vec3_Set(Blocks.MaxBB[block], 1, 1, 1);
+				break;
+			default: /* X- (west face) */
+				Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
+				Vec3_Set(Blocks.MaxBB[block], 3.0f/16.0f, 1, 1);
+				break;
+		}
+#endif
 	} else {		
 		Vec3_Set(Blocks.MinBB[block], 0, 0,                   0);
 		Vec3_Set(Blocks.MaxBB[block], 1, def->height / 16.0f, 1);
@@ -1887,6 +1924,44 @@ void Block_ResetProps(BlockID block) {
 		Block_Tex(block, FACE_XMIN) = 113;  /* top back */
 		Block_Tex(block, FACE_ZMIN) = 55; Block_Tex(block, FACE_ZMAX) = 55;
 		Block_Tex(block, FACE_YMAX) = 55; Block_Tex(block, FACE_YMIN) = 55;
+#if defined EXTENDED_BLOCKS
+	} else if ((block >= BLOCK_DOOR_D0_BOTTOM && block <= BLOCK_DOOR_D3_OPEN_TOP) ||
+	           (block >= BLOCK_IRON_DOOR_D0_BOTTOM && block <= BLOCK_IRON_DOOR_D3_OPEN_TOP)) {
+		/* Exact port of MC Alpha 1.2.6 BlockDoor.getBlockTextureFromSideAndMetadata
+		   MC sides: 0=Y-,1=Y+,2=Z-,3=Z+,4=X-,5=X+
+		   CC faces: XMIN=0,XMAX=1,ZMIN=2,ZMAX=3,YMIN=4,YMAX=5 */
+		static const int cc_to_mc[6] = { 4, 5, 2, 3, 0, 1 };
+		int dbase = (block >= BLOCK_IRON_DOOR_D0_BOTTOM) ? BLOCK_IRON_DOOR_D0_BOTTOM : BLOCK_DOOR_D0_BOTTOM;
+		int doff = block - dbase;
+		int ddir = doff / 4;
+		int dIsOpen = (doff % 4) >= 2;
+		int dIsBottom = (doff & 1) == 0;
+		int dwall = dIsOpen ? ddir : ((ddir + 3) & 3);
+		cc_bool isIron = (block >= BLOCK_IRON_DOOR_D0_BOTTOM);
+		TextureLoc frontTex = isIron ? (dIsBottom ? 98 : 82) : (dIsBottom ? 97 : 81);
+		TextureLoc backTex  = isIron ? (dIsBottom ? 129 : 113) : (dIsBottom ? 130 : 114);
+		TextureLoc edgeTex  = isIron ? 55 : 4;
+		int face;
+		for (face = 0; face < 6; face++) {
+			int ms = cc_to_mc[face];
+			int zAligned, isZFace, var4;
+			if (ms <= 1) {
+				/* Y faces = edge */
+				Block_Tex(block, face) = edgeTex;
+				continue;
+			}
+			/* MC Alpha edge check: (dwall==0||dwall==2) ^ (ms<=3) */
+			zAligned = (dwall == 0 || dwall == 2);
+			isZFace  = (ms <= 3);
+			if (zAligned ^ isZFace) {
+				Block_Tex(block, face) = edgeTex;
+				continue;
+			}
+			/* MC Alpha: var4 = dwall/2 + ((ms&1) ^ dwall) + isOpen */
+			var4 = dwall / 2 + ((ms & 1) ^ dwall) + dIsOpen;
+			Block_Tex(block, face) = (var4 & 1) ? backTex : frontTex;
+		}
+#endif
 	} else if (block == BLOCK_DCHEST_S_L) {
 		/* Front +Z, left half (+X block) */
 		Block_Tex(block, FACE_ZMAX) = 43; Block_Tex(block, FACE_ZMIN) = 58;

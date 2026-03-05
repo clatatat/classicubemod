@@ -189,6 +189,11 @@ int Block_MaxStackSize(BlockID block) {
 		block == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || block == BLOCK_IRON_DOOR_NS_OPEN_TOP ||
 		block == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || block == BLOCK_IRON_DOOR_EW_OPEN_TOP)
 		return 1;
+#if defined EXTENDED_BLOCKS
+	if ((block >= BLOCK_DOOR_D0_BOTTOM && block <= BLOCK_DOOR_D3_OPEN_TOP) ||
+		(block >= BLOCK_IRON_DOOR_D0_BOTTOM && block <= BLOCK_IRON_DOOR_D3_OPEN_TOP))
+		return 1;
+#endif
 	return MAX_STACK_SIZE;
 }
 
@@ -1590,6 +1595,10 @@ static void OnReset(void) {
 	Inventory_Remove(BLOCK_LADDER_N);
 	Inventory_Remove(BLOCK_LADDER_E);
 	Inventory_Remove(BLOCK_LADDER_W);
+	
+	/* Remove 4-direction door variants from inventory (auto-placed by placement code) */
+	{ int di; for (di = BLOCK_DOOR_D0_BOTTOM; di <= BLOCK_DOOR_D3_OPEN_TOP; di++) Inventory_Remove(di); }
+	{ int di; for (di = BLOCK_IRON_DOOR_D0_BOTTOM; di <= BLOCK_IRON_DOOR_D3_OPEN_TOP; di++) Inventory_Remove(di); }
 #endif
 
 	/* Remove wheat stages from inventory (grown on farmland) */

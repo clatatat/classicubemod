@@ -2,6 +2,7 @@
 #define CC_BLOCKPHYSICS_H
 #include "Core.h"
 #include "Vectors.h"
+#include "BlockID.h"
 CC_BEGIN_HEADER
 
 /* Implements simple block physics.
@@ -20,14 +21,14 @@ CC_VAR extern struct Physics_ {
 	cc_uint8* FlowLevels;
 	/* Called when block is activated by a neighbouring block change. */
 	/* e.g. trigger sand falling, water flooding */
-	PhysicsHandler OnActivate[256];
+	PhysicsHandler OnActivate[BLOCK_COUNT];
 	/* Called when this block is randomly activated. */
 	/* e.g. grass eventually fading to dirt in darkness */
-	PhysicsHandler OnRandomTick[256];
+	PhysicsHandler OnRandomTick[BLOCK_COUNT];
 	/* Called when user manually places a block. */
-	PhysicsHandler OnPlace[256];
+	PhysicsHandler OnPlace[BLOCK_COUNT];
 	/* Called when user manually deletes a block. */
-	PhysicsHandler OnDelete[256];
+	PhysicsHandler OnDelete[BLOCK_COUNT];
 } Physics;
 
 void Physics_SetEnabled(cc_bool enabled);

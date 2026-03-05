@@ -227,7 +227,7 @@ void Physics_SetFiniteLiquid(cc_bool enabled) {
 }
 
 static void Physics_Activate(int index) {
-	BlockID block = World.Blocks[index];
+	BlockID block = World_GetRawBlock(index);
 	PhysicsHandler activate = Physics.OnActivate[block];
 	if (activate) activate(index, block);
 }
@@ -273,10 +273,10 @@ void Physics_OnBlockChanged(int x, int y, int z, BlockID old, BlockID now) {
 
 	/* User can place/delete blocks over ID 256 */
 	if (now == BLOCK_AIR) {
-		handler = Physics.OnDelete[(BlockRaw)old];
+		handler = Physics.OnDelete[old];
 		if (handler) handler(index, old);
 	} else {
-		handler = Physics.OnPlace[(BlockRaw)now];
+		handler = Physics.OnPlace[now];
 		if (handler) handler(index, now);
 	}
 	Physics_ActivateNeighbours(x, y, z, index);
@@ -300,17 +300,17 @@ static void Physics_TickRandomBlocks(void) {
 				hi = World_Pack(x2, y2, z2);
 				
 				index = Random_Range(&physics_rnd, lo, hi);
-				block = World.Blocks[index];
+				block = World_GetRawBlock(index);
 				tick = Physics.OnRandomTick[block];
 				if (tick) tick(index, block);
 
 				index = Random_Range(&physics_rnd, lo, hi);
-				block = World.Blocks[index];
+				block = World_GetRawBlock(index);
 				tick = Physics.OnRandomTick[block];
 				if (tick) tick(index, block);
 
 				index = Random_Range(&physics_rnd, lo, hi);
-				block = World.Blocks[index];
+				block = World_GetRawBlock(index);
 				tick = Physics.OnRandomTick[block];
 				if (tick) tick(index, block);
 			}
@@ -327,7 +327,7 @@ static void Physics_DoFalling(int index, BlockID block) {
 	/* Find lowest block can fall into */
 	while (index >= World.OneY) {
 		index -= World.OneY;
-		other  = World.Blocks[index];
+		other  = World_GetRawBlock(index);
 
 		if (other == BLOCK_AIR || (other >= BLOCK_WATER && other <= BLOCK_STILL_LAVA))
 			found = index;
@@ -2186,12 +2186,21 @@ static cc_bool Redstone_IsIronDoor(BlockID b) {
 	return b == BLOCK_IRON_DOOR || b == BLOCK_IRON_DOOR_NS_TOP
 		|| b == BLOCK_IRON_DOOR_EW_BOTTOM || b == BLOCK_IRON_DOOR_EW_TOP
 		|| b == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || b == BLOCK_IRON_DOOR_NS_OPEN_TOP
-		|| b == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || b == BLOCK_IRON_DOOR_EW_OPEN_TOP;
+		|| b == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || b == BLOCK_IRON_DOOR_EW_OPEN_TOP
+#if defined EXTENDED_BLOCKS
+		|| (b >= BLOCK_IRON_DOOR_D0_BOTTOM && b <= BLOCK_IRON_DOOR_D3_OPEN_TOP)
+#endif
+		;
 }
 
 static cc_bool Redstone_IsIronDoorBottom(BlockID b) {
 	return b == BLOCK_IRON_DOOR || b == BLOCK_IRON_DOOR_EW_BOTTOM
-		|| b == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || b == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM;
+		|| b == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || b == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM
+#if defined EXTENDED_BLOCKS
+		|| (b >= BLOCK_IRON_DOOR_D0_BOTTOM && b <= BLOCK_IRON_DOOR_D3_OPEN_TOP
+		    && ((b - BLOCK_IRON_DOOR_D0_BOTTOM) & 1) == 0)
+#endif
+		;
 }
 
 static void IronDoor_Register(int x, int y, int z) {
@@ -2294,6 +2303,28 @@ static void Redstone_TickIronDoors(void) {
 			Audio_PlayDigSound(SOUND_DOOR);
 			Physics_ActivateNeighbours(dx, dy, dz, index);
 		}
+#if defined EXTENDED_BLOCKS
+		/* New 4-direction iron door variants: XOR 2 toggles open/closed */
+		else if (bottom >= BLOCK_IRON_DOOR_D0_BOTTOM && bottom <= BLOCK_IRON_DOOR_D3_OPEN_TOP) {
+			int doff = (bottom - BLOCK_IRON_DOOR_D0_BOTTOM);
+			cc_bool isOpen = (doff % 4) >= 2;
+			if (!isOpen && powered) {
+				/* Closed → Open: XOR 2 */
+				Game_UpdateBlock(dx, dy, dz, bottom ^ 2);
+				if (World_Contains(dx, dy + 1, dz))
+					Game_UpdateBlock(dx, dy + 1, dz, (bottom + 1) ^ 2);
+				Audio_PlayDigSound(SOUND_DOOR);
+				Physics_ActivateNeighbours(dx, dy, dz, index);
+			} else if (isOpen && !powered) {
+				/* Open → Closed: XOR 2 */
+				Game_UpdateBlock(dx, dy, dz, bottom ^ 2);
+				if (World_Contains(dx, dy + 1, dz))
+					Game_UpdateBlock(dx, dy + 1, dz, (bottom + 1) ^ 2);
+				Audio_PlayDigSound(SOUND_DOOR);
+				Physics_ActivateNeighbours(dx, dy, dz, index);
+			}
+		}
+#endif
 	}
 }
 
@@ -2557,7 +2588,7 @@ static void Physics_HandleSapling(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 
 	below = BLOCK_AIR;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	/* Saplings stay alive on dirt */
 	if (below == BLOCK_DIRT) return;
 
@@ -2629,6 +2660,12 @@ static void Physics_HandleGrass(int index, BlockID block) {
 		    above == BLOCK_IRON_DOOR_EW_BOTTOM || above == BLOCK_IRON_DOOR_EW_TOP ||
 		    above == BLOCK_IRON_DOOR_NS_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_NS_OPEN_TOP ||
 		    above == BLOCK_IRON_DOOR_EW_OPEN_BOTTOM || above == BLOCK_IRON_DOOR_EW_OPEN_TOP) return;
+
+#if defined EXTENDED_BLOCKS
+		/* Don't decay under new 4-direction door variants */
+		if ((above >= BLOCK_DOOR_D0_BOTTOM && above <= BLOCK_DOOR_D3_OPEN_TOP) ||
+		    (above >= BLOCK_IRON_DOOR_D0_BOTTOM && above <= BLOCK_IRON_DOOR_D3_OPEN_TOP)) return;
+#endif
 
 		if (Blocks.Collide[above] == COLLIDE_SOLID) {
 			Game_UpdateBlock(x, y, z, BLOCK_DIRT);
@@ -2833,7 +2870,7 @@ static void Physics_HandleFlower(int index, BlockID block) {
 	}
 
 	below = BLOCK_DIRT;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	if (!(below == BLOCK_DIRT || below == BLOCK_GRASS)) {
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
@@ -2852,7 +2889,7 @@ static void Physics_HandleMushroom(int index, BlockID block) {
 	}
 
 	below = BLOCK_STONE;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	if (!(below == BLOCK_STONE || below == BLOCK_COBBLE)) {
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
 		Physics_ActivateNeighbours(x, y, z, index);
@@ -2866,7 +2903,7 @@ static void Physics_HandleFlowerActivate(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 
 	below = BLOCK_DIRT;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	if (below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS || below == BLOCK_FARMLAND_DRY || below == BLOCK_FARMLAND_WET) return;
 
 	/* No support - break and drop */
@@ -2882,7 +2919,7 @@ static void Physics_HandleMushroomActivate(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 
 	below = BLOCK_STONE;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	if (below == BLOCK_STONE || below == BLOCK_COBBLE) return;
 
 	/* No support - break and drop */
@@ -2898,7 +2935,7 @@ static void Physics_HandleSaplingActivate(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 
 	below = BLOCK_AIR;
-	if (y > 0) below = World.Blocks[index - World.OneY];
+	if (y > 0) below = World_GetRawBlock(index - World.OneY);
 	if (below == BLOCK_DIRT || below == BLOCK_GRASS || below == BLOCK_SNOWY_GRASS) return;
 
 	/* No support - break and drop */
@@ -2951,6 +2988,8 @@ static cc_bool FiniteLiquid_BlocksFlow(int x, int y, int z) {
 		b == BLOCK_LADDER ||
 #if defined EXTENDED_BLOCKS
 		b == BLOCK_LADDER_S || b == BLOCK_LADDER_N || b == BLOCK_LADDER_E || b == BLOCK_LADDER_W ||
+		(b >= BLOCK_DOOR_D0_BOTTOM && b <= BLOCK_DOOR_D3_OPEN_TOP) ||
+		(b >= BLOCK_IRON_DOOR_D0_BOTTOM && b <= BLOCK_IRON_DOOR_D3_OPEN_TOP) ||
 #endif
 		b == BLOCK_SIGN_WALL || b == BLOCK_SIGN_FLOOR) return true;
 	/* MC Alpha: material.isSolid() - in CC, solid collide blocks */
@@ -3336,7 +3375,7 @@ static void FiniteLiquid_TickWater(void) {
 	for (i = 0; i < count; i++) {
 		int index;
 		if (Physics_CheckItem(&waterQ, &index)) {
-			BlockID block = World.Blocks[index];
+			BlockID block = World_GetRawBlock(index);
 			if (block != BLOCK_WATER) continue; /* Only tick flowing, not still */
 			FiniteLiquid_UpdateBlock(index, true);
 		}
@@ -3349,7 +3388,7 @@ static void FiniteLiquid_TickLava(void) {
 	for (i = 0; i < count; i++) {
 		int index;
 		if (Physics_CheckItem(&lavaQ, &index)) {
-			BlockID block = World.Blocks[index];
+			BlockID block = World_GetRawBlock(index);
 			if (block != BLOCK_LAVA) continue; /* Only tick flowing, not still */
 			FiniteLiquid_UpdateBlock(index, false);
 		}
@@ -3362,7 +3401,7 @@ static void Physics_PlaceLava(int index, BlockID block) {
 }
 
 static void Physics_PropagateLava(int posIndex, int x, int y, int z) {
-	BlockID block = World.Blocks[posIndex];
+	BlockID block = World_GetRawBlock(posIndex);
 
 	if (block >= BLOCK_WATER && block <= BLOCK_STILL_LAVA) {
 		/* Lava spreading into water turns the water solid */
@@ -3392,7 +3431,7 @@ static void Physics_TickLava(void) {
 	for (i = 0; i < count; i++) {
 		int index;
 		if (Physics_CheckItem(&lavaQ, &index)) {
-			BlockID block = World.Blocks[index];
+			BlockID block = World_GetRawBlock(index);
 			if (!(block == BLOCK_LAVA || block == BLOCK_STILL_LAVA)) continue;
 			Physics_ActivateLava(index, block);
 		}
@@ -3405,7 +3444,7 @@ static void Physics_PlaceWater(int index, BlockID block) {
 }
 
 static void Physics_PropagateWater(int posIndex, int x, int y, int z) {
-	BlockID block = World.Blocks[posIndex];
+	BlockID block = World_GetRawBlock(posIndex);
 	int xx, yy, zz;
 
 	if (block >= BLOCK_WATER && block <= BLOCK_STILL_LAVA) {
@@ -3446,7 +3485,7 @@ static void Physics_TickWater(void) {
 	for (i = 0; i < count; i++) {
 		int index;
 		if (Physics_CheckItem(&waterQ, &index)) {
-			BlockID block = World.Blocks[index];
+			BlockID block = World_GetRawBlock(index);
 			if (!(block == BLOCK_WATER || block == BLOCK_STILL_WATER)) continue;
 			Physics_ActivateWater(index, block);
 		}
@@ -3483,7 +3522,7 @@ static void Physics_DeleteSponge(int index, BlockID block) {
 					if (!World_Contains(xx, yy, zz)) continue;
 
 					index = World_Pack(xx, yy, zz);
-					block = World.Blocks[index];
+					block = World_GetRawBlock(index);
 					if (block == BLOCK_WATER || block == BLOCK_STILL_WATER) {
 						TickQueue_Enqueue(&waterQ, index | PHYSICS_ONE_DELAY);
 					}
@@ -3499,7 +3538,7 @@ static void Physics_HandleSlab(int index, BlockID block) {
 	World_Unpack(index, x, y, z);
 	if (index < World.OneY) return;
 
-	if (World.Blocks[index - World.OneY] != BLOCK_SLAB) return;
+	if (World_GetRawBlock(index - World.OneY) != BLOCK_SLAB) return;
 	Game_UpdateBlock(x, y,     z, BLOCK_AIR);
 	Game_UpdateBlock(x, y - 1, z, BLOCK_DOUBLE_SLAB);
 }
@@ -3555,7 +3594,7 @@ void TNT_ExplodeRadius(int x, int y, int z, int power) {
 				if (!World_Contains(xx, yy, zz)) continue;
 				index = World_Pack(xx, yy, zz);
 
-				block = World.Blocks[index];
+				block = World_GetRawBlock(index);
 				if (BlocksTNT(block)) continue;
 
 				/* If this is a TNT block, schedule it for chain detonation */
@@ -4031,7 +4070,7 @@ static void Physics_TickFire(void) {
 
 		if (index < 0 || index >= World.Volume) continue;
 
-		block = World.Blocks[index];
+		block = World_GetRawBlock(index);
 		if (block != BLOCK_FIRE) continue;
 
 		if (delay > 0) {
@@ -4314,6 +4353,22 @@ void Physics_Init(void) {
 	Physics.OnDelete[BLOCK_IRON_DOOR_EW_TOP]          = Physics_DeleteIronDoor;
 	Physics.OnDelete[BLOCK_IRON_DOOR_NS_OPEN_TOP]     = Physics_DeleteIronDoor;
 	Physics.OnDelete[BLOCK_IRON_DOOR_EW_OPEN_TOP]     = Physics_DeleteIronDoor;
+	
+#if defined EXTENDED_BLOCKS
+	/* New 4-direction iron door variants - register tracking on place/delete */
+	{
+		int di;
+		for (di = BLOCK_IRON_DOOR_D0_BOTTOM; di <= BLOCK_IRON_DOOR_D3_OPEN_TOP; di++) {
+			cc_bool isBottom = ((di - BLOCK_IRON_DOOR_D0_BOTTOM) & 1) == 0;
+			int doff = (di - BLOCK_IRON_DOOR_D0_BOTTOM) % 4;
+			cc_bool isClosed = doff < 2;
+			if (isBottom && isClosed) {
+				Physics.OnPlace[di]  = Physics_PlaceIronDoor;
+			}
+			Physics.OnDelete[di] = Physics_DeleteIronDoor;
+		}
+	}
+#endif
 	
 	/* Curved rail variants - track for redstone power switching */
 	Physics.OnPlace[BLOCK_RAIL_CURVE_SE]  = Physics_PlaceCurvedRail;

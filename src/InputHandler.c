@@ -460,6 +460,25 @@ static cc_bool IsIronDoorTop(BlockID b) {
 		|| b == BLOCK_IRON_DOOR_NS_OPEN_TOP || b == BLOCK_IRON_DOOR_EW_OPEN_TOP;
 }
 
+#if defined EXTENDED_BLOCKS
+/* Helper: check if a block is a new 4-direction wooden door variant */
+static cc_bool IsNewWoodDoor(BlockID b) {
+	return b >= BLOCK_DOOR_D0_BOTTOM && b <= BLOCK_DOOR_D3_OPEN_TOP;
+}
+/* Helper: check if block is new 4-direction wooden door bottom half */
+static cc_bool IsNewWoodDoorBottom(BlockID b) {
+	return IsNewWoodDoor(b) && ((b - BLOCK_DOOR_D0_BOTTOM) & 1) == 0;
+}
+/* Helper: check if a block is a new 4-direction iron door variant */
+static cc_bool IsNewIronDoor(BlockID b) {
+	return b >= BLOCK_IRON_DOOR_D0_BOTTOM && b <= BLOCK_IRON_DOOR_D3_OPEN_TOP;
+}
+/* Helper: check if block is new 4-direction iron door bottom half */
+static cc_bool IsNewIronDoorBottom(BlockID b) {
+	return IsNewIronDoor(b) && ((b - BLOCK_IRON_DOOR_D0_BOTTOM) & 1) == 0;
+}
+#endif
+
 /*########################################################################################################################*
 *---------------------------------------------------Tool/Breaking system------------------------------------------------*
 *#########################################################################################################################*/
@@ -539,6 +558,10 @@ static int Block_MinPickaxeTier(BlockID block) {
 			if (Blocks.DigSounds[block] == SOUND_STONE || Blocks.DigSounds[block] == SOUND_METAL) {
 				return TIER_WOOD;
 			}
+#if defined EXTENDED_BLOCKS
+			/* New 4-direction iron door variants require iron pickaxe */
+			if (IsNewIronDoor(block)) return TIER_IRON;
+#endif
 			return -1;
 	}
 }
@@ -739,18 +762,59 @@ static void BreakDoorPair(BlockID old, IVec3 pos) {
 			}
 		}
 	}
+
+#if defined EXTENDED_BLOCKS
+	/* New 4-direction door variants: bottom is even offset, top = bottom+1 */
+	if (IsNewWoodDoor(old) || IsNewIronDoor(old)) {
+		cc_bool isBottom;
+		if (IsNewWoodDoor(old))
+			isBottom = ((old - BLOCK_DOOR_D0_BOTTOM) & 1) == 0;
+		else
+			isBottom = ((old - BLOCK_IRON_DOOR_D0_BOTTOM) & 1) == 0;
+
+		if (isBottom) {
+			otherPos.x = pos.x; otherPos.y = pos.y + 1; otherPos.z = pos.z;
+			if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+				otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+				if ((IsNewWoodDoor(old) && IsNewWoodDoor(otherBlock)) ||
+				    (IsNewIronDoor(old) && IsNewIronDoor(otherBlock))) {
+					Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+					Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+				}
+			}
+		} else {
+			otherPos.x = pos.x; otherPos.y = pos.y - 1; otherPos.z = pos.z;
+			if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+				otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+				if ((IsNewWoodDoor(old) && IsNewWoodDoor(otherBlock)) ||
+				    (IsNewIronDoor(old) && IsNewIronDoor(otherBlock))) {
+					Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z, BLOCK_AIR);
+					Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock, BLOCK_AIR);
+				}
+			}
+		}
+	}
+#endif
 }
 
 /* Helper: immediately destroy a block and handle side effects */
 /* Helper: check if a block is any wooden door variant */
 static cc_bool IsWoodDoor(BlockID b) {
 	return b == BLOCK_DOOR_NS_BOTTOM || b == BLOCK_DOOR_NS_TOP ||
-		b == BLOCK_DOOR_EW_BOTTOM || b == BLOCK_DOOR_EW_TOP;
+		b == BLOCK_DOOR_EW_BOTTOM || b == BLOCK_DOOR_EW_TOP
+#if defined EXTENDED_BLOCKS
+		|| IsNewWoodDoor(b)
+#endif
+		;
 }
 
 /* Helper: check if a block is any iron door variant */
 static cc_bool IsAnyIronDoor(BlockID b) {
-	return IsIronDoorBottom(b) || IsIronDoorTop(b);
+	return IsIronDoorBottom(b) || IsIronDoorTop(b)
+#if defined EXTENDED_BLOCKS
+		|| IsNewIronDoor(b)
+#endif
+		;
 }
 
 /* Helper: apply small random horizontal momentum to a dropped item */
@@ -1559,6 +1623,47 @@ static void InputHandler_PlaceBlock(void) {
 			
 			return; /* Don't place a block, just swap the door */
 		}
+
+#if defined EXTENDED_BLOCKS
+		/* 4-direction wooden door toggle: XOR 2 swaps open/closed state */
+		if (IsNewWoodDoor(targetBlock)) {
+			cc_bool isBottom = ((targetBlock - BLOCK_DOOR_D0_BOTTOM) & 1) == 0;
+			BlockID bottomBlock, topBlock;
+
+			if (isBottom) {
+				bottomBlock = targetBlock;
+				otherPos.y = targetPos.y + 1;
+			} else {
+				bottomBlock = targetBlock - 1;
+				otherPos.y = targetPos.y - 1;
+			}
+			topBlock = bottomBlock + 1;
+
+			/* Toggle both halves: XOR 2 flips the open/closed bit */
+			newBlock = bottomBlock ^ 2;
+			newOtherBlock = topBlock ^ 2;
+
+			/* Update the half that was clicked */
+			Game_ChangeBlock(targetPos.x, targetPos.y, targetPos.z,
+				isBottom ? newBlock : newOtherBlock);
+			Event_RaiseBlock(&UserEvents.BlockChanged, targetPos, targetBlock,
+				isBottom ? newBlock : newOtherBlock);
+
+			/* Update the other half */
+			otherPos.x = targetPos.x;
+			otherPos.z = targetPos.z;
+			if (World_Contains(otherPos.x, otherPos.y, otherPos.z)) {
+				otherBlock = World_GetBlock(otherPos.x, otherPos.y, otherPos.z);
+				Game_ChangeBlock(otherPos.x, otherPos.y, otherPos.z,
+					isBottom ? newOtherBlock : newBlock);
+				Event_RaiseBlock(&UserEvents.BlockChanged, otherPos, otherBlock,
+					isBottom ? newOtherBlock : newBlock);
+			}
+
+			Audio_PlayDigSound(SOUND_DOOR);
+			return;
+		}
+#endif
 	}
 	
 	/* Flint and steel: place fire at the target location */
@@ -2055,7 +2160,7 @@ static void InputHandler_PlaceBlock(void) {
 	
 	/* Door placement requires space above for door top and determines orientation from player yaw */
 	if (block == BLOCK_DOOR_NS_BOTTOM) {
-		BlockID above, doorBottom, doorTop;
+		BlockID above, doorBottom;
 		float yaw;
 		
 		/* Check if space above is available */
@@ -2065,35 +2170,34 @@ static void InputHandler_PlaceBlock(void) {
 		/* Can't place door if space above is occupied by non-replaceable block */
 		if (Blocks.Draw[above] != DRAW_GAS && !Blocks.CanDelete[above]) return;
 		
-		/* Determine door orientation based on player's yaw */
+		/* Determine door orientation based on player's yaw (MC Alpha 1.2.6 formula) */
 		yaw = LocalPlayer_Instances[0].Base.Yaw;
-		
-		/* Normalize yaw to 0-360 degrees */
 		while (yaw < 0) yaw += 360.0f;
 		while (yaw >= 360.0f) yaw -= 360.0f;
 		
-		/* Choose NS vs EW door based on yaw quadrants:
-		 * 315-45° (facing North/South): place NS door
-		 * 45-135° (facing East): place EW door
-		 * 135-225° (facing South/North): place NS door
-		 * 225-315° (facing West): place EW door
-		 */
-		if ((yaw >= 315.0f || yaw < 45.0f) || (yaw >= 135.0f && yaw < 225.0f)) {
-			/* Place NS door */
-			doorBottom = BLOCK_DOOR_NS_BOTTOM;
-			doorTop = BLOCK_DOOR_NS_TOP;
-		} else {
-			/* Place EW door */
-			doorBottom = BLOCK_DOOR_EW_BOTTOM;
-			doorTop = BLOCK_DOOR_EW_TOP;
+#if defined EXTENDED_BLOCKS
+		{
+			/* MC Alpha: dir = floor(((yaw+180)*4/360) - 0.5) & 3
+			   CC yaw 0=North, MC yaw 0=South, so add 2 to convert
+			   Result: Dir 0=facing E, 1=facing S, 2=facing W, 3=facing N */
+			int dir = ((int)Math_Floor(((yaw + 180.0f) * 4.0f / 360.0f) - 0.5f) + 2) & 3;
+			doorBottom = BLOCK_DOOR_D0_BOTTOM + dir * 4;
 		}
+#else
+		/* Fallback: 2-direction placement */
+		if ((yaw >= 315.0f || yaw < 45.0f) || (yaw >= 135.0f && yaw < 225.0f)) {
+			doorBottom = BLOCK_DOOR_NS_BOTTOM;
+		} else {
+			doorBottom = BLOCK_DOOR_EW_BOTTOM;
+		}
+#endif
 		
 		block = doorBottom; /* Update block to place the correct orientation */
 	}
 	
 	/* Iron Door placement: requires space above, determines orientation from yaw */
 	if (block == BLOCK_IRON_DOOR) {
-		BlockID above, doorBottom, doorTop;
+		BlockID above, doorBottom;
 		float yaw;
 		
 		if (!World_Contains(pos.x, pos.y + 1, pos.z)) return;
@@ -2104,11 +2208,18 @@ static void InputHandler_PlaceBlock(void) {
 		while (yaw < 0) yaw += 360.0f;
 		while (yaw >= 360.0f) yaw -= 360.0f;
 		
+#if defined EXTENDED_BLOCKS
+		{
+			int dir = ((int)Math_Floor(((yaw + 180.0f) * 4.0f / 360.0f) - 0.5f) + 2) & 3;
+			doorBottom = BLOCK_IRON_DOOR_D0_BOTTOM + dir * 4;
+		}
+#else
 		if ((yaw >= 315.0f || yaw < 45.0f) || (yaw >= 135.0f && yaw < 225.0f)) {
 			doorBottom = BLOCK_IRON_DOOR; /* NS */
 		} else {
 			doorBottom = BLOCK_IRON_DOOR_EW_BOTTOM; /* EW */
 		}
+#endif
 		
 		block = doorBottom;
 	}
@@ -2332,6 +2443,26 @@ static void InputHandler_PlaceBlock(void) {
 			Event_RaiseBlock(&UserEvents.BlockChanged, topPos, aboveBlock, doorTop);
 		}
 	}
+
+#if defined EXTENDED_BLOCKS
+	/* Auto-place top for new 4-direction door bottom halves */
+	if (IsNewWoodDoorBottom(block) || IsNewIronDoorBottom(block)) {
+		IVec3 topPos;
+		BlockID aboveBlock, doorTop;
+		
+		doorTop = block + 1; /* Top is always bottom + 1 in the ID layout */
+		
+		topPos.x = pos.x;
+		topPos.y = pos.y + 1;
+		topPos.z = pos.z;
+		
+		if (World_Contains(topPos.x, topPos.y, topPos.z)) {
+			aboveBlock = World_GetBlock(topPos.x, topPos.y, topPos.z);
+			Game_ChangeBlock(topPos.x, topPos.y, topPos.z, doorTop);
+			Event_RaiseBlock(&UserEvents.BlockChanged, topPos, aboveBlock, doorTop);
+		}
+	}
+#endif
 }
 
 static void InputHandler_PickBlock(void) {

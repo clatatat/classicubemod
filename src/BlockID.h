@@ -177,6 +177,46 @@ enum BLOCKID {
 	BLOCK_LADDER_E = 258, /* Attached to east wall (+X), 2/16 thick at +X edge */
 	BLOCK_LADDER_W = 259, /* Attached to west wall (-X), 2/16 thick at -X edge */
 
+	/* Wooden door 4-direction variants (MC Alpha 1.2.6 style)
+	   Layout per direction: closed_bottom, closed_top, open_bottom, open_top
+	   XOR 2 toggles open/closed, XOR 1 toggles bottom/top
+	   Dir d closed wall = (d+3)&3, open wall = d
+	   Walls: 0=Z-(north), 1=X+(east), 2=Z+(south), 3=X-(west) */
+	BLOCK_DOOR_D0_BOTTOM      = 260, /* Dir 0 (facing S) closed, X- wall */
+	BLOCK_DOOR_D0_TOP         = 261,
+	BLOCK_DOOR_D0_OPEN_BOTTOM = 262, /* Dir 0 open, Z- wall */
+	BLOCK_DOOR_D0_OPEN_TOP    = 263,
+	BLOCK_DOOR_D1_BOTTOM      = 264, /* Dir 1 (facing W) closed, Z- wall */
+	BLOCK_DOOR_D1_TOP         = 265,
+	BLOCK_DOOR_D1_OPEN_BOTTOM = 266, /* Dir 1 open, X+ wall */
+	BLOCK_DOOR_D1_OPEN_TOP    = 267,
+	BLOCK_DOOR_D2_BOTTOM      = 268, /* Dir 2 (facing N) closed, X+ wall */
+	BLOCK_DOOR_D2_TOP         = 269,
+	BLOCK_DOOR_D2_OPEN_BOTTOM = 270, /* Dir 2 open, Z+ wall */
+	BLOCK_DOOR_D2_OPEN_TOP    = 271,
+	BLOCK_DOOR_D3_BOTTOM      = 272, /* Dir 3 (facing E) closed, Z+ wall */
+	BLOCK_DOOR_D3_TOP         = 273,
+	BLOCK_DOOR_D3_OPEN_BOTTOM = 274, /* Dir 3 open, X- wall */
+	BLOCK_DOOR_D3_OPEN_TOP    = 275,
+
+	/* Iron door 4-direction variants (same layout as wooden) */
+	BLOCK_IRON_DOOR_D0_BOTTOM      = 276, /* Dir 0 closed, X- wall */
+	BLOCK_IRON_DOOR_D0_TOP         = 277,
+	BLOCK_IRON_DOOR_D0_OPEN_BOTTOM = 278, /* Dir 0 open, Z- wall */
+	BLOCK_IRON_DOOR_D0_OPEN_TOP    = 279,
+	BLOCK_IRON_DOOR_D1_BOTTOM      = 280, /* Dir 1 closed, Z- wall */
+	BLOCK_IRON_DOOR_D1_TOP         = 281,
+	BLOCK_IRON_DOOR_D1_OPEN_BOTTOM = 282, /* Dir 1 open, X+ wall */
+	BLOCK_IRON_DOOR_D1_OPEN_TOP    = 283,
+	BLOCK_IRON_DOOR_D2_BOTTOM      = 284, /* Dir 2 closed, X+ wall */
+	BLOCK_IRON_DOOR_D2_TOP         = 285,
+	BLOCK_IRON_DOOR_D2_OPEN_BOTTOM = 286, /* Dir 2 open, Z+ wall */
+	BLOCK_IRON_DOOR_D2_OPEN_TOP    = 287,
+	BLOCK_IRON_DOOR_D3_BOTTOM      = 288, /* Dir 3 closed, Z+ wall */
+	BLOCK_IRON_DOOR_D3_TOP         = 289,
+	BLOCK_IRON_DOOR_D3_OPEN_BOTTOM = 290, /* Dir 3 open, X- wall */
+	BLOCK_IRON_DOOR_D3_OPEN_TOP    = 291,
+
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM
 	BLOCK_MAX_DEFINED = BLOCK_MAX_CPE,
