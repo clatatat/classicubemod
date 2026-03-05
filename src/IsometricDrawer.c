@@ -179,7 +179,11 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 	itemTile = GetItemTexForBlock(block);
 	if (itemTile >= 0) {
 		IsometricDrawer_FlatItem(itemTile, size);
-	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || IsRail(block)) {
+	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || IsRail(block)
+#if defined EXTENDED_BLOCKS
+		|| (block >= BLOCK_LADDER_S && block <= BLOCK_LADDER_W)
+#endif
+		) {
 		IsometricDrawer_Flat(block, size);
 	} else {
 		IsometricDrawer_Angled(block, size);

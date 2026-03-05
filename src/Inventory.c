@@ -1584,6 +1584,14 @@ static void OnReset(void) {
 	Inventory_Remove(BLOCK_FARMLAND_DRY);
 	Inventory_Remove(BLOCK_FARMLAND_WET);
 
+#if defined EXTENDED_BLOCKS
+	/* Remove ladder directional variants from inventory (auto-placed by placement code) */
+	Inventory_Remove(BLOCK_LADDER_S);
+	Inventory_Remove(BLOCK_LADDER_N);
+	Inventory_Remove(BLOCK_LADDER_E);
+	Inventory_Remove(BLOCK_LADDER_W);
+#endif
+
 	/* Remove wheat stages from inventory (grown on farmland) */
 	{ int i; for (i = BLOCK_WHEAT_0; i <= BLOCK_WHEAT_7; i++) Inventory_Remove(i); }
 

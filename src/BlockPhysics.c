@@ -377,6 +377,32 @@ static void Physics_HandleLadder(int index, BlockID block) {
 	}
 }
 
+#if defined EXTENDED_BLOCKS
+/* Directional ladder variant: only checks the specific support direction */
+static void Physics_HandleLadderVariant(int index, BlockID block) {
+	int x, y, z;
+	cc_bool supportGone = false;
+	
+	World_Unpack(index, x, y, z);
+	
+	if (block == BLOCK_LADDER_S) {
+		supportGone = (z >= World.MaxZ) || Blocks.Draw[World_GetBlock(x, y, z + 1)] != DRAW_OPAQUE;
+	} else if (block == BLOCK_LADDER_N) {
+		supportGone = (z <= 0) || Blocks.Draw[World_GetBlock(x, y, z - 1)] != DRAW_OPAQUE;
+	} else if (block == BLOCK_LADDER_E) {
+		supportGone = (x >= World.MaxX) || Blocks.Draw[World_GetBlock(x + 1, y, z)] != DRAW_OPAQUE;
+	} else if (block == BLOCK_LADDER_W) {
+		supportGone = (x <= 0) || Blocks.Draw[World_GetBlock(x - 1, y, z)] != DRAW_OPAQUE;
+	}
+	
+	if (supportGone) {
+		Physics_DropBlock(x, y, z, BLOCK_LADDER);
+		Game_UpdateBlock(x, y, z, BLOCK_AIR);
+		Physics_ActivateNeighbours(x, y, z, index);
+	}
+}
+#endif
+
 static void Physics_HandleTorch(int index, BlockID block) {
 	BlockID neighbor;
 	cc_bool hasSupport = false;
@@ -2923,6 +2949,9 @@ static cc_bool FiniteLiquid_BlocksFlow(int x, int y, int z) {
 		b == BLOCK_IRON_DOOR      || b == BLOCK_IRON_DOOR_NS_TOP ||
 		b == BLOCK_IRON_DOOR_EW_BOTTOM || b == BLOCK_IRON_DOOR_EW_TOP ||
 		b == BLOCK_LADDER ||
+#if defined EXTENDED_BLOCKS
+		b == BLOCK_LADDER_S || b == BLOCK_LADDER_N || b == BLOCK_LADDER_E || b == BLOCK_LADDER_W ||
+#endif
 		b == BLOCK_SIGN_WALL || b == BLOCK_SIGN_FLOOR) return true;
 	/* MC Alpha: material.isSolid() - in CC, solid collide blocks */
 	return Blocks.Collide[b] >= COLLIDE_SOLID;
@@ -4161,6 +4190,12 @@ void Physics_Init(void) {
 	
 	/* Ladder breaks when support block is removed */
 	Physics.OnActivate[BLOCK_LADDER]   = Physics_HandleLadder;
+#if defined EXTENDED_BLOCKS
+	Physics.OnActivate[BLOCK_LADDER_S] = Physics_HandleLadderVariant;
+	Physics.OnActivate[BLOCK_LADDER_N] = Physics_HandleLadderVariant;
+	Physics.OnActivate[BLOCK_LADDER_E] = Physics_HandleLadderVariant;
+	Physics.OnActivate[BLOCK_LADDER_W] = Physics_HandleLadderVariant;
+#endif
 	
 	/* Torch breaks when all support blocks are removed */
 	Physics.OnActivate[BLOCK_TORCH]    = Physics_HandleTorch;

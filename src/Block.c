@@ -73,6 +73,9 @@ static const struct SimpleBlockDef shadow_ceiling_def = {"Shadow Ceiling", 0, 0,
 static const struct SimpleBlockDef snowy_grass_def = {"Snowy Grass", 116, 118, 2, 16, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_OPAQUE, COLLIDE_SOLID, SOUND_GRASS, SOUND_SNOW};
 static const struct SimpleBlockDef stone_plate_pressed_def = {"Stone Pressure Plate Pressed", 1, 1, 1, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_STONE, SOUND_STONE};
 static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
+#if defined EXTENDED_BLOCKS
+static const struct SimpleBlockDef ladder_variant_def = {"Ladder", 83, 83, 83, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_CLIMB, SOUND_WOOD, SOUND_WOOD};
+#endif
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef sign_floor_def = {"Sign", 4, 20, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
@@ -1764,6 +1767,10 @@ void Block_ResetProps(BlockID block) {
 		def = &rail_curve_nw_def;
 	} else if (block == BLOCK_RAIL_CURVE_NE) {
 		def = &rail_curve_ne_def;
+#if defined EXTENDED_BLOCKS
+	} else if (block >= BLOCK_LADDER_S && block <= BLOCK_LADDER_W) {
+		def = &ladder_variant_def;
+#endif
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
 	}
@@ -1923,6 +1930,56 @@ void Block_ResetProps(BlockID block) {
 		/* Default render bounds (will be overridden dynamically based on facing) */
 		Vec3_Set(Blocks.RenderMinBB[block], 0, 0, 15.0f/16.0f);
 		Vec3_Set(Blocks.RenderMaxBB[block], 1, 1, 1);
+#if defined EXTENDED_BLOCKS
+	} else if (block == BLOCK_LADDER_S) {
+		/* Attached to south wall (+Z), 2/16 thick at +Z edge (MC Alpha meta 2) */
+		Vec3_Set(Blocks.MinBB[block], 0, 0, 14.0f/16.0f);
+		Vec3_Set(Blocks.MaxBB[block], 1, 1, 1);
+		Vec3_Set(Blocks.RenderMinBB[block], 0, 0, 14.0f/16.0f);
+		Vec3_Set(Blocks.RenderMaxBB[block], 1, 1, 1);
+		Block_Tex(block, FACE_ZMIN) = 83;
+		Block_Tex(block, FACE_ZMAX) = 86;
+		Block_Tex(block, FACE_XMIN) = 86;
+		Block_Tex(block, FACE_XMAX) = 86;
+		Block_Tex(block, FACE_YMAX) = 86;
+		Block_Tex(block, FACE_YMIN) = 86;
+	} else if (block == BLOCK_LADDER_N) {
+		/* Attached to north wall (-Z), 2/16 thick at -Z edge (MC Alpha meta 3) */
+		Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.MaxBB[block], 1, 1, 2.0f/16.0f);
+		Vec3_Set(Blocks.RenderMinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.RenderMaxBB[block], 1, 1, 2.0f/16.0f);
+		Block_Tex(block, FACE_ZMAX) = 83;
+		Block_Tex(block, FACE_ZMIN) = 86;
+		Block_Tex(block, FACE_XMIN) = 86;
+		Block_Tex(block, FACE_XMAX) = 86;
+		Block_Tex(block, FACE_YMAX) = 86;
+		Block_Tex(block, FACE_YMIN) = 86;
+	} else if (block == BLOCK_LADDER_E) {
+		/* Attached to east wall (+X), 2/16 thick at +X edge (MC Alpha meta 4) */
+		Vec3_Set(Blocks.MinBB[block], 14.0f/16.0f, 0, 0);
+		Vec3_Set(Blocks.MaxBB[block], 1, 1, 1);
+		Vec3_Set(Blocks.RenderMinBB[block], 14.0f/16.0f, 0, 0);
+		Vec3_Set(Blocks.RenderMaxBB[block], 1, 1, 1);
+		Block_Tex(block, FACE_XMIN) = 83;
+		Block_Tex(block, FACE_XMAX) = 86;
+		Block_Tex(block, FACE_ZMIN) = 86;
+		Block_Tex(block, FACE_ZMAX) = 86;
+		Block_Tex(block, FACE_YMAX) = 86;
+		Block_Tex(block, FACE_YMIN) = 86;
+	} else if (block == BLOCK_LADDER_W) {
+		/* Attached to west wall (-X), 2/16 thick at -X edge (MC Alpha meta 5) */
+		Vec3_Set(Blocks.MinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.MaxBB[block], 2.0f/16.0f, 1, 1);
+		Vec3_Set(Blocks.RenderMinBB[block], 0, 0, 0);
+		Vec3_Set(Blocks.RenderMaxBB[block], 2.0f/16.0f, 1, 1);
+		Block_Tex(block, FACE_XMAX) = 83;
+		Block_Tex(block, FACE_XMIN) = 86;
+		Block_Tex(block, FACE_ZMIN) = 86;
+		Block_Tex(block, FACE_ZMAX) = 86;
+		Block_Tex(block, FACE_YMAX) = 86;
+		Block_Tex(block, FACE_YMIN) = 86;
+#endif
 	} else if (block == BLOCK_TORCH) {
 		/* Torch: small collision box for ground torch (default), overridden dynamically */
 		Vec3_Set(Blocks.MinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);

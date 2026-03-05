@@ -586,6 +586,9 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block == BLOCK_STONE_PLATE) return 0.0f;
 	if (block == BLOCK_STONE_PLATE_PRESSED) return 0.0f;
 	if (block == BLOCK_LADDER)       return 0.0f;
+#if defined EXTENDED_BLOCKS
+	if (block >= BLOCK_LADDER_S && block <= BLOCK_LADDER_W) return 0.0f;
+#endif
 	if (block == BLOCK_SAPLING)      return 0.0f;
 	if (block == BLOCK_FIRE)         return 0.0f;
 	/* Redstone torches (all variants) */
@@ -1058,6 +1061,10 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					dropBlock = BLOCK_DIRT;
 				} else if (IsRail(old)) {
 					dropBlock = BLOCK_RAIL; /* All rail variants drop as standard rail */
+#if defined EXTENDED_BLOCKS
+				} else if (old >= BLOCK_LADDER_S && old <= BLOCK_LADDER_W) {
+					dropBlock = BLOCK_LADDER; /* Ladder variants drop as base ladder */
+#endif
 				} else if (old >= BLOCK_WHEAT_0 && old <= BLOCK_WHEAT_7) {
 					/* Wheat crops: drop seeds and wheat based on growth stage */
 					dropBlock = BLOCK_AIR; /* suppress normal block drop */
@@ -1719,28 +1726,56 @@ static void InputHandler_PlaceBlock(void) {
 	
 	/* Ladders require an adjacent opaque block to attach to */
 	if (block == BLOCK_LADDER) {
-		cc_bool hasSupport = false;
+#if defined EXTENDED_BLOCKS
+		/* MC Alpha 1.2.6 ladder placement: clicked face has priority, then first available */
+		Face clickedFace = Game_SelectedPos.closest;
+		BlockID ladderVariant = 0;
 		BlockID neighbor;
 		
-		/* Check all 4 horizontal neighbors for opaque blocks */
-		if (World_Contains(pos.x - 1, pos.y, pos.z)) {
-			neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
-			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-		}
-		if (World_Contains(pos.x + 1, pos.y, pos.z)) {
-			neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
-			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-		}
-		if (World_Contains(pos.x, pos.y, pos.z - 1)) {
-			neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
-			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-		}
-		if (World_Contains(pos.x, pos.y, pos.z + 1)) {
+		/* Cascade: south(+Z) > north(-Z) > east(+X) > west(-X) */
+		/* Clicked face overrides the fallback priority */
+		if ((ladderVariant == 0 || clickedFace == FACE_ZMIN) && World_Contains(pos.x, pos.y, pos.z + 1)) {
 			neighbor = World_GetBlock(pos.x, pos.y, pos.z + 1);
-			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) ladderVariant = BLOCK_LADDER_S;
+		}
+		if ((ladderVariant == 0 || clickedFace == FACE_ZMAX) && World_Contains(pos.x, pos.y, pos.z - 1)) {
+			neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
+			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) ladderVariant = BLOCK_LADDER_N;
+		}
+		if ((ladderVariant == 0 || clickedFace == FACE_XMIN) && World_Contains(pos.x + 1, pos.y, pos.z)) {
+			neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
+			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) ladderVariant = BLOCK_LADDER_E;
+		}
+		if ((ladderVariant == 0 || clickedFace == FACE_XMAX) && World_Contains(pos.x - 1, pos.y, pos.z)) {
+			neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
+			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) ladderVariant = BLOCK_LADDER_W;
 		}
 		
-		if (!hasSupport) return; /* Can't place ladder without adjacent solid block */
+		if (ladderVariant == 0) return; /* No support at all */
+		block = ladderVariant;
+#else
+		{
+			cc_bool hasSupport = false;
+			BlockID neighbor;
+			if (World_Contains(pos.x, pos.y, pos.z + 1)) {
+				neighbor = World_GetBlock(pos.x, pos.y, pos.z + 1);
+				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			}
+			if (World_Contains(pos.x, pos.y, pos.z - 1)) {
+				neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
+				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			}
+			if (World_Contains(pos.x + 1, pos.y, pos.z)) {
+				neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
+				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			}
+			if (World_Contains(pos.x - 1, pos.y, pos.z)) {
+				neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
+				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			}
+			if (!hasSupport) return;
+		}
+#endif
 	}
 	
 	/* Torch requires a wall or floor to attach to */

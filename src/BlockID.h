@@ -170,6 +170,13 @@ enum BLOCKID {
 	BLOCK_RAIL_CURVE_NE = 255, /* NE curve rail (meta 9, tex 145) */
 
 #if defined EXTENDED_BLOCKS
+	/* Ladder directional variants (placed in world, not in inventory) */
+	/* Named by the wall the ladder attaches to (where support block is) */
+	BLOCK_LADDER_S = 256, /* Attached to south wall (+Z), 2/16 thick at +Z edge */
+	BLOCK_LADDER_N = 257, /* Attached to north wall (-Z), 2/16 thick at -Z edge */
+	BLOCK_LADDER_E = 258, /* Attached to east wall (+X), 2/16 thick at +X edge */
+	BLOCK_LADDER_W = 259, /* Attached to west wall (-X), 2/16 thick at -X edge */
+
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM
 	BLOCK_MAX_DEFINED = BLOCK_MAX_CPE,
