@@ -385,6 +385,9 @@ static void Adv_PropagateSkyLight(void) {
 *#########################################################################################################################*/
 static cc_uint8 Adv_GetBlockEmission(BlockID block) {
 	if (block == BLOCK_TORCH) return ADV_TORCH_LEVEL;
+#if defined EXTENDED_BLOCKS
+	if (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W) return ADV_TORCH_LEVEL;
+#endif
 	if (block == BLOCK_LAVA || block == BLOCK_STILL_LAVA) return ADV_LAVA_LEVEL;
 	return 0;
 }

@@ -13,6 +13,13 @@
 #include "Options.h"
 #include "Builder.h"
 
+/* Helper: check if a block is a regular torch (ground or wall-mounted) for light emission */
+#ifdef EXTENDED_BLOCKS
+#define IsRegTorchLight(b) ((b) == BLOCK_TORCH || ((b) >= BLOCK_TORCH_S && (b) <= BLOCK_TORCH_W))
+#else
+#define IsRegTorchLight(b) ((b) == BLOCK_TORCH)
+#endif
+
 const char* const LightingMode_Names[LIGHTING_MODE_COUNT] = { "Classic", "Fancy", "Advanced" };
 
 cc_uint8 Lighting_Mode;
@@ -158,7 +165,7 @@ static void TorchLight_Remove(int srcX, int srcY, int srcZ) {
 		for (z = minZ; z <= maxZ; z++)
 			for (x = minX; x <= maxX; x++) {
 				BlockID b = World_GetBlock(x, y, z);
-				if (b == BLOCK_TORCH)
+				if (IsRegTorchLight(b))
 					TorchLight_Propagate(x, y, z);
 			}
 }
@@ -189,7 +196,7 @@ static void TorchLight_ScanWorld(void) {
 		for (z = 0; z < World.Length; z++)
 			for (x = 0; x < World.Width; x++) {
 				block = World_GetBlock(x, y, z);
-				if (block == BLOCK_TORCH)
+				if (IsRegTorchLight(block))
 					TorchLight_Propagate(x, y, z);
 			}
 }
@@ -396,10 +403,10 @@ void ClassicLighting_OnBlockChanged(int x, int y, int z, BlockID oldBlock, Block
 
 	/* Handle torch light */
 	if (torch_lightmap) {
-		if (newBlock == BLOCK_TORCH) {
+		if (IsRegTorchLight(newBlock)) {
 			TorchLight_Propagate(x, y, z);
 			TorchLight_RefreshChunks(x, y, z);
-		} else if (oldBlock == BLOCK_TORCH) {
+		} else if (IsRegTorchLight(oldBlock)) {
 			TorchLight_Remove(x, y, z);
 			TorchLight_RefreshChunks(x, y, z);
 		} else if (Blocks.BlocksLight[newBlock] != Blocks.BlocksLight[oldBlock]) {

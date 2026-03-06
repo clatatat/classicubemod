@@ -1547,6 +1547,13 @@ static void OnReset(void) {
 	Inventory_Remove(BLOCK_RED_TORCH_OFF_W);
 	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED);
 	Inventory_Remove(BLOCK_RED_TORCH_UNMOUNTED_OFF);
+#if defined EXTENDED_BLOCKS
+	/* Remove wall-mounted regular torch variants (player places generic torch, code picks variant) */
+	Inventory_Remove(BLOCK_TORCH_S);
+	Inventory_Remove(BLOCK_TORCH_N);
+	Inventory_Remove(BLOCK_TORCH_E);
+	Inventory_Remove(BLOCK_TORCH_W);
+#endif
 	
 	/* Remove pressed button from inventory (non-placeable, auto-placed by physics) */
 	Inventory_Remove(BLOCK_BUTTON_PRESSED);

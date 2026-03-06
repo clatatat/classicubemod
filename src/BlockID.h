@@ -217,6 +217,12 @@ enum BLOCKID {
 	BLOCK_IRON_DOOR_D3_OPEN_BOTTOM = 290, /* Dir 3 open, X- wall */
 	BLOCK_IRON_DOOR_D3_OPEN_TOP    = 291,
 
+	/* Wall-mounted regular torch variants - named by direction to attach block */
+	BLOCK_TORCH_S = 292, /* Attached to block at z+1 (south) */
+	BLOCK_TORCH_N = 293, /* Attached to block at z-1 (north) */
+	BLOCK_TORCH_E = 294, /* Attached to block at x+1 (east) */
+	BLOCK_TORCH_W = 295, /* Attached to block at x-1 (west) */
+
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM
 	BLOCK_MAX_DEFINED = BLOCK_MAX_CPE,

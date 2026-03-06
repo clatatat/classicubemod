@@ -4238,6 +4238,12 @@ void Physics_Init(void) {
 	
 	/* Torch breaks when all support blocks are removed */
 	Physics.OnActivate[BLOCK_TORCH]    = Physics_HandleTorch;
+#if defined EXTENDED_BLOCKS
+	Physics.OnActivate[BLOCK_TORCH_S]  = Physics_HandleTorch;
+	Physics.OnActivate[BLOCK_TORCH_N]  = Physics_HandleTorch;
+	Physics.OnActivate[BLOCK_TORCH_E]  = Physics_HandleTorch;
+	Physics.OnActivate[BLOCK_TORCH_W]  = Physics_HandleTorch;
+#endif
 	
 	/* Snow breaks when block below is removed */
 	Physics.OnActivate[BLOCK_SNOW]     = Physics_HandleSnow;

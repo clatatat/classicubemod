@@ -196,6 +196,7 @@ static cc_bool RayTrace(struct RayTracer* t, const Vec3* origin, const Vec3* dir
 #if defined EXTENDED_BLOCKS
 		    || (t->block >= BLOCK_DOOR_D0_BOTTOM && t->block <= BLOCK_DOOR_D3_OPEN_TOP)
 		    || (t->block >= BLOCK_IRON_DOOR_D0_BOTTOM && t->block <= BLOCK_IRON_DOOR_D3_OPEN_TOP)
+		    || (t->block >= BLOCK_TORCH_S && t->block <= BLOCK_TORCH_W)
 #endif
 		    ) {
 			Vec3 min, max;

@@ -77,6 +77,7 @@ static const struct SimpleBlockDef farmland_dry_def = {"Farmland", 132, 2, 2, 15
 static const struct SimpleBlockDef ladder_variant_def = {"Ladder", 83, 83, 83, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_CLIMB, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef door_variant_def = {"Door", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef iron_door_variant_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
+static const struct SimpleBlockDef torch_wall_def = {"Torch Wall", 80, 80, 80, 10, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
 #endif
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
@@ -308,7 +309,11 @@ cc_bool IsDirectionalBlock(BlockID block) {
 		|| IsButton(block)
 		|| IsLever(block)
 		|| block == BLOCK_SIGN_WALL
-		|| block == BLOCK_SIGN_FLOOR;
+		|| block == BLOCK_SIGN_FLOOR
+#if defined EXTENDED_BLOCKS
+		|| (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W)
+#endif
+		;
 }
 
 /* Calculate which direction a torch should face based on adjacent solid blocks */
@@ -409,7 +414,11 @@ static cc_bool IsRedstoneTorch(BlockID block) {
 
 /* Helper: check if a block is any torch (regular or redstone) */
 static cc_bool IsAnyTorch(BlockID block) {
-	return block == BLOCK_TORCH || IsRedstoneTorch(block);
+	return block == BLOCK_TORCH || IsRedstoneTorch(block)
+#if defined EXTENDED_BLOCKS
+		|| (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W)
+#endif
+		;
 }
 
 /* Get redstone dust top texture based on neighboring redstone connections */
@@ -1038,6 +1047,16 @@ static void DirectionalBlock_Update(int x, int y, int z) {
 			facing = 4; /* Free-standing, always ground/upright */
 			DirectionalCache_Set(x, y, z, facing);
 			return;
+#if defined EXTENDED_BLOCKS
+		} else if (block == BLOCK_TORCH_S) {
+			facing = 0; /* Attached to z+1 */
+		} else if (block == BLOCK_TORCH_N) {
+			facing = 1; /* Attached to z-1 */
+		} else if (block == BLOCK_TORCH_E) {
+			facing = 2; /* Attached to x+1 */
+		} else if (block == BLOCK_TORCH_W) {
+			facing = 3; /* Attached to x-1 */
+#endif
 		} else {
 			/* Regular torch: use placement hint if available */
 			if (torch_placement_hint != 255) {
@@ -1152,7 +1171,11 @@ TextureLoc DirectionalBlock_GetTexture(BlockID block, int x, int y, int z, Face 
 	}
 	
 	/* Torch uses texture 80 - sprite rendering handles display */
-	if (block == BLOCK_TORCH) {
+	if (block == BLOCK_TORCH
+#if defined EXTENDED_BLOCKS
+		|| (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W)
+#endif
+	) {
 		return 80;
 	}
 	
@@ -1776,6 +1799,8 @@ void Block_ResetProps(BlockID block) {
 		def = &door_variant_def;
 	} else if (block >= BLOCK_IRON_DOOR_D0_BOTTOM && block <= BLOCK_IRON_DOOR_D3_OPEN_TOP) {
 		def = &iron_door_variant_def;
+	} else if (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W) {
+		def = &torch_wall_def;
 #endif
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
@@ -2086,6 +2111,14 @@ void Block_ResetProps(BlockID block) {
 		Vec3_Set(Blocks.MaxBB[block], 9.0f/16.0f, 11.0f/16.0f, 9.0f/16.0f);
 		Vec3_Set(Blocks.RenderMinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);
 		Vec3_Set(Blocks.RenderMaxBB[block], 9.0f/16.0f, 11.0f/16.0f, 9.0f/16.0f);
+#if defined EXTENDED_BLOCKS
+	} else if (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W) {
+		/* Wall-mounted regular torch variants: same base geometry as ground torch */
+		Vec3_Set(Blocks.MinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);
+		Vec3_Set(Blocks.MaxBB[block], 9.0f/16.0f, 10.0f/16.0f, 9.0f/16.0f);
+		Vec3_Set(Blocks.RenderMinBB[block], 7.0f/16.0f, 0, 7.0f/16.0f);
+		Vec3_Set(Blocks.RenderMaxBB[block], 9.0f/16.0f, 10.0f/16.0f, 9.0f/16.0f);
+#endif
 	} else if (IsButton(block)) {
 		/* Button: default bounds for south wall (facing 0), dynamically rotated by DirectionalBlock_GetRenderBounds */
 		Vec3_Set(Blocks.MinBB[block], 5.0f/16.0f, 6.0f/16.0f, 14.0f/16.0f);

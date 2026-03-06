@@ -905,6 +905,10 @@ static RNGState spriteRng;
 	|| (b) == BLOCK_RED_TORCH_OFF_E || (b) == BLOCK_RED_TORCH_OFF_W \
 	|| (b) == BLOCK_RED_TORCH_UNMOUNTED || (b) == BLOCK_RED_TORCH_UNMOUNTED_OFF)
 #define IsAnyTorchBlock(b) ((b) == BLOCK_TORCH || IsRedTorch(b))
+#ifdef EXTENDED_BLOCKS
+#undef IsAnyTorchBlock
+#define IsAnyTorchBlock(b) ((b) == BLOCK_TORCH || IsRedTorch(b) || ((b) >= BLOCK_TORCH_S && (b) <= BLOCK_TORCH_W))
+#endif
 
 static void Builder_DrawTorch(int x, int y, int z) {
 	struct Builder1DPart* part;

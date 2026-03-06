@@ -618,6 +618,9 @@ static float Block_BaseBreakTime(BlockID block) {
 	if (block >= BLOCK_RED_TORCH_ON_S && block <= BLOCK_RED_TORCH_OFF_W) return 0.0f;
 	if (block == BLOCK_RED_TORCH_UNMOUNTED)     return 0.0f;
 	if (block == BLOCK_RED_TORCH_UNMOUNTED_OFF) return 0.0f;
+#if defined EXTENDED_BLOCKS
+	if (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W) return 0.0f;
+#endif
 	/* Flowers and mushrooms */
 	if (block == BLOCK_DANDELION)    return 0.0f;
 	if (block == BLOCK_ROSE)         return 0.0f;
@@ -1128,6 +1131,8 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 #if defined EXTENDED_BLOCKS
 				} else if (old >= BLOCK_LADDER_S && old <= BLOCK_LADDER_W) {
 					dropBlock = BLOCK_LADDER; /* Ladder variants drop as base ladder */
+				} else if (old >= BLOCK_TORCH_S && old <= BLOCK_TORCH_W) {
+					dropBlock = BLOCK_TORCH; /* Torch wall variants drop as base torch */
 #endif
 				} else if (old >= BLOCK_WHEAT_0 && old <= BLOCK_WHEAT_7) {
 					/* Wheat crops: drop seeds and wheat based on growth stage */
@@ -1973,6 +1978,80 @@ static void InputHandler_PlaceBlock(void) {
 		} else {
 			/* Regular torches and unlit redstone torches: use clicked face for orientation */
 			Face torchClickedFace = Game_SelectedPos.closest;
+#if defined EXTENDED_BLOCKS
+			if (block == BLOCK_TORCH) {
+				/* Regular torch: use directional block IDs for wall placement */
+				switch (torchClickedFace) {
+					case FACE_ZMIN: /* Clicked -Z face, torch attach to z+1 */
+						if (World_Contains(pos.x, pos.y, pos.z + 1)) {
+							neighbor = World_GetBlock(pos.x, pos.y, pos.z + 1);
+							if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+								block = BLOCK_TORCH_S; hasSupport = true;
+							}
+						}
+						break;
+					case FACE_ZMAX: /* Clicked +Z face, torch attach to z-1 */
+						if (World_Contains(pos.x, pos.y, pos.z - 1)) {
+							neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
+							if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+								block = BLOCK_TORCH_N; hasSupport = true;
+							}
+						}
+						break;
+					case FACE_XMIN: /* Clicked -X face, torch attach to x+1 */
+						if (World_Contains(pos.x + 1, pos.y, pos.z)) {
+							neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
+							if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+								block = BLOCK_TORCH_E; hasSupport = true;
+							}
+						}
+						break;
+					case FACE_XMAX: /* Clicked +X face, torch attach to x-1 */
+						if (World_Contains(pos.x - 1, pos.y, pos.z)) {
+							neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
+							if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+								block = BLOCK_TORCH_W; hasSupport = true;
+							}
+						}
+						break;
+					case FACE_YMAX: /* Clicked top face, ground torch */
+					case FACE_YMIN: /* Clicked bottom face, try ground */
+						if (World_Contains(pos.x, pos.y - 1, pos.z)) {
+							neighbor = World_GetBlock(pos.x, pos.y - 1, pos.z);
+							if (Blocks.Draw[neighbor] == DRAW_OPAQUE) {
+								hasSupport = true; /* block stays BLOCK_TORCH (ground) */
+							}
+						}
+						break;
+					default: break;
+				}
+				/* Fallback: try walls then ground */
+				if (!hasSupport) {
+					if (World_Contains(pos.x, pos.y, pos.z + 1)) {
+						neighbor = World_GetBlock(pos.x, pos.y, pos.z + 1);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) { block = BLOCK_TORCH_S; hasSupport = true; }
+					}
+					if (!hasSupport && World_Contains(pos.x, pos.y, pos.z - 1)) {
+						neighbor = World_GetBlock(pos.x, pos.y, pos.z - 1);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) { block = BLOCK_TORCH_N; hasSupport = true; }
+					}
+					if (!hasSupport && World_Contains(pos.x + 1, pos.y, pos.z)) {
+						neighbor = World_GetBlock(pos.x + 1, pos.y, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) { block = BLOCK_TORCH_E; hasSupport = true; }
+					}
+					if (!hasSupport && World_Contains(pos.x - 1, pos.y, pos.z)) {
+						neighbor = World_GetBlock(pos.x - 1, pos.y, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) { block = BLOCK_TORCH_W; hasSupport = true; }
+					}
+					if (!hasSupport && World_Contains(pos.x, pos.y - 1, pos.z)) {
+						neighbor = World_GetBlock(pos.x, pos.y - 1, pos.z);
+						if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true; /* ground torch */
+					}
+				}
+			} else
+#endif
+			{
+			/* Unlit redstone torches: use clicked face + placement hint */
 			switch (torchClickedFace) {
 				case FACE_ZMIN: /* Clicked -Z face, torch attach to z+1 */
 					if (World_Contains(pos.x, pos.y, pos.z + 1)) {
@@ -2037,6 +2116,7 @@ static void InputHandler_PlaceBlock(void) {
 			if (!hasSupport && World_Contains(pos.x, pos.y - 1, pos.z)) {
 				neighbor = World_GetBlock(pos.x, pos.y - 1, pos.z);
 				if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+			}
 			}
 		}
 		
