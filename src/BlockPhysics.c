@@ -410,31 +410,27 @@ static void Physics_HandleTorch(int index, BlockID block) {
 	
 	World_Unpack(index, x, y, z);
 	
-	/* Check block below (ground support) */
-	if (y > 0) {
-		neighbor = World_GetBlock(x, y - 1, z);
-		if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+#if defined EXTENDED_BLOCKS
+	/* Wall-mounted variants: only check the specific block they're attached to */
+	if (block == BLOCK_TORCH_S) {
+		if (z < World.MaxZ) { neighbor = World_GetBlock(x, y, z + 1); hasSupport = Blocks.Draw[neighbor] == DRAW_OPAQUE; }
+	} else if (block == BLOCK_TORCH_N) {
+		if (z > 0)           { neighbor = World_GetBlock(x, y, z - 1); hasSupport = Blocks.Draw[neighbor] == DRAW_OPAQUE; }
+	} else if (block == BLOCK_TORCH_E) {
+		if (x < World.MaxX)  { neighbor = World_GetBlock(x + 1, y, z); hasSupport = Blocks.Draw[neighbor] == DRAW_OPAQUE; }
+	} else if (block == BLOCK_TORCH_W) {
+		if (x > 0)           { neighbor = World_GetBlock(x - 1, y, z); hasSupport = Blocks.Draw[neighbor] == DRAW_OPAQUE; }
+	} else
+#endif
+	{
+		/* Ground torch (BLOCK_TORCH): only check block below */
+		if (y > 0) {
+			neighbor = World_GetBlock(x, y - 1, z);
+			if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
+		}
 	}
 	
-	/* Check 4 horizontal neighbors for opaque blocks (wall support) */
-	if (!hasSupport && x > 0) {
-		neighbor = World_GetBlock(x - 1, y, z);
-		if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-	}
-	if (!hasSupport && x < World.MaxX) {
-		neighbor = World_GetBlock(x + 1, y, z);
-		if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-	}
-	if (!hasSupport && z > 0) {
-		neighbor = World_GetBlock(x, y, z - 1);
-		if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-	}
-	if (!hasSupport && z < World.MaxZ) {
-		neighbor = World_GetBlock(x, y, z + 1);
-		if (Blocks.Draw[neighbor] == DRAW_OPAQUE) hasSupport = true;
-	}
-	
-	/* No support at all - break the torch */
+	/* No support - break the torch */
 	if (!hasSupport) {
 		Physics_DropBlock(x, y, z, BLOCK_TORCH);
 		Game_UpdateBlock(x, y, z, BLOCK_AIR);
