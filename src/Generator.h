@@ -29,6 +29,7 @@ extern const struct MapGenerator FloatingGen;
 extern const struct MapGenerator CavesGen;
 extern const struct MapGenerator EmptyGen;
 extern const struct MapGenerator StrangeGen;
+extern const struct MapGenerator Perlin3DGen;
 
 /* Starts generating a map using the given generator */
 void Gen_Start(STRING_REF const struct MapGenerator* gen, int seed,

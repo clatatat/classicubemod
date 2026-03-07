@@ -467,6 +467,89 @@ static float CombinedNoise_Calc(const struct CombinedNoise* n, float x, float y)
 
 
 /*########################################################################################################################*
+*--------------------------------------------------3D Noise generation----------------------------------------------------*
+*#########################################################################################################################*/
+/* 3D Improved Perlin noise using Ken Perlin's 2002 improved algorithm.
+   Uses 16 gradient directions selected by the low 4 bits of the hash. */
+static float Grad3D(int hash, float x, float y, float z) {
+	float u, v;
+	hash &= 15;
+	u = hash < 8 ? x : y;
+	v = hash < 4 ? y : (hash == 12 || hash == 14 ? x : z);
+	return ((hash & 1) == 0 ? u : -u) + ((hash & 2) == 0 ? v : -v);
+}
+
+static float ImprovedNoise_Calc3D(const cc_uint8* p, float x, float y, float z) {
+	int xFloor, yFloor, zFloor, X, Y, Z;
+	float u, v, w;
+	int A, AA, AB, B, BA, BB;
+	float g1, g2, g3, g4, g5, g6, g7, g8;
+	float l1, l2, l3, l4, m1, m2;
+
+	xFloor = x >= 0 ? (int)x : (int)x - 1;
+	yFloor = y >= 0 ? (int)y : (int)y - 1;
+	zFloor = z >= 0 ? (int)z : (int)z - 1;
+	X = xFloor & 0xFF; Y = yFloor & 0xFF; Z = zFloor & 0xFF;
+	x -= xFloor; y -= yFloor; z -= zFloor;
+
+	u = x * x * x * (x * (x * 6 - 15) + 10); /* Fade(x) */
+	v = y * y * y * (y * (y * 6 - 15) + 10); /* Fade(y) */
+	w = z * z * z * (z * (z * 6 - 15) + 10); /* Fade(z) */
+
+	A  = p[X] + Y;
+	AA = p[A] + Z;
+	AB = p[A + 1] + Z;
+	B  = p[X + 1] + Y;
+	BA = p[B] + Z;
+	BB = p[B + 1] + Z;
+
+	/* Trilinear interpolation of 8 gradient dot products */
+	g1 = Grad3D(p[AA],     x,     y,     z);
+	g2 = Grad3D(p[BA],     x - 1, y,     z);
+	g3 = Grad3D(p[AB],     x,     y - 1, z);
+	g4 = Grad3D(p[BB],     x - 1, y - 1, z);
+	g5 = Grad3D(p[AA + 1], x,     y,     z - 1);
+	g6 = Grad3D(p[BA + 1], x - 1, y,     z - 1);
+	g7 = Grad3D(p[AB + 1], x,     y - 1, z - 1);
+	g8 = Grad3D(p[BB + 1], x - 1, y - 1, z - 1);
+
+	l1 = g1 + u * (g2 - g1);
+	l2 = g3 + u * (g4 - g3);
+	l3 = g5 + u * (g6 - g5);
+	l4 = g7 + u * (g8 - g7);
+
+	m1 = l1 + v * (l2 - l1);
+	m2 = l3 + v * (l4 - l3);
+
+	return m1 + w * (m2 - m1);
+}
+
+/* 3D octave noise: up to 16 octaves of 3D Perlin noise */
+#define OCTAVE3D_MAX 16
+struct OctaveNoise3D { cc_uint8 p[OCTAVE3D_MAX][NOISE_TABLE_SIZE]; int octaves; };
+
+static void OctaveNoise3D_Init(struct OctaveNoise3D* n, RNGState* rnd, int octaves) {
+	int i;
+	n->octaves = octaves;
+	for (i = 0; i < octaves; i++) {
+		ImprovedNoise_Init(n->p[i], rnd);
+	}
+}
+
+static float OctaveNoise3D_Calc(const struct OctaveNoise3D* n, float x, float y, float z) {
+	float amplitude = 1, freq = 1;
+	float sum = 0;
+	int i;
+	for (i = 0; i < n->octaves; i++) {
+		sum += ImprovedNoise_Calc3D(n->p[i], x * freq, y * freq, z * freq) * amplitude;
+		amplitude *= 2.0f;
+		freq *= 0.5f;
+	}
+	return sum;
+}
+
+
+/*########################################################################################################################*
 *----------------------------------------------------Notchy map gen-------------------------------------------------------*
 *#########################################################################################################################*/
 static int waterLevel, minHeight;
@@ -3307,6 +3390,206 @@ const struct MapGenerator StrangeGen = {
 	StrangeGen_Prepare,
 	StrangeGen_Generate,
 	StrangeGen_Setup
+};
+
+
+/*########################################################################################################################*
+*---------------------------------------------------3D Perlin map gen-----------------------------------------------------*
+*#########################################################################################################################*/
+/* 3D Perlin terrain generator based on Minecraft Infdev 20100230's algorithm.
+   Uses three 3D octave noise generators blended together to create terrain density.
+   A height bias ensures a natural ground surface around the midpoint of the world. */
+
+/* Noise generators are large (16 octaves * 512 bytes each), so heap-allocate them */
+struct Perlin3DNoiseState {
+	struct OctaveNoise3D noiseGen1;  /* 16-octave 3D noise (low selector) */
+	struct OctaveNoise3D noiseGen2;  /* 16-octave 3D noise (high selector) */
+	struct OctaveNoise3D noiseGen3;  /* 8-octave 3D noise (blender/selector) */
+	struct OctaveNoise3D treeNoise;  /* 5-octave 2D noise for tree density */
+};
+static struct Perlin3DNoiseState* perlin3d_noise;
+
+static cc_bool Perlin3DGen_Prepare(int seed) {
+	Random_Seed(&rnd, seed);
+	waterLevel = World.Height / 2;
+
+	perlin3d_noise = (struct Perlin3DNoiseState*)Mem_TryAlloc(1, sizeof(struct Perlin3DNoiseState));
+	if (!perlin3d_noise) return false;
+
+	OctaveNoise3D_Init(&perlin3d_noise->noiseGen1, &rnd, 16);
+	OctaveNoise3D_Init(&perlin3d_noise->noiseGen2, &rnd, 16);
+	OctaveNoise3D_Init(&perlin3d_noise->noiseGen3, &rnd, 8);
+	/* Advance RNG state to match Infdev (3 unused generators) */
+	{ struct OctaveNoise unused; OctaveNoise_Init(&unused, &rnd, 4); }
+	{ struct OctaveNoise unused; OctaveNoise_Init(&unused, &rnd, 4); }
+	{ struct OctaveNoise unused; OctaveNoise_Init(&unused, &rnd, 5); }
+	OctaveNoise3D_Init(&perlin3d_noise->treeNoise, &rnd, 5);
+	return true;
+}
+
+/* Core 3D density function - determines terrain shape.
+   Blends two noise fields using a selector noise, then subtracts a height bias
+   so that density is positive (solid) below ~waterLevel and negative (air) above. */
+static float Perlin3DGen_DensityAt(float bx, float by, float bz) {
+	float heightBias, selector, n1val, n2val, blend, density;
+	/* by is in 4-block grid units: convert to block Y, subtract waterLevel */
+	heightBias = by * 4.0f - (float)waterLevel;
+	if (heightBias < 0.0f) heightBias *= 3.0f; /* steeper falloff below sea level */
+
+	/* Selector noise: 8 octaves, stretched vertically */
+	selector = OctaveNoise3D_Calc(&perlin3d_noise->noiseGen3,
+		bx * 684.412f / 80.0f, by * 684.412f / 400.0f, bz * 684.412f / 80.0f) / 2.0f;
+
+	if (selector < -1.0f) {
+		/* Only noiseGen1 */
+		density = OctaveNoise3D_Calc(&perlin3d_noise->noiseGen1,
+			bx * 684.412f, by * 984.412f, bz * 684.412f) / 512.0f - heightBias;
+	} else if (selector > 1.0f) {
+		/* Only noiseGen2 */
+		density = OctaveNoise3D_Calc(&perlin3d_noise->noiseGen2,
+			bx * 684.412f, by * 984.412f, bz * 684.412f) / 512.0f - heightBias;
+	} else {
+		/* Blend noiseGen1 and noiseGen2 based on selector */
+		n1val = OctaveNoise3D_Calc(&perlin3d_noise->noiseGen1,
+			bx * 684.412f, by * 984.412f, bz * 684.412f) / 512.0f - heightBias;
+		n2val = OctaveNoise3D_Calc(&perlin3d_noise->noiseGen2,
+			bx * 684.412f, by * 984.412f, bz * 684.412f) / 512.0f - heightBias;
+		/* Clamp both to [-10, 10] */
+		if (n1val < -10.0f) n1val = -10.0f;
+		if (n1val >  10.0f) n1val =  10.0f;
+		if (n2val < -10.0f) n2val = -10.0f;
+		if (n2val >  10.0f) n2val =  10.0f;
+		blend = (selector + 1.0f) / 2.0f; /* map [-1,1] to [0,1] */
+		density = n1val + (n2val - n1val) * blend;
+	}
+
+	if (density < -10.0f) density = -10.0f;
+	if (density >  10.0f) density =  10.0f;
+	return density;
+}
+
+static void Perlin3DGen_Generate(void) {
+	/* The world is divided into a low-resolution 3D grid.
+	   Grid cells are 4x4x4 blocks. X and Z grids span the world width/length,
+	   while Y grid has (Height/4 + 1) sample points.
+	   Density is sampled at grid vertices, then trilinearly interpolated. */
+	int gridX = World.Width  / 4;
+	int gridZ = World.Length / 4;
+	int gridY = World.Height / 4;
+	int gx, gz, gy, sy, sx, sz;
+	int bx, by, bz, index;
+	float wx, wz;
+	float d000, d001, d010, d011, d100, d101, d110, d111;
+	float yFrac, c00, c01, c10, c11;
+	float xFrac, c0, c1;
+	float zFrac, density;
+	BlockRaw block;
+
+	Gen_CurrentState = "Generating terrain";
+	Mem_Set(Gen_Blocks, BLOCK_AIR, World.Volume);
+
+	for (gx = 0; gx < gridX; gx++) {
+		Gen_CurrentProgress = (float)gx / gridX;
+		for (gz = 0; gz < gridZ; gz++) {
+			/* World-space coordinates in 4-block grid units */
+			wx = (float)gx;
+			wz = (float)gz;
+
+			for (gy = 0; gy < gridY; gy++) {
+				/* Sample density at 8 corners of this grid cell */
+				d000 = Perlin3DGen_DensityAt(wx,        (float)gy,        wz);
+				d100 = Perlin3DGen_DensityAt(wx + 1.0f, (float)gy,        wz);
+				d010 = Perlin3DGen_DensityAt(wx,        (float)(gy + 1),  wz);
+				d110 = Perlin3DGen_DensityAt(wx + 1.0f, (float)(gy + 1),  wz);
+				d001 = Perlin3DGen_DensityAt(wx,        (float)gy,        wz + 1.0f);
+				d101 = Perlin3DGen_DensityAt(wx + 1.0f, (float)gy,        wz + 1.0f);
+				d011 = Perlin3DGen_DensityAt(wx,        (float)(gy + 1),  wz + 1.0f);
+				d111 = Perlin3DGen_DensityAt(wx + 1.0f, (float)(gy + 1),  wz + 1.0f);
+
+				/* Trilinear interpolation within the 4x4x4 sub-cell */
+				for (sy = 0; sy < 4; sy++) {
+					yFrac = (float)sy / 4.0f;
+					/* Interpolate Y edges */
+					c00 = d000 + (d010 - d000) * yFrac;
+					c10 = d100 + (d110 - d100) * yFrac;
+					c01 = d001 + (d011 - d001) * yFrac;
+					c11 = d101 + (d111 - d101) * yFrac;
+
+					for (sx = 0; sx < 4; sx++) {
+						xFrac = (float)sx / 4.0f;
+						/* Interpolate X */
+						c0 = c00 + (c10 - c00) * xFrac;
+						c1 = c01 + (c11 - c01) * xFrac;
+
+						bx = gx * 4 + sx;
+						by = gy * 4 + sy;
+
+						for (sz = 0; sz < 4; sz++) {
+							zFrac = (float)sz / 4.0f;
+							/* Interpolate Z */
+							density = c0 + (c1 - c0) * zFrac;
+
+							bz = gz * 4 + sz;
+							block = BLOCK_AIR;
+							if (by < waterLevel) block = BLOCK_STILL_WATER;
+							if (density > 0.0f)  block = BLOCK_STONE;
+
+							index = World_Pack(bx, by, bz);
+							Gen_Blocks[index] = block;
+						}
+					}
+				}
+			}
+		}
+	}
+
+	/* Surface replacement pass: convert top stone to grass, sub-surface to dirt */
+	Gen_CurrentState = "Creating surface";
+	{ int x, z, y, depth;
+	  for (x = 0; x < World.Width; x++) {
+		Gen_CurrentProgress = (float)x / World.Width;
+		for (z = 0; z < World.Length; z++) {
+			depth = -1;
+			for (y = World.MaxY; y >= 0; y--) {
+				index = World_Pack(x, y, z);
+				if (Gen_Blocks[index] == BLOCK_AIR || Gen_Blocks[index] == BLOCK_STILL_WATER) {
+					depth = -1;
+				} else if (Gen_Blocks[index] == BLOCK_STONE) {
+					if (depth == -1) {
+						depth = 3;
+						if (y >= waterLevel - 1) {
+							Gen_Blocks[index] = BLOCK_GRASS;
+						} else {
+							Gen_Blocks[index] = BLOCK_DIRT;
+						}
+					} else if (depth > 0) {
+						depth--;
+						Gen_Blocks[index] = BLOCK_DIRT;
+					}
+				}
+			}
+		}
+	}}
+
+	/* Carve caves and ores using the shared NotchyGen functions */
+	NotchyGen_CarveCaves();
+	NotchyGen_CarveAllOres();
+
+	Mem_Free(perlin3d_noise);
+	perlin3d_noise = NULL;
+	gen_done = true;
+}
+
+static void Perlin3DGen_Setup(void) {
+	Env_SetEdgeBlock(BLOCK_STILL_WATER);
+	Env_SetSidesBlock(BLOCK_BEDROCK);
+	Env_SetEdgeHeight(waterLevel);
+}
+
+const struct MapGenerator Perlin3DGen = {
+	Perlin3DGen_Prepare,
+	Perlin3DGen_Generate,
+	Perlin3DGen_Setup
 };
 
 
