@@ -3409,12 +3409,19 @@ struct Perlin3DNoiseState {
 };
 static struct Perlin3DNoiseState* perlin3d_noise;
 
+static cc_int16* perlin3d_heightmap;
+
 static cc_bool Perlin3DGen_Prepare(int seed) {
+	int mapArea;
 	Random_Seed(&rnd, seed);
 	waterLevel = World.Height / 2;
 
 	perlin3d_noise = (struct Perlin3DNoiseState*)Mem_TryAlloc(1, sizeof(struct Perlin3DNoiseState));
 	if (!perlin3d_noise) return false;
+
+	mapArea = World.Width * World.Length;
+	perlin3d_heightmap = (cc_int16*)Mem_TryAlloc(mapArea, 2);
+	if (!perlin3d_heightmap) { Mem_Free(perlin3d_noise); perlin3d_noise = NULL; return false; }
 
 	OctaveNoise3D_Init(&perlin3d_noise->noiseGen1, &rnd, 16);
 	OctaveNoise3D_Init(&perlin3d_noise->noiseGen2, &rnd, 16);
@@ -3543,31 +3550,73 @@ static void Perlin3DGen_Generate(void) {
 		}
 	}
 
-	/* Surface replacement pass: convert top stone to grass, sub-surface to dirt */
+	/* Surface replacement pass: convert top stone to grass/dirt,
+	   place sand beaches near water, gravel on underwater floors.
+	   Also builds the heightmap for tree planting. */
 	Gen_CurrentState = "Creating surface";
-	{ int x, z, y, depth;
-	  for (x = 0; x < World.Width; x++) {
-		Gen_CurrentProgress = (float)x / World.Width;
-		for (z = 0; z < World.Length; z++) {
+	{ int x, z, y, depth, hIndex;
+	  struct OctaveNoise sandNoise, gravelNoise;
+	  float sandVal, gravelVal;
+	  BlockRaw above;
+
+	  OctaveNoise_Init(&sandNoise,   &rnd, 8);
+	  OctaveNoise_Init(&gravelNoise, &rnd, 8);
+
+	  hIndex = 0;
+	  for (z = 0; z < World.Length; z++) {
+		Gen_CurrentProgress = (float)z / World.Length;
+		for (x = 0; x < World.Width; x++) {
+			sandVal   = OctaveNoise_Calc(&sandNoise,   (float)x, (float)z);
+			gravelVal = OctaveNoise_Calc(&gravelNoise, (float)x, (float)z);
+
 			depth = -1;
+			perlin3d_heightmap[hIndex] = -1;
 			for (y = World.MaxY; y >= 0; y--) {
 				index = World_Pack(x, y, z);
 				if (Gen_Blocks[index] == BLOCK_AIR || Gen_Blocks[index] == BLOCK_STILL_WATER) {
 					depth = -1;
 				} else if (Gen_Blocks[index] == BLOCK_STONE) {
 					if (depth == -1) {
+						/* Record first solid Y for this column (for trees) */
+						if (perlin3d_heightmap[hIndex] == -1)
+							perlin3d_heightmap[hIndex] = (cc_int16)y;
+
 						depth = 3;
-						if (y >= waterLevel - 1) {
-							Gen_Blocks[index] = BLOCK_GRASS;
+						above = (y < World.MaxY) ? Gen_Blocks[index + World.OneY] : BLOCK_AIR;
+
+						if (above == BLOCK_STILL_WATER) {
+							/* Underwater floor: gravel patches */
+							if (gravelVal > 12) {
+								Gen_Blocks[index] = BLOCK_GRAVEL;
+							} else {
+								Gen_Blocks[index] = BLOCK_DIRT;
+							}
+						} else if (above == BLOCK_AIR) {
+							/* Exposed surface: sand near water, grass elsewhere */
+							if (y <= waterLevel && sandVal > 8) {
+								Gen_Blocks[index] = BLOCK_SAND;
+							} else {
+								Gen_Blocks[index] = BLOCK_GRASS;
+							}
 						} else {
 							Gen_Blocks[index] = BLOCK_DIRT;
 						}
 					} else if (depth > 0) {
 						depth--;
-						Gen_Blocks[index] = BLOCK_DIRT;
+						/* Sand below sand surface */
+						if (y <= waterLevel && sandVal > 8) {
+							above = (y < World.MaxY) ? Gen_Blocks[index + World.OneY] : BLOCK_AIR;
+							if (above == BLOCK_SAND)
+								Gen_Blocks[index] = BLOCK_SAND;
+							else
+								Gen_Blocks[index] = BLOCK_DIRT;
+						} else {
+							Gen_Blocks[index] = BLOCK_DIRT;
+						}
 					}
 				}
 			}
+			hIndex++;
 		}
 	}}
 
@@ -3575,8 +3624,53 @@ static void Perlin3DGen_Generate(void) {
 	NotchyGen_CarveCaves();
 	NotchyGen_CarveAllOres();
 
-	Mem_Free(perlin3d_noise);
-	perlin3d_noise = NULL;
+	/* Plant trees using patch-based placement (same as NotchyGen) */
+	Gen_CurrentState = "Planting trees";
+	{ int numPatches, patchX, patchZ;
+	  int treeX, treeY, treeZ, treeHeight;
+	  int count, i, j, k, m;
+	  BlockRaw under;
+	  IVec3 coords[TREE_MAX_COUNT];
+	  BlockRaw blocks[TREE_MAX_COUNT];
+
+	  Tree_Blocks = Gen_Blocks;
+	  Tree_Rnd    = &rnd;
+
+	  numPatches = World.Width * World.Length / 4000;
+
+	  for (i = 0; i < numPatches; i++) {
+		Gen_CurrentProgress = (float)i / numPatches;
+		patchX = Random_Next(&rnd, World.Width);
+		patchZ = Random_Next(&rnd, World.Length);
+
+		for (j = 0; j < 20; j++) {
+			treeX = patchX; treeZ = patchZ;
+			for (k = 0; k < 20; k++) {
+				treeX += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+				treeZ += Random_Next(&rnd, 6) - Random_Next(&rnd, 6);
+
+				if (!World_ContainsXZ(treeX, treeZ) || Random_Float(&rnd) >= 0.25f) continue;
+				treeY = perlin3d_heightmap[treeZ * World.Width + treeX] + 1;
+				if (treeY <= 0 || treeY >= World.Height) continue;
+
+				index = World_Pack(treeX, treeY, treeZ);
+				under = Gen_Blocks[index - World.OneY];
+				if (under != BLOCK_GRASS) continue;
+
+				treeHeight = 5 + Random_Next(&rnd, 3);
+				if (TreeGen_CanGrow(treeX, treeY, treeZ, treeHeight)) {
+					count = TreeGen_Grow(treeX, treeY, treeZ, treeHeight, coords, blocks);
+					for (m = 0; m < count; m++) {
+						index = World_Pack(coords[m].x, coords[m].y, coords[m].z);
+						Gen_Blocks[index] = blocks[m];
+					}
+				}
+			}
+		}
+	}}
+
+	Mem_Free(perlin3d_noise);     perlin3d_noise     = NULL;
+	Mem_Free(perlin3d_heightmap); perlin3d_heightmap = NULL;
 	gen_done = true;
 }
 
