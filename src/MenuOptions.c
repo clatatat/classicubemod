@@ -1242,10 +1242,10 @@ void GraphicsOptionsScreen_Show(void) {
 /*########################################################################################################################*
 *-----------------------------------------------GraphicsOptionsScreen2----------------------------------------------------*
 *#########################################################################################################################*/
-static const char* const GrO2_DepthNames[] = { "32-bit", "16-bit", "256 color" };
-#define GRO2_DEPTH_COUNT 3
+static const char* const GrO2_DepthNames[] = { "32-bit", "16-bit" };
+#define GRO2_DEPTH_COUNT 2
 
-static int  GrO2_GetDepth(void) { return Options_GetInt(OPT_COLOR_DEPTH, 0, 2, 0); }
+static int  GrO2_GetDepth(void) { return Options_GetInt(OPT_COLOR_DEPTH, 0, 1, 0); }
 static void GrO2_SetDepth(int v) { Options_SetInt(OPT_COLOR_DEPTH, v); }
 
 static int  GrO2_GetSpriteCull(void) { return Options_GetInt(OPT_SPRITE_CULL_DIST, 0, 128, 0); }
@@ -1270,7 +1270,6 @@ static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eColor depth for rendering.\n" \
 			"&e32-bit: &fFull color (default).\n" \
 			"&e16-bit: &fReduced color, better perf.\n" \
-			"&e256 color: &f8-bit palette mode.\n" \
 			"&cRequires restart to take effect.");
 		MenuOptionsScreen_AddInt(s, "Detail cull (chunks)",
 			0, 128, 0,

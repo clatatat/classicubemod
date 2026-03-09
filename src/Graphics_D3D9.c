@@ -83,11 +83,11 @@ static void FindCompatibleViewFormat(void) {
 	int count, depthOpt, i;
 	cc_result res;
 
-	depthOpt = Options_GetInt(OPT_COLOR_DEPTH, 0, 2, 0);
+	depthOpt = Options_GetInt(OPT_COLOR_DEPTH, 0, 1, 0);
 	if (depthOpt == 1) { /* 16-bit */
 		formats = formats16;
 		count   = Array_Elems(formats16);
-	} else { /* 32-bit (default) or 256 color (uses 32-bit surface) */
+	} else { /* 32-bit (default) */
 		formats = formats32;
 		count   = Array_Elems(formats32);
 	}
