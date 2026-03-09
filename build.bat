@@ -1,4 +1,5 @@
 @echo off
+copy src\texpacks\logo.png dist\win2000\logo.png
 setlocal
 
 REM Build script for ClassiCube targeting Windows 2000

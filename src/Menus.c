@@ -67,12 +67,37 @@ void Menu_LayoutBack(struct ButtonWidget* btn) {
 }
 static void Menu_CloseKeyboard(void* s) { OnscreenKeyboard_Close(); }
 
+#define MENU_DIRT_TILE_SIZE 64
+static void Menu_RenderDirtBackground(void) {
+	struct Texture tex;
+	TextureLoc loc;
+	int atlasIndex, rows, i;
+	PackedCol col = PackedCol_Make(64, 64, 64, 255);
+
+	loc  = Block_Tex(BLOCK_DIRT, FACE_YMAX);
+	rows = Math_CeilDiv(Window_UI.Height, MENU_DIRT_TILE_SIZE);
+
+	Tex_SetRect(tex, 0, 0, Window_UI.Width, MENU_DIRT_TILE_SIZE);
+	tex.uv   = Atlas1D_TexRec(loc, 1, &atlasIndex);
+	tex.uv.u2 = (float)Window_UI.Width / MENU_DIRT_TILE_SIZE;
+
+	Atlas1D_Bind(Atlas1D_Index(loc));
+	for (i = 0; i < rows; i++) {
+		tex.y = i * MENU_DIRT_TILE_SIZE;
+		Gfx_Draw2DTexture(&tex, col);
+	}
+}
+
 static void Menu_RenderBounds(void) {
 	/* These were sourced by taking a screenshot of vanilla
 	Then using paint to extract the color components
 	Then using wolfram alpha to solve the glblendfunc equation */
 	PackedCol topCol    = PackedCol_Make(24, 24, 24, 105);
 	PackedCol bottomCol = PackedCol_Make(51, 51, 98, 162);
+
+	if (MainMenu_Active) {
+		Menu_RenderDirtBackground();
+	}
 
 	/* Simple flat red tint when player is dead */
 	if (Player_Health <= 0 && Game_SurvivalMode) {
@@ -247,6 +272,7 @@ static void Menu_SwitchLoadLevel(void* a, void* b)       { LoadLevelScreen_Show(
 static void Menu_SwitchSaveLevel(void* a, void* b)       { SaveLevelScreen_Show(); }
 static void Menu_SwitchTexPacks(void* a, void* b)        { TexturePackScreen_Show(); }
 static void Menu_SwitchHotkeys(void* a, void* b)         { HotkeyListScreen_Show(); }
+static void Menu_SwitchMainMenu(void* a, void* b)        { MainMenuScreen_Show(); }
 
 
 /*########################################################################################################################*
@@ -489,6 +515,200 @@ void MenuScreen_Render2(void* screen, float delta) {
 
 
 /*########################################################################################################################*
+*------------------------------------------------------MainMenuScreen-----------------------------------------------------*
+*#########################################################################################################################*/
+cc_bool MainMenu_Active;
+static GfxResourceID MainMenu_LogoTex;
+
+static void MainMenuScreen_LoadLogo(void) {
+	cc_string path = String_FromConst("logo.png");
+	cc_filepath raw;
+	struct Stream stream;
+	cc_result res;
+
+	Platform_EncodePath(&raw, &path);
+	res = Stream_OpenPath(&stream, &raw);
+	if (res) return;
+
+	Game_UpdateTexture(&MainMenu_LogoTex, &stream, &path, NULL, NULL);
+	stream.Close(&stream);
+}
+
+static struct MainMenuScreen {
+	Screen_Body
+	int rows; /* number of dirt tile rows */
+	struct ButtonWidget generate, load, options, quit;
+	struct Widget* __widgets[4];
+} MainMenuScreen;
+
+static void MainMenuScreen_Generate(void* a, void* b) {
+	GameplayOptionsScreen_Show();
+}
+
+static void MainMenuScreen_Load(void* a, void* b) {
+	LoadLevelScreen_Show();
+}
+
+static void MainMenuScreen_Options(void* a, void* b) {
+	OptionsGroupScreen_Show();
+}
+
+static void MainMenuScreen_Quit(void* a, void* b) {
+	Window_RequestClose();
+}
+
+static void MainMenuScreen_ContextLost(void* screen) {
+	Screen_ContextLost(screen);
+}
+
+static void MainMenuScreen_ContextRecreated(void* screen) {
+	struct MainMenuScreen* s = (struct MainMenuScreen*)screen;
+	struct FontDesc titleFont;
+	Gui_MakeTitleFont(&titleFont);
+	Screen_UpdateVb(screen);
+
+	ButtonWidget_SetConst(&s->generate, "Generate new level...", &titleFont);
+	ButtonWidget_SetConst(&s->load,     "Load level...",         &titleFont);
+	ButtonWidget_SetConst(&s->options,  "Options...",            &titleFont);
+	ButtonWidget_SetConst(&s->quit,     "Quit game",             &titleFont);
+	Font_Free(&titleFont);
+}
+
+static void MainMenuScreen_Layout(void* screen) {
+	struct MainMenuScreen* s = (struct MainMenuScreen*)screen;
+	int oldRows = s->rows;
+
+	/* Logo centered, 30px below top quarter */
+	/* Buttons below logo */
+	Widget_SetLocation(&s->generate, ANCHOR_CENTRE, ANCHOR_CENTRE, 0,  10);
+	Widget_SetLocation(&s->load,     ANCHOR_CENTRE, ANCHOR_CENTRE, 0,  60);
+	Widget_SetLocation(&s->options,  ANCHOR_CENTRE, ANCHOR_CENTRE, 0, 110);
+	Widget_SetLocation(&s->quit,     ANCHOR_MAX,    ANCHOR_MAX,    5,   5);
+
+	s->rows = Math_CeilDiv(Window_UI.Height, MENU_DIRT_TILE_SIZE);
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s) + s->rows * 4;
+	if (oldRows != s->rows) Screen_UpdateVb(s);
+}
+
+static void MainMenuScreen_BuildMesh(void* screen) {
+	struct MainMenuScreen* s = (struct MainMenuScreen*)screen;
+	struct VertexTextured* data;
+	struct VertexTextured** ptr;
+	struct Texture tex;
+	TextureLoc loc;
+	int atlasIndex, i;
+
+	data = Screen_LockVb(s);
+	ptr  = &data;
+
+	/* Build dirt background tiles */
+	loc       = Block_Tex(BLOCK_DIRT, FACE_YMAX);
+	Tex_SetRect(tex, 0, 0, Window_UI.Width, MENU_DIRT_TILE_SIZE);
+	tex.uv    = Atlas1D_TexRec(loc, 1, &atlasIndex);
+	tex.uv.u2 = (float)Window_UI.Width / MENU_DIRT_TILE_SIZE;
+
+	for (i = 0; i < s->rows; i++) {
+		tex.y = i * MENU_DIRT_TILE_SIZE;
+		Gfx_Make2DQuad(&tex, PackedCol_Make(64, 64, 64, 255), ptr);
+	}
+
+	/* Build widget meshes */
+	Widget_BuildMesh(&s->generate, ptr);
+	Widget_BuildMesh(&s->load,     ptr);
+	Widget_BuildMesh(&s->options,  ptr);
+	Widget_BuildMesh(&s->quit,     ptr);
+	Gfx_UnlockDynamicVb(s->vb);
+}
+
+static void MainMenuScreen_Render(void* screen, float delta) {
+	struct MainMenuScreen* s = (struct MainMenuScreen*)screen;
+	int offset = 0;
+	TextureLoc loc;
+
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
+	Gfx_BindDynamicVb(s->vb);
+
+	/* Draw dirt background */
+	if (s->rows) {
+		loc = Block_Tex(BLOCK_DIRT, FACE_YMAX);
+		Atlas1D_Bind(Atlas1D_Index(loc));
+		Gfx_DrawVb_IndexedTris_Range(s->rows * 4, 0, DRAW_HINT_SPRITE);
+		offset = s->rows * 4;
+	}
+
+	/* Draw logo centered near top */
+	if (MainMenu_LogoTex) {
+		struct Texture logoTex;
+		int logoW = 400, logoH = 400;
+		/* Scale logo for very small screens */
+		if (Window_UI.Width < 500) { logoW = 200; logoH = 200; }
+
+		logoTex.ID     = MainMenu_LogoTex;
+		logoTex.x      = (Window_UI.Width - logoW) / 2;
+		logoTex.y      = Window_UI.Height / 8 - logoH / 2;
+		if (logoTex.y < 5) logoTex.y = 5;
+		logoTex.width  = logoW;
+		logoTex.height = logoH;
+		logoTex.uv.u1  = 0; logoTex.uv.v1 = 0;
+		logoTex.uv.u2  = 1; logoTex.uv.v2 = 1;
+		Texture_Render(&logoTex);
+	}
+
+	/* Re-bind screen VB for widget rendering */
+	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
+	Gfx_BindDynamicVb(s->vb);
+
+	/* Draw button widgets */
+	offset = Widget_Render2(&s->generate, offset);
+	offset = Widget_Render2(&s->load,     offset);
+	offset = Widget_Render2(&s->options,  offset);
+	offset = Widget_Render2(&s->quit,     offset);
+}
+
+static void MainMenuScreen_Init(void* screen) {
+	struct MainMenuScreen* s = (struct MainMenuScreen*)screen;
+	s->widgets    = s->__widgets;
+	s->numWidgets = 0;
+	s->maxWidgets = Array_Elems(s->__widgets);
+
+	ButtonWidget_Add(s, &s->generate, 300, MainMenuScreen_Generate);
+	ButtonWidget_Add(s, &s->load,     300, MainMenuScreen_Load);
+	ButtonWidget_Add(s, &s->options,  300, MainMenuScreen_Options);
+	ButtonWidget_Add(s, &s->quit,     120, MainMenuScreen_Quit);
+
+	s->rows = Math_CeilDiv(Window_UI.Height, MENU_DIRT_TILE_SIZE);
+	s->maxVertices = Screen_CalcDefaultMaxVertices(s) + s->rows * 4;
+
+	if (!MainMenu_LogoTex) {
+		MainMenuScreen_LoadLogo();
+	}
+}
+
+static void MainMenuScreen_Free(void* screen) {
+	/* MainMenu_Active stays true until game world is actually entered */
+}
+
+static const struct ScreenVTABLE MainMenuScreen_VTABLE = {
+	MainMenuScreen_Init,    Screen_NullUpdate,  MainMenuScreen_Free,
+	MainMenuScreen_Render,  MainMenuScreen_BuildMesh,
+	Menu_InputDown,         Screen_InputUp,     Screen_TKeyPress, Screen_TText,
+	Menu_PointerDown,       Screen_PointerUp,   Menu_PointerMove, Screen_TMouseScroll,
+	MainMenuScreen_Layout,  MainMenuScreen_ContextLost, MainMenuScreen_ContextRecreated,
+	Menu_PadAxis
+};
+
+void MainMenuScreen_Show(void) {
+	struct MainMenuScreen* s = &MainMenuScreen;
+	MainMenu_Active    = true;
+	s->grabsInput  = true;
+	s->closable    = false; /* Can't close main menu by pressing Escape */
+	s->blocksWorld = true;
+	s->VTABLE      = &MainMenuScreen_VTABLE;
+	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
+}
+
+
+/*########################################################################################################################*
 *-----------------------------------------------------PauseScreenBase-----------------------------------------------------*
 *#########################################################################################################################*/
 #define PAUSE_MAX_BTNS 6
@@ -501,7 +721,9 @@ static struct PauseScreen {
 } PauseScreen;
 
 static void PauseScreenBase_Quit(void* a, void* b) { 
-	Window_RequestClose(); 
+	Gui_Remove((struct Screen*)&PauseScreen);
+	Game_Reset();
+	MainMenuScreen_Show();
 }
 
 static void PauseScreenBase_Game(void* a, void* b) { 
@@ -542,7 +764,7 @@ static void PauseScreen_ContextRecreated(void* screen) {
 	struct FontDesc titleFont;
 	PauseScreenBase_ContextRecreated(s, &titleFont);
 
-	ButtonWidget_SetConst(&s->quit, "Quit game", &titleFont);
+	ButtonWidget_SetConst(&s->quit, "Main menu", &titleFont);
 	PauseScreen_CheckHacksAllowed(s);
 	Font_Free(&titleFont);
 }
@@ -703,6 +925,7 @@ static void OptionsGroupScreen_CheckHacksAllowed(void* screen) {
 	struct OptionsGroupScreen* s = (struct OptionsGroupScreen*)screen;
 	Widget_SetDisabled(&s->btns[6],
 			!Entities.CurPlayer->Hacks.CanAnyHacks); /* env settings */
+	Widget_SetDisabled(&s->btns[7], MainMenu_Active); /* gameplay options - only in-game */
 	s->dirty = true;
 }
 
@@ -751,7 +974,7 @@ static void OptionsGroupScreen_Init(void* screen) {
 
 	Menu_AddButtons(s,  s->btns, 300, optsGroup_btns, 8);
 	TextWidget_Add(s,   &s->desc);
-	AddPrimaryButton(s, &s->done, Menu_SwitchPause);
+	AddPrimaryButton(s, &s->done, MainMenu_Active ? Menu_SwitchMainMenu : Menu_SwitchPause);
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
 }
@@ -1363,9 +1586,9 @@ static void GenLevelScreen_Init(void* screen) {
 	s->maxWidgets = Array_Elems(s->__widgets);
 	s->selectedI  = -1;
 
-	GenLevelScreen_Make(s, 0, World.Width);
-	GenLevelScreen_Make(s, 1, World.Height);
-	GenLevelScreen_Make(s, 2, World.Length);
+	GenLevelScreen_Make(s, 0, World.Width  ? World.Width  : 256);
+	GenLevelScreen_Make(s, 1, World.Height ? World.Height : 64);
+	GenLevelScreen_Make(s, 2, World.Length ? World.Length : 256);
 	GenLevelScreen_Make(s, 3, 0);
 
 	TextWidget_Add(s,   &s->title);
@@ -1375,7 +1598,7 @@ static void GenLevelScreen_Init(void* screen) {
 	ButtonWidget_Add(s, &s->themeBtn,  200, GenLevelScreen_ClickTheme);
 	ButtonWidget_Add(s, &s->customizeBtn, 200, GenLevelScreen_ClickCustomize);
 	ButtonWidget_Add(s, &s->generate,  200, GenLevelScreen_Generate);
-	AddPrimaryButton(s, &s->cancel,         Menu_SwitchPause);
+	AddPrimaryButton(s, &s->cancel,    MainMenu_Active ? Menu_SwitchMainMenu : Menu_SwitchPause);
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(s);
 	CustomTheme_Load();
@@ -2211,7 +2434,7 @@ void LoadLevelScreen_Show(void) {
 	s->ActionClick = LoadLevelScreen_ActionFunc;
 	s->LoadEntries = LoadLevelScreen_LoadEntries;
 	s->EntryClick  = LoadLevelScreen_EntryClick;
-	s->DoneClick   = Menu_SwitchPause;
+	s->DoneClick   = MainMenu_Active ? Menu_SwitchMainMenu : Menu_SwitchPause;
 	s->UpdateEntry = ListScreen_UpdateEntry;
 
 	s->grabsInput = true;

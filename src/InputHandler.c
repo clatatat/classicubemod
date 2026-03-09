@@ -2862,7 +2862,7 @@ static cc_bool BindTriggered_HideFPS(int key, struct InputDevice* device) {
 }
 
 static cc_bool BindTriggered_Fullscreen(int key, struct InputDevice* device) {
-	if (Gui.InputGrab) return false;
+	if (Gui.InputGrab && !MainMenu_Active) return false;
 	
 	Game_ToggleFullscreen();
 	return true;

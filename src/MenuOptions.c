@@ -1841,7 +1841,13 @@ static void GP_SetMobDamageMultiplier(int v) {
 }
 
 static void GameplayScreen_SwitchBack(void* a, void* b) {
-	if (Gui.ClassicMenu) { Menu_SwitchPause(a, b); } else { Menu_SwitchOptions(a, b); }
+	if (MainMenu_Active) {
+		GenLevelScreen_Show();
+	} else if (Gui.ClassicMenu) {
+		Menu_SwitchPause(a, b);
+	} else {
+		Menu_SwitchOptions(a, b);
+	}
 }
 
 static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {

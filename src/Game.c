@@ -346,6 +346,7 @@ static void HandleOnNewMapLoaded(void* obj) {
 	for (comp = comps_head; comp; comp = comp->next) {
 		if (comp->OnNewMapLoaded) comp->OnNewMapLoaded();
 	}
+	MainMenu_Active = false;
 	/* Reset player health and air when a new map is loaded */
 	Player_Health = PLAYER_MAX_HEALTH;
 	Player_Air    = PLAYER_MAX_AIR;

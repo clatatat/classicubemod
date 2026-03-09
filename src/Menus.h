@@ -29,6 +29,8 @@ void Menu_SetButtons(struct ButtonWidget* btns, struct FontDesc* font,
 					const struct SimpleButtonDesc* descs, int count);
 void Menu_LayoutBack(struct ButtonWidget* btn);
 
+extern cc_bool MainMenu_Active;
+void MainMenuScreen_Show(void);
 void PauseScreen_Show(void);
 void OptionsGroupScreen_Show(void);
 void ClassicOptionsScreen_Show(void);
