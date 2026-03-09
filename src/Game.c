@@ -237,6 +237,9 @@ void Game_UpdateBlock(int x, int y, int z, BlockID block) {
 	BlockID old = World_GetBlock(x, y, z);
 	World_SetBlock(x, y, z, block);
 
+	if ((old == BLOCK_SIGN_WALL || old == BLOCK_SIGN_FLOOR) && block != old)
+		Sign_RemoveAt(x, y, z);
+
 	if (Weather_Heightmap) {
 		EnvRenderer_OnBlockChanged(x, y, z, old, block);
 	}
@@ -382,6 +385,25 @@ static void Game_WarnFunc(const cc_string* msg) {
 	}
 }
 
+void Game_LoadGPOptions(void) {
+	Game_EnemySpawning       = GPOptions_GetBool(OPT_ENEMY_SPAWNING,    true);
+	Game_PassiveSpawning     = GPOptions_GetBool(OPT_PASSIVE_SPAWNING,  true);
+	Game_SurvivalMode        = GPOptions_GetBool(OPT_SURVIVAL_MODE,     false);
+	Game_CreeperBehavior     = GPOptions_GetInt(OPT_CREEPER_BEHAVIOR,   0, 2, CREEPER_EXPLOSION_ATK);
+	Game_SpiderWallclimb     = GPOptions_GetBool(OPT_SPIDER_WALLCLIMB,  true);
+	Game_SkeletonShoot       = GPOptions_GetBool(OPT_SKELETON_SHOOT,    true);
+	Game_SpiderLeapDist      = GPOptions_GetInt(OPT_SPIDER_LEAP_DIST,   0, 6, 5);
+	Game_SpiderVariants      = GPOptions_GetBool(OPT_SPIDER_VARIANTS,   true);
+	Game_CreeperVariants     = GPOptions_GetBool(OPT_CREEPER_VARIANTS,  false);
+	Game_ZombieSpeed         = GPOptions_GetInt(OPT_ZOMBIE_SPEED,       0, 3, 2);
+	Game_MobSpawnRate        = GPOptions_GetInt(OPT_MOB_SPAWN_RATE,     0, 4, 0);
+	Game_LightRestrictSpawning = GPOptions_GetBool(OPT_LIGHT_RESTRICT_SPAWN, true);
+	Game_DaylightCycle         = GPOptions_GetBool(OPT_DAYLIGHT_CYCLE, false);
+	Game_MobLightSensitivity   = GPOptions_GetInt(OPT_MOB_LIGHT_SENSITIVITY, 0, 2, 1);
+	Game_MobHealthMultiplier   = GPOptions_GetInt(OPT_MOB_HEALTH_MULTIPLIER, 0, 3, 1);
+	Game_MobDamageMultiplier   = GPOptions_GetInt(OPT_MOB_DAMAGE_MULTIPLIER, 0, 3, 1);
+}
+
 static void LoadOptions(void) {
 	/* Force Classic Enhanced mode */
 	Game_ClassicMode  = false;
@@ -398,22 +420,7 @@ static void LoadOptions(void) {
 	Game_SimpleArmsAnim      = Options_GetBool(OPT_SIMPLE_ARMS_ANIM,   false);
 	Game_BreakableLiquids    = Options_GetBool(OPT_MODIFIABLE_LIQUIDS, false);
 	Game_AllowServerTextures = Options_GetBool(OPT_SERVER_TEXTURES,    true);
-	Game_EnemySpawning       = Options_GetBool(OPT_ENEMY_SPAWNING,    true);
-	Game_PassiveSpawning     = Options_GetBool(OPT_PASSIVE_SPAWNING,  true);
-	Game_SurvivalMode        = Options_GetBool(OPT_SURVIVAL_MODE,     false);
-	Game_CreeperBehavior     = Options_GetInt(OPT_CREEPER_BEHAVIOR,   0, 2, CREEPER_EXPLODE_DEATH);
-	Game_SpiderWallclimb     = Options_GetBool(OPT_SPIDER_WALLCLIMB,  false);
-	Game_SkeletonShoot       = Options_GetBool(OPT_SKELETON_SHOOT,    false);
-	Game_SpiderLeapDist      = Options_GetInt(OPT_SPIDER_LEAP_DIST,   0, 6, 2);
-	Game_SpiderVariants      = Options_GetBool(OPT_SPIDER_VARIANTS,   true);
-	Game_CreeperVariants     = Options_GetBool(OPT_CREEPER_VARIANTS,  true);
-	Game_ZombieSpeed         = Options_GetInt(OPT_ZOMBIE_SPEED,       0, 3, 2);
-	Game_MobSpawnRate        = Options_GetInt(OPT_MOB_SPAWN_RATE,     0, 4, 2);
-	Game_LightRestrictSpawning = Options_GetBool(OPT_LIGHT_RESTRICT_SPAWN, false);
-	Game_DaylightCycle         = Options_GetBool(OPT_DAYLIGHT_CYCLE, false);
-	Game_MobLightSensitivity   = Options_GetInt(OPT_MOB_LIGHT_SENSITIVITY, 0, 2, 0);
-	Game_MobHealthMultiplier   = Options_GetInt(OPT_MOB_HEALTH_MULTIPLIER, 0, 3, 1);
-	Game_MobDamageMultiplier   = Options_GetInt(OPT_MOB_DAMAGE_MULTIPLIER, 0, 3, 1);
+	Game_LoadGPOptions();
 
 	Game_ViewDistance     = Options_GetInt(OPT_VIEW_DISTANCE, 8, 4096, DEFAULT_VIEWDIST);
 	Game_UserViewDistance = Game_ViewDistance;

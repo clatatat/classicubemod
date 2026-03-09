@@ -974,8 +974,27 @@ static void TableWidget_Reposition(void* widget) {
 	w->cellSizeX = Display_ScaleX(cellSize * scale);
 	w->cellSizeY = Display_ScaleY(cellSize * scale);
 
+	/* Shrink cells if table would be wider than screen */
+	{
+		int maxW = Window_Main.Width - w->scroll.width - 4;
+		if (w->cellSizeX * w->blocksPerRow > maxW && w->blocksPerRow > 0) {
+			int cappedX = maxW / w->blocksPerRow;
+			if (cappedX < w->cellSizeX) {
+				w->cellSizeY = w->cellSizeY * cappedX / w->cellSizeX;
+				w->cellSizeX = cappedX;
+			}
+		}
+	}
+
 	blockSize    = classic ? 40 : 50;
 	blockSize    = Display_ScaleX(blockSize * scale);
+	/* Scale block sizes proportionally if cells were shrunk */
+	{
+		int origCellX = Display_ScaleX(cellSize * scale);
+		if (w->cellSizeX < origCellX && origCellX > 0) {
+			blockSize = blockSize * w->cellSizeX / origCellX;
+		}
+	}
 	w->normBlockSize = (blockSize             ) * 0.7f / 2.0f;
 	w->selBlockSize  = (blockSize + 25 * scale) * 0.7f / 2.0f;
 	w->rowsVisible   = min(8, w->rowsTotal); /* 8 rows max */
@@ -1309,7 +1328,26 @@ static void ItemTableWidget_Reposition(void* widget) {
 	w->cellSizeX = Display_ScaleX(cellSize * scale);
 	w->cellSizeY = Display_ScaleY(cellSize * scale);
 
+	/* Shrink cells if table would be wider than screen */
+	{
+		int maxW = Window_Main.Width - w->scroll.width - 4;
+		if (w->cellSizeX * w->itemsPerRow > maxW && w->itemsPerRow > 0) {
+			int cappedX = maxW / w->itemsPerRow;
+			if (cappedX < w->cellSizeX) {
+				w->cellSizeY = w->cellSizeY * cappedX / w->cellSizeX;
+				w->cellSizeX = cappedX;
+			}
+		}
+	}
+
 	blockSize    = Display_ScaleX(50 * scale);
+	/* Scale block sizes proportionally if cells were shrunk */
+	{
+		int origCellX = Display_ScaleX(cellSize * scale);
+		if (w->cellSizeX < origCellX && origCellX > 0) {
+			blockSize = blockSize * w->cellSizeX / origCellX;
+		}
+	}
 	w->normItemSize = (blockSize             ) * 0.7f / 2.0f;
 	w->selItemSize  = (blockSize + 25 * scale) * 0.7f / 2.0f;
 	w->rowsVisible  = min(8, w->rowsTotal);

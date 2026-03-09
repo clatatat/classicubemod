@@ -226,3 +226,104 @@ void Options_GetSecure(const char* opt, cc_string* dst) {
 	res = Platform_Decrypt(data, dataLen, dst);
 	if (res) Platform_Log2("Error %e decrypting option %c", &res, opt);
 }
+
+
+/*########################################################################################################################*
+*---------------------------------------------------Per-world GPOptions---------------------------------------------------*
+*#########################################################################################################################*/
+CC_BIG_VAR struct StringsBuffer GPOptions;
+
+void GPOptions_Clear(void) {
+	StringsBuffer_Clear(&GPOptions);
+}
+
+void GPOptions_Load(const cc_string* path) {
+	cc_string entry; char entryBuffer[1024];
+	cc_string key, value;
+	cc_uint8 buffer[2048];
+	struct Stream stream, buffered;
+	cc_filepath raw_path;
+	cc_result res;
+
+	GPOptions_Clear();
+	StringsBuffer_SetLengthBits(&GPOptions, 11);
+
+	Platform_EncodePath(&raw_path, path);
+	res = Stream_OpenPath(&stream, &raw_path);
+	if (res) return; /* File doesn't exist = new world, use defaults */
+
+	Stream_ReadonlyBuffered(&buffered, &stream, buffer, sizeof(buffer));
+	for (;;) {
+		String_InitArray(entry, entryBuffer);
+		res = Stream_ReadLine(&buffered, &entry);
+		if (res == ERR_END_OF_STREAM) break;
+		if (res) { Logger_IOWarn2(res, "reading from", &raw_path); break; }
+
+		String_UNSAFE_TrimStart(&entry);
+		String_UNSAFE_TrimEnd(&entry);
+		if (!entry.length) continue;
+
+		String_UNSAFE_Separate(&entry, '=', &key, &value);
+		EntryList_Set(&GPOptions, &key, &value, '=');
+	}
+	(void)stream.Close(&stream);
+}
+
+void GPOptions_Save(const cc_string* path) {
+	cc_string entry;
+	struct Stream stream;
+	cc_filepath raw_path;
+	cc_result res;
+	int i;
+
+	Platform_EncodePath(&raw_path, path);
+	res = Stream_CreatePath(&stream, &raw_path);
+	if (res) { Logger_IOWarn2(res, "saving gameplay options", &raw_path); return; }
+
+	for (i = 0; i < GPOptions.count; i++) {
+		StringsBuffer_UNSAFE_GetRaw(&GPOptions, i, &entry);
+		res = Stream_WriteLine(&stream, &entry);
+		if (res) { Logger_IOWarn2(res, "writing to", &raw_path); break; }
+	}
+
+	res = stream.Close(&stream);
+	if (res) { Logger_IOWarn2(res, "closing", &raw_path); }
+}
+
+static cc_bool GPOptions_UNSAFE_Get(const char* keyRaw, cc_string* value) {
+	cc_string key = String_FromReadonly(keyRaw);
+	*value = EntryList_UNSAFE_Get(&GPOptions, &key, '=');
+	return value->length > 0;
+}
+
+cc_bool GPOptions_GetBool(const char* key, cc_bool defValue) {
+	cc_string str;
+	cc_bool value;
+	if (!GPOptions_UNSAFE_Get(key, &str))   return defValue;
+	if (!Convert_ParseBool(&str, &value))   return defValue;
+	return value;
+}
+
+int GPOptions_GetInt(const char* key, int min, int max, int defValue) {
+	cc_string str;
+	int value;
+	if (!GPOptions_UNSAFE_Get(key, &str))  return defValue;
+	if (!Convert_ParseInt(&str, &value))   return defValue;
+	Math_Clamp(value, min, max);
+	return value;
+}
+
+void GPOptions_SetBool(const char* keyRaw, cc_bool value) {
+	static const cc_string str_true  = String_FromConst("True");
+	static const cc_string str_false = String_FromConst("False");
+	cc_string key = String_FromReadonly(keyRaw);
+	EntryList_Set(&GPOptions, &key, value ? &str_true : &str_false, '=');
+}
+
+void GPOptions_SetInt(const char* keyRaw, int value) {
+	cc_string str; char strBuffer[STRING_INT_CHARS];
+	cc_string key = String_FromReadonly(keyRaw);
+	String_InitArray(str, strBuffer);
+	String_AppendInt(&str, value);
+	EntryList_Set(&GPOptions, &key, &str, '=');
+}

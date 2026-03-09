@@ -12,18 +12,19 @@
 #include "TexturePack.h"
 #include "ExtMath.h"
 #include "World.h"
+#include "Window.h"
 #include "Lighting.h"
 
 /* Pixel dimensions for the pre-rasterized sign texture.
    128 wide x 48 tall = 4 lines of 12px each. */
-#define SIGN_TEX_W 100
+#define SIGN_TEX_W 128
 #define SIGN_TEX_H  48
 #define SIGN_LINE_H  12
 
 /* Board geometry offsets (in block-local coordinates, range 0..1) */
-#define SIGN_X_MIN (1.0f  / 16.0f)
+#define SIGN_X_MIN (1.0f / 16.0f)
 #define SIGN_X_MAX (15.0f / 16.0f)
-#define SIGN_Y_MIN (4.0f  / 16.0f)
+#define SIGN_Y_MIN (4.0f / 16.0f)
 #define SIGN_Y_MAX (12.0f / 16.0f)
 /* Front-face Z/X offset from the block's LOCAL origin (min corner of block).
    Facing 0 & 2: text face is the near side of the board — slightly inward from 14/16 to avoid Z-fighting.
@@ -135,31 +136,10 @@ void Signs_Init(void) {
 *-------------------------------------------------Sign texture rasterizer-------------------------------------------------*
 *#########################################################################################################################*/
 
-/* Scale the terrain atlas wood texture (tile 4) to fill the sign background */
+/* Clear sign texture to transparent — the wood background comes from
+   the Builder model (wall signs) or the board box (floor signs). */
 static void Sign_DrawWoodBackground(struct Context2D* ctx) {
-	struct Bitmap* dst = (struct Bitmap*)ctx;
-	struct Bitmap* atlas = &Atlas2D.Bmp;
-	int tileSize = Atlas2D.TileSize;
-	int srcX = Atlas2D_TileX(4) * tileSize;
-	int srcY = Atlas2D_TileY(4) * tileSize;
-	int dx, dy, sx, sy;
-
-	if (!atlas->scan0 || tileSize <= 0) {
-		Context2D_Clear(ctx, BitmapCol_Make(70, 43, 10, 255), 0, 0, SIGN_TEX_W, SIGN_TEX_H);
-		return;
-	}
-
-	/* Nearest-neighbour scale the single tile to fill the sign texture */
-	for (dy = 0; dy < SIGN_TEX_H; dy++) {
-		BitmapCol* dstRow = Bitmap_GetRow(dst, dy);
-		sy = srcY + (dy * tileSize / SIGN_TEX_H);
-		if (sy >= atlas->height) continue;
-		for (dx = 0; dx < SIGN_TEX_W; dx++) {
-			sx = srcX + (dx * tileSize / SIGN_TEX_W);
-			if (sx >= atlas->width) continue;
-			dstRow[dx] = Bitmap_GetRow(atlas, sy)[sx];
-		}
-	}
+	Context2D_Clear(ctx, BitmapCol_Make(0, 0, 0, 0), 0, 0, SIGN_TEX_W, SIGN_TEX_H);
 }
 
 static void Sign_RasterizeTexture(struct SignTexEntry* entry, struct SignData* sd) {
@@ -186,7 +166,7 @@ static void Sign_RasterizeTexture(struct SignTexEntry* entry, struct SignData* s
 		if (len > (int)sizeof(colorBuf) - 2) len = (int)sizeof(colorBuf) - 2;
 		Mem_Copy(colorBuf + 2, sd->lines[i], len);
 		colorStr = String_Init(colorBuf, len + 2, sizeof(colorBuf));
-		lineY   = i * SIGN_LINE_H + 1;
+		lineY   = i * SIGN_LINE_H;
 		DrawTextArgs_Make(&args, &colorStr, &sign_font, false);
 		textW   = Drawer2D_TextWidth(&args);
 		/* Centre text horizontally */
@@ -225,47 +205,58 @@ static void Sign_BuildQuad(struct VertexTextured* v,
 	   so the texture must be horizontally mirrored relative to naive mapping. */
 	float u1 = tex->uv.u2, u2 = tex->uv.u1;
 	float v1 = tex->uv.v1, v2 = tex->uv.v2;
-	float yMin = by + SIGN_Y_MIN;
-	float yMax = by + SIGN_Y_MAX;
+	float xScale, yScale, cx_off, cy_off, xLo, xHi, yMin, yMax;
+
+	if (Window_Main.Width < 640 || Window_Main.Height < 480) {
+		xScale = 1.125f; yScale = 0.9375f;
+	} else {
+		xScale = 1.25f; yScale = 1.0f;
+	}
+	cx_off = (SIGN_X_MIN + SIGN_X_MAX) * 0.5f;
+	cy_off = (SIGN_Y_MIN + SIGN_Y_MAX) * 0.5f;
+	xLo  = cx_off + (SIGN_X_MIN - cx_off) * xScale;
+	xHi  = cx_off + (SIGN_X_MAX - cx_off) * xScale;
+	yMin = by + cy_off + (SIGN_Y_MIN - cy_off) * yScale;
+	yMax = by + cy_off + (SIGN_Y_MAX - cy_off) * yScale;
 
 	switch (facing) {
 		default:
 		case 0: /* Text faces North (-Z): quad on near (-Z) face of board, which sits at +Z edge */
 		{
 			float z = bz + SIGN_NEAR_FACE;
-			v[0].x = bx + SIGN_X_MIN; v[0].y = yMin; v[0].z = z; v[0].Col = col; v[0].U = u1; v[0].V = v2;
-			v[1].x = bx + SIGN_X_MIN; v[1].y = yMax; v[1].z = z; v[1].Col = col; v[1].U = u1; v[1].V = v1;
-			v[2].x = bx + SIGN_X_MAX; v[2].y = yMax; v[2].z = z; v[2].Col = col; v[2].U = u2; v[2].V = v1;
-			v[3].x = bx + SIGN_X_MAX; v[3].y = yMin; v[3].z = z; v[3].Col = col; v[3].U = u2; v[3].V = v2;
+			v[0].x = bx + xLo; v[0].y = yMin; v[0].z = z; v[0].Col = col; v[0].U = u1; v[0].V = v2;
+			v[1].x = bx + xLo; v[1].y = yMax; v[1].z = z; v[1].Col = col; v[1].U = u1; v[1].V = v1;
+			v[2].x = bx + xHi; v[2].y = yMax; v[2].z = z; v[2].Col = col; v[2].U = u2; v[2].V = v1;
+			v[3].x = bx + xHi; v[3].y = yMin; v[3].z = z; v[3].Col = col; v[3].U = u2; v[3].V = v2;
 			break;
 		}
 		case 1: /* Text faces South (+Z): quad on far (+Z) face of board, which sits at -Z edge */
 		{
 			float z = bz + SIGN_FAR_FACE;
 			/* Mirrored on X so text reads correctly when viewed from +Z */
-			v[0].x = bx + SIGN_X_MAX; v[0].y = yMin; v[0].z = z; v[0].Col = col; v[0].U = u1; v[0].V = v2;
-			v[1].x = bx + SIGN_X_MAX; v[1].y = yMax; v[1].z = z; v[1].Col = col; v[1].U = u1; v[1].V = v1;
-			v[2].x = bx + SIGN_X_MIN; v[2].y = yMax; v[2].z = z; v[2].Col = col; v[2].U = u2; v[2].V = v1;
-			v[3].x = bx + SIGN_X_MIN; v[3].y = yMin; v[3].z = z; v[3].Col = col; v[3].U = u2; v[3].V = v2;
+			v[0].x = bx + xHi; v[0].y = yMin; v[0].z = z; v[0].Col = col; v[0].U = u1; v[0].V = v2;
+			v[1].x = bx + xHi; v[1].y = yMax; v[1].z = z; v[1].Col = col; v[1].U = u1; v[1].V = v1;
+			v[2].x = bx + xLo; v[2].y = yMax; v[2].z = z; v[2].Col = col; v[2].U = u2; v[2].V = v1;
+			v[3].x = bx + xLo; v[3].y = yMin; v[3].z = z; v[3].Col = col; v[3].U = u2; v[3].V = v2;
 			break;
 		}
 		case 2: /* Text faces West (-X): quad on near (-X) face of board, which sits at +X edge */
 		{
 			float x = bx + SIGN_NEAR_FACE;
-			v[0].x = x; v[0].y = yMin; v[0].z = bz + SIGN_X_MAX; v[0].Col = col; v[0].U = u1; v[0].V = v2;
-			v[1].x = x; v[1].y = yMax; v[1].z = bz + SIGN_X_MAX; v[1].Col = col; v[1].U = u1; v[1].V = v1;
-			v[2].x = x; v[2].y = yMax; v[2].z = bz + SIGN_X_MIN; v[2].Col = col; v[2].U = u2; v[2].V = v1;
-			v[3].x = x; v[3].y = yMin; v[3].z = bz + SIGN_X_MIN; v[3].Col = col; v[3].U = u2; v[3].V = v2;
+			v[0].x = x; v[0].y = yMin; v[0].z = bz + xHi; v[0].Col = col; v[0].U = u1; v[0].V = v2;
+			v[1].x = x; v[1].y = yMax; v[1].z = bz + xHi; v[1].Col = col; v[1].U = u1; v[1].V = v1;
+			v[2].x = x; v[2].y = yMax; v[2].z = bz + xLo; v[2].Col = col; v[2].U = u2; v[2].V = v1;
+			v[3].x = x; v[3].y = yMin; v[3].z = bz + xLo; v[3].Col = col; v[3].U = u2; v[3].V = v2;
 			break;
 		}
 		case 3: /* Text faces East (+X): quad on far (+X) face of board, which sits at -X edge */
 		{
 			float x = bx + SIGN_FAR_FACE;
 			/* Mirrored on Z so text reads correctly when viewed from +X */
-			v[0].x = x; v[0].y = yMin; v[0].z = bz + SIGN_X_MIN; v[0].Col = col; v[0].U = u1; v[0].V = v2;
-			v[1].x = x; v[1].y = yMax; v[1].z = bz + SIGN_X_MIN; v[1].Col = col; v[1].U = u1; v[1].V = v1;
-			v[2].x = x; v[2].y = yMax; v[2].z = bz + SIGN_X_MAX; v[2].Col = col; v[2].U = u2; v[2].V = v1;
-			v[3].x = x; v[3].y = yMin; v[3].z = bz + SIGN_X_MAX; v[3].Col = col; v[3].U = u2; v[3].V = v2;
+			v[0].x = x; v[0].y = yMin; v[0].z = bz + xLo; v[0].Col = col; v[0].U = u1; v[0].V = v2;
+			v[1].x = x; v[1].y = yMax; v[1].z = bz + xLo; v[1].Col = col; v[1].U = u1; v[1].V = v1;
+			v[2].x = x; v[2].y = yMax; v[2].z = bz + xHi; v[2].Col = col; v[2].U = u2; v[2].V = v1;
+			v[3].x = x; v[3].y = yMin; v[3].z = bz + xHi; v[3].Col = col; v[3].U = u2; v[3].V = v2;
 			break;
 		}
 	}
@@ -277,9 +268,9 @@ static void Sign_BuildQuad(struct VertexTextured* v,
 *#########################################################################################################################*/
 
 /* Floor sign dimensions (in block units 0..1) - matching Alpha proportions */
-#define FBOARD_HALF_W (7.0f / 16.0f)  /* Board is 14/16 wide, half = 7/16 */
-#define FBOARD_BOT   (9.0f / 16.0f)   /* Board bottom */
-#define FBOARD_TOP   (1.0f)           /* Board top */
+#define FBOARD_HALF_W (7.0f / 16.0f) /* Board is 14/16 wide, half = 7/16 */
+#define FBOARD_BOT   (9.0f / 16.0f)    /* Board bottom */
+#define FBOARD_TOP   (1.0f)             /* Board top */
 #define FBOARD_HALF_D (1.0f / 16.0f)  /* Board depth: 2/16, half = 1/16 */
 #define FBOARD_VERTS 24               /* 6 faces * 4 verts per face */
 
@@ -357,20 +348,31 @@ static void FloorSign_BuildTextQuad(struct VertexTextured* v,
                                      PackedCol col)
 {
 	float cx = bx + 0.5f, cz = bz + 0.5f;
-	float yBot = by + FBOARD_BOT, yTop = by + FBOARD_TOP;
 	float angle = (float)rotation * 22.5f * MATH_DEG2RAD;
 	float cos_a = Math_CosF(angle), sin_a = Math_SinF(angle);
 	float u1 = tex->uv.u1, u2 = tex->uv.u2;
 	float v1 = tex->uv.v1, v2 = tex->uv.v2;
+	float xScale, yScale, cyBoard, halfW, yBot, yTop;
+	float lx0, lx1, lz, rx0, rz0, rx1, rz1;
+
+	if (Window_Main.Width < 640 || Window_Main.Height < 480) {
+		xScale = 1.125f; yScale = 0.9375f;
+	} else {
+		xScale = 1.25f; yScale = 1.0f;
+	}
+	halfW   = FBOARD_HALF_W * xScale;
+	cyBoard = (FBOARD_BOT + FBOARD_TOP) * 0.5f;
+	yBot    = by + cyBoard + (FBOARD_BOT - cyBoard) * yScale;
+	yTop    = by + cyBoard + (FBOARD_TOP - cyBoard) * yScale;
 
 	/* Front face with z-fighting offset */
-	float lx0 = -FBOARD_HALF_W, lx1 = FBOARD_HALF_W;
-	float lz = FBOARD_HALF_D + 0.002f;
+	lx0 = -halfW; lx1 = halfW;
+	lz = FBOARD_HALF_D + 0.002f;
 
-	float rx0 = cx + lx0 * cos_a - lz * sin_a;
-	float rz0 = cz + lx0 * sin_a + lz * cos_a;
-	float rx1 = cx + lx1 * cos_a - lz * sin_a;
-	float rz1 = cz + lx1 * sin_a + lz * cos_a;
+	rx0 = cx + lx0 * cos_a - lz * sin_a;
+	rz0 = cz + lx0 * sin_a + lz * cos_a;
+	rx1 = cx + lx1 * cos_a - lz * sin_a;
+	rz1 = cz + lx1 * sin_a + lz * cos_a;
 
 	v[0].x = rx0; v[0].y = yBot; v[0].z = rz0; v[0].Col = col; v[0].U = u1; v[0].V = v2;
 	v[1].x = rx0; v[1].y = yTop; v[1].z = rz0; v[1].Col = col; v[1].U = u1; v[1].V = v1;

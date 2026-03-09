@@ -1231,7 +1231,7 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	GrO_InitialResIdx = GrO_GetRes();
 
 	ButtonWidget_Add(s, &s->buttons[s->numButtons], 400, GrO_SwitchPage2);
-	Widget_SetLocation(&s->buttons[s->numButtons], ANCHOR_CENTRE, ANCHOR_MAX, 0, 95);
+	Widget_SetLocation(&s->buttons[s->numButtons], ANCHOR_CENTRE, ANCHOR_MAX, 0, 70);
 }
 
 void GraphicsOptionsScreen_Show(void) {
@@ -1713,19 +1713,19 @@ void MiscOptionsScreen_Show(void) {
 static cc_bool GP_GetEnemySpawning(void) { return Game_EnemySpawning; }
 static void    GP_SetEnemySpawning(cc_bool v) {
 	Game_EnemySpawning = v;
-	Options_SetBool(OPT_ENEMY_SPAWNING, v);
+	GPOptions_SetBool(OPT_ENEMY_SPAWNING, v);
 }
 
 static cc_bool GP_GetPassiveSpawning(void) { return Game_PassiveSpawning; }
 static void    GP_SetPassiveSpawning(cc_bool v) {
 	Game_PassiveSpawning = v;
-	Options_SetBool(OPT_PASSIVE_SPAWNING, v);
+	GPOptions_SetBool(OPT_PASSIVE_SPAWNING, v);
 }
 
 static cc_bool GP_GetSurvivalMode(void) { return Game_SurvivalMode; }
 static void    GP_SetSurvivalMode(cc_bool v) {
 	Game_SurvivalMode = v;
-	Options_SetBool(OPT_SURVIVAL_MODE, v);
+	GPOptions_SetBool(OPT_SURVIVAL_MODE, v);
 }
 
 static const char* const CreeperBehavior_Names[CREEPER_BEHAVIOR_COUNT] = {
@@ -1734,19 +1734,19 @@ static const char* const CreeperBehavior_Names[CREEPER_BEHAVIOR_COUNT] = {
 static int  GP_GetCreeperBehavior(void) { return Game_CreeperBehavior; }
 static void GP_SetCreeperBehavior(int v) {
 	Game_CreeperBehavior = v;
-	Options_SetInt(OPT_CREEPER_BEHAVIOR, v);
+	GPOptions_SetInt(OPT_CREEPER_BEHAVIOR, v);
 }
 
 static cc_bool GP_GetSpiderWallclimb(void) { return Game_SpiderWallclimb; }
 static void    GP_SetSpiderWallclimb(cc_bool v) {
 	Game_SpiderWallclimb = v;
-	Options_SetBool(OPT_SPIDER_WALLCLIMB, v);
+	GPOptions_SetBool(OPT_SPIDER_WALLCLIMB, v);
 }
 
 static cc_bool GP_GetSkeletonShoot(void) { return Game_SkeletonShoot; }
 static void    GP_SetSkeletonShoot(cc_bool v) {
 	Game_SkeletonShoot = v;
-	Options_SetBool(OPT_SKELETON_SHOOT, v);
+	GPOptions_SetBool(OPT_SKELETON_SHOOT, v);
 }
 
 static const char* const SpiderLeapDist_Names[SPIDER_LEAP_DIST_COUNT] = {
@@ -1755,25 +1755,25 @@ static const char* const SpiderLeapDist_Names[SPIDER_LEAP_DIST_COUNT] = {
 static int  GP_GetSpiderLeapDist(void) { return Game_SpiderLeapDist; }
 static void GP_SetSpiderLeapDist(int v) {
 	Game_SpiderLeapDist = v;
-	Options_SetInt(OPT_SPIDER_LEAP_DIST, v);
+	GPOptions_SetInt(OPT_SPIDER_LEAP_DIST, v);
 }
 
 static cc_bool GP_GetSpiderVariants(void) { return Game_SpiderVariants; }
 static void    GP_SetSpiderVariants(cc_bool v) {
 	Game_SpiderVariants = v;
-	Options_SetBool(OPT_SPIDER_VARIANTS, v);
+	GPOptions_SetBool(OPT_SPIDER_VARIANTS, v);
 }
 
 static cc_bool GP_GetCreeperVariants(void) { return Game_CreeperVariants; }
 static void    GP_SetCreeperVariants(cc_bool v) {
 	struct MenuOptionsScreen* s = &MenuOptionsScreen_Instance;
 	Game_CreeperVariants = v;
-	Options_SetBool(OPT_CREEPER_VARIANTS, v);
+	GPOptions_SetBool(OPT_CREEPER_VARIANTS, v);
 
 	if (v) {
 		/* Force behavior to "Explosion attack" when variants are enabled */
 		Game_CreeperBehavior = CREEPER_EXPLOSION_ATK;
-		Options_SetInt(OPT_CREEPER_BEHAVIOR, CREEPER_EXPLOSION_ATK);
+		GPOptions_SetInt(OPT_CREEPER_BEHAVIOR, CREEPER_EXPLOSION_ATK);
 		MenuOptionsScreen_Update(s, &s->buttons[4]);
 	}
 	Widget_SetDisabled(&s->buttons[4], v);
@@ -1785,7 +1785,7 @@ static const char* const ZombieSpeed_Names[ZOMBIE_SPEED_COUNT] = {
 static int  GP_GetZombieSpeed(void) { return Game_ZombieSpeed; }
 static void GP_SetZombieSpeed(int v) {
 	Game_ZombieSpeed = v;
-	Options_SetInt(OPT_ZOMBIE_SPEED, v);
+	GPOptions_SetInt(OPT_ZOMBIE_SPEED, v);
 }
 
 static const char* const MobSpawnRate_Names[MOB_SPAWN_RATE_COUNT] = {
@@ -1794,19 +1794,19 @@ static const char* const MobSpawnRate_Names[MOB_SPAWN_RATE_COUNT] = {
 static int  GP_GetMobSpawnRate(void) { return Game_MobSpawnRate; }
 static void GP_SetMobSpawnRate(int v) {
 	Game_MobSpawnRate = v;
-	Options_SetInt(OPT_MOB_SPAWN_RATE, v);
+	GPOptions_SetInt(OPT_MOB_SPAWN_RATE, v);
 }
 
 static cc_bool GP_GetLightRestrictSpawning(void) { return Game_LightRestrictSpawning; }
 static void    GP_SetLightRestrictSpawning(cc_bool v) {
 	Game_LightRestrictSpawning = v;
-	Options_SetBool(OPT_LIGHT_RESTRICT_SPAWN, v);
+	GPOptions_SetBool(OPT_LIGHT_RESTRICT_SPAWN, v);
 }
 
 static cc_bool GP_GetDaylightCycle(void) { return Game_DaylightCycle; }
 static void    GP_SetDaylightCycle(cc_bool v) {
 	Game_DaylightCycle = v;
-	Options_SetBool(OPT_DAYLIGHT_CYCLE, v);
+	GPOptions_SetBool(OPT_DAYLIGHT_CYCLE, v);
 	if (v) {
 		DayNightCycle_Enable();
 	} else {
@@ -1822,7 +1822,7 @@ static const char* const MobLightSensitivity_Names[MOB_LIGHT_SENSITIVITY_COUNT] 
 static int  GP_GetMobLightSensitivity(void) { return Game_MobLightSensitivity; }
 static void GP_SetMobLightSensitivity(int v) {
 	Game_MobLightSensitivity = v;
-	Options_SetInt(OPT_MOB_LIGHT_SENSITIVITY, v);
+	GPOptions_SetInt(OPT_MOB_LIGHT_SENSITIVITY, v);
 }
 
 static const char* const MobMultiplier_Names[MOB_MULTIPLIER_COUNT] = {
@@ -1831,13 +1831,13 @@ static const char* const MobMultiplier_Names[MOB_MULTIPLIER_COUNT] = {
 static int  GP_GetMobHealthMultiplier(void) { return Game_MobHealthMultiplier; }
 static void GP_SetMobHealthMultiplier(int v) {
 	Game_MobHealthMultiplier = v;
-	Options_SetInt(OPT_MOB_HEALTH_MULTIPLIER, v);
+	GPOptions_SetInt(OPT_MOB_HEALTH_MULTIPLIER, v);
 }
 
 static int  GP_GetMobDamageMultiplier(void) { return Game_MobDamageMultiplier; }
 static void GP_SetMobDamageMultiplier(int v) {
 	Game_MobDamageMultiplier = v;
-	Options_SetInt(OPT_MOB_DAMAGE_MULTIPLIER, v);
+	GPOptions_SetInt(OPT_MOB_DAMAGE_MULTIPLIER, v);
 }
 
 static void GameplayScreen_SwitchBack(void* a, void* b) {

@@ -189,5 +189,22 @@ void Options_SetSecure(const char* opt, const cc_string* data);
 /* NOTE: Not all platforms support secure saving. */
 void Options_GetSecure(const char* opt, cc_string* data);
 
+/* Per-world gameplay options (stored in maps/<world>/gpoptions.txt) */
+extern struct StringsBuffer GPOptions;
+/* Loads gameplay options from the given file path. */
+void GPOptions_Load(const cc_string* path);
+/* Saves gameplay options to the given file path. */
+void GPOptions_Save(const cc_string* path);
+/* Clears gameplay options buffer and resets to defaults. */
+void GPOptions_Clear(void);
+/* Returns value of given gameplay option as a bool, or default value if not found. */
+cc_bool GPOptions_GetBool(const char* key, cc_bool defValue);
+/* Returns value of given gameplay option as an integer, or default value if could not be converted. */
+int GPOptions_GetInt(const char* key, int min, int max, int defValue);
+/* Sets value of given gameplay option to either "true" or "false". */
+void GPOptions_SetBool(const char* keyRaw, cc_bool value);
+/* Sets value of given gameplay option to given integer converted to a string. */
+void GPOptions_SetInt(const char* keyRaw, int value);
+
 CC_END_HEADER
 #endif

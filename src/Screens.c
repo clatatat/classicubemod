@@ -2855,10 +2855,21 @@ static void SurvInv_Layout(void* screen) {
 	scale = Gui_GetInventoryScale();
 	cs    = (int)(44.0f * Math_SqrtF(scale));
 	if (cs < 20) cs = 20;
-	s->cellSize = cs;
 	gap = cs / 3;
 
 	totalWidth  = cs * 9;
+	/* Use crafting table height (7 rows) for shrink test so all GUIs get same cell size */
+	totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	/* Shrink cells if inventory doesn't fit on screen */
+	while ((totalHeight + 20 > Window_UI.Height || totalWidth + 10 > Window_UI.Width) && cs > 8) {
+		cs--;
+		gap = cs / 3;
+		totalWidth  = cs * 9;
+		totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	}
+	s->cellSize = cs;
+
+	/* Actual layout uses 2 rows on top, not 3 */
 	totalHeight = cs * 2 + gap + cs * 3 + gap + cs;
 	baseX = (Window_UI.Width  - totalWidth)  / 2;
 	baseY = (Window_UI.Height - totalHeight) / 2;
@@ -2883,9 +2894,13 @@ static void SurvInv_Layout(void* screen) {
 	s->hotbarY = s->gridY + cs * 3 + gap;
 
 	/* Title above everything */
-	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 12;
-	Widget_Layout(&s->title);
+	{
+		int titleOff = baseY - s->title.height - 4;
+		if (titleOff < 0) titleOff = 0;
+		Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
+		s->title.yOffset = titleOff;
+		Widget_Layout(&s->title);
+	}
 }
 
 /* Stack count texture cache for survival inventory */
@@ -2935,7 +2950,7 @@ static void SurvInv_RenderCount(int count, int slotX, int slotY, int cellSize) {
 	tex = survInv_countTex[count];
 	/* Position at bottom-right of slot */
 	tex.x = slotX + cellSize - tex.width - 1;
-	tex.y = slotY + cellSize - tex.height + 8;
+	tex.y = slotY + cellSize - tex.height;
 	Texture_Render(&tex);
 }
 
@@ -3563,11 +3578,19 @@ static void CraftTable_Layout(void* screen) {
 	scale = Gui_GetInventoryScale();
 	cs    = (int)(44.0f * Math_SqrtF(scale));
 	if (cs < 20) cs = 20;
-	s->cellSize = cs;
 	gap = cs / 3;
 
 	totalWidth  = cs * 9;
 	totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	/* Shrink cells if inventory doesn't fit on screen */
+	while ((totalHeight + 20 > Window_UI.Height || totalWidth + 10 > Window_UI.Width) && cs > 8) {
+		cs--;
+		gap = cs / 3;
+		totalWidth  = cs * 9;
+		totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	}
+	s->cellSize = cs;
+
 	baseX = (Window_UI.Width  - totalWidth)  / 2;
 	baseY = (Window_UI.Height - totalHeight) / 2;
 
@@ -3591,9 +3614,13 @@ static void CraftTable_Layout(void* screen) {
 	s->hotbarY = s->gridY + cs * 3 + gap;
 
 	/* Title above everything */
-	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 12;
-	Widget_Layout(&s->title);
+	{
+		int titleOff = baseY - s->title.height - 4;
+		if (titleOff < 0) titleOff = 0;
+		Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
+		s->title.yOffset = titleOff;
+		Widget_Layout(&s->title);
+	}
 }
 
 static void CraftTable_ContextLost(void* screen) {
@@ -4105,11 +4132,19 @@ static void Furnace_Layout(void* screen) {
 	scale = Gui_GetInventoryScale();
 	cs    = (int)(44.0f * Math_SqrtF(scale));
 	if (cs < 20) cs = 20;
-	s->cellSize = cs;
 	gap = cs / 3;
 
 	totalWidth  = cs * 9;
 	totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	/* Shrink cells if inventory doesn't fit on screen */
+	while ((totalHeight + 20 > Window_UI.Height || totalWidth + 10 > Window_UI.Width) && cs > 8) {
+		cs--;
+		gap = cs / 3;
+		totalWidth  = cs * 9;
+		totalHeight = cs * 3 + gap + cs * 3 + gap + cs;
+	}
+	s->cellSize = cs;
+
 	baseX = (Window_UI.Width  - totalWidth)  / 2;
 	baseY = (Window_UI.Height - totalHeight) / 2;
 
@@ -4146,9 +4181,13 @@ static void Furnace_Layout(void* screen) {
 	s->hotbarY = s->gridY + cs * 3 + gap;
 
 	/* Title above everything */
-	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 12;
-	Widget_Layout(&s->title);
+	{
+		int titleOff = baseY - s->title.height - 4;
+		if (titleOff < 0) titleOff = 0;
+		Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
+		s->title.yOffset = titleOff;
+		Widget_Layout(&s->title);
+	}
 }
 
 static void Furnace_ContextLost(void* screen) {
@@ -4642,11 +4681,19 @@ static void ChestScr_Layout(void* screen) {
 	scale = Gui_GetInventoryScale();
 	cs    = (int)(44.0f * Math_SqrtF(scale));
 	if (cs < 20) cs = 20;
-	s->cellSize = cs;
 	gap = cs / 3;
 
 	totalWidth  = cs * 9;
 	totalHeight = cs * s->chestRows + gap + cs * 3 + gap + cs;
+	/* Shrink cells if inventory doesn't fit on screen */
+	while ((totalHeight + 20 > Window_UI.Height || totalWidth + 10 > Window_UI.Width) && cs > 8) {
+		cs--;
+		gap = cs / 3;
+		totalWidth  = cs * 9;
+		totalHeight = cs * s->chestRows + gap + cs * 3 + gap + cs;
+	}
+	s->cellSize = cs;
+
 	baseX = (Window_UI.Width  - totalWidth)  / 2;
 	baseY = (Window_UI.Height - totalHeight) / 2;
 
@@ -4662,9 +4709,13 @@ static void ChestScr_Layout(void* screen) {
 	s->hotbarY = s->gridY + cs * 3 + gap;
 
 	/* Title above everything */
-	Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
-	s->title.yOffset = baseY - s->title.height - 12;
-	Widget_Layout(&s->title);
+	{
+		int titleOff = baseY - s->title.height - 4;
+		if (titleOff < 0) titleOff = 0;
+		Widget_SetLocation(&s->title, ANCHOR_CENTRE, ANCHOR_MIN, 0, 0);
+		s->title.yOffset = titleOff;
+		Widget_Layout(&s->title);
+	}
 }
 
 static void ChestScr_ContextLost(void* screen) {

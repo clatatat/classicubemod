@@ -412,16 +412,16 @@ static void ListScreen_Init(void* screen) {
 
 	for (i = 0; i < LIST_SCREEN_ITEMS; i++) 
 	{
-		ButtonWidget_Add(s, &s->btns[i], 300, s->EntryClick);
+		ButtonWidget_Add(s, &s->btns[i], min(300, Window_Main.Width - 10), s->EntryClick);
 		s->btns[i].meta.val = i;
 	}
-	width = Input_TouchMode ? 140 : 400;
+	width = Input_TouchMode ? 140 : min(400, Window_Main.Width - 10);
 	ButtonWidget_Add(s, &s->action, width, s->ActionClick);
 
 	ButtonWidget_Add(s, &s->left,  40, ListScreen_MoveBackwards);
 	ButtonWidget_Add(s, &s->right, 40, ListScreen_MoveForwards);
 	TextWidget_Add(s,   &s->title);
-	ButtonWidget_Add(s, &s->done,  width, s->DoneClick);
+	ButtonWidget_Add(s, &s->done,  min(width, Window_Main.Width - 10), s->DoneClick);
 
 	s->maxVertices = Screen_CalcDefaultMaxVertices(screen);
 	s->LoadEntries(s);
@@ -1622,6 +1622,11 @@ static void SaveLevelScreen_Save(void* screen, void* widget) {
 	String_Format1(&path, "maps/%s/worldsettings.dat", &file);
 	WorldSettings_SaveToFile(&path);
 
+	/* Save gpoptions.txt */
+	String_InitArray(path, pathBuffer);
+	String_Format1(&path, "maps/%s/gpoptions.txt", &file);
+	GPOptions_Save(&path);
+
 	World.LastSave = Game.Time;
 	Chat_Add1("&eSaved map to: maps/%s", &file);
 	CPE_SendNotifyAction(NOTIFY_ACTION_LEVEL_SAVED, 0);
@@ -2075,6 +2080,13 @@ static void LoadLevelScreen_EntryClick(void* screen, void* widget) {
 		String_InitArray(path, pathBuffer);
 		String_Format1(&path, "maps/%s/worldsettings.dat", &relPath);
 		WorldSettings_LoadFromFile(&path);
+
+		/* Load gpoptions.txt (clear first so new world gets defaults if file doesn't exist) */
+		GPOptions_Clear();
+		String_InitArray(path, pathBuffer);
+		String_Format1(&path, "maps/%s/gpoptions.txt", &relPath);
+		GPOptions_Load(&path);
+		Game_LoadGPOptions();
 	} else {
 		/* Legacy bare .cw file */
 		String_InitArray(path, pathBuffer);
