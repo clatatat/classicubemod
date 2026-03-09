@@ -105,6 +105,7 @@ extern int Player_Air;    /* 0 to PLAYER_MAX_AIR (300 units = 15 seconds) */
 
 extern cc_bool Game_Anaglyph3D;
 extern cc_bool Game_ViewBobbing;
+extern cc_bool Game_AltStatPos;
 extern cc_bool Game_BreakableLiquids;
 /* Whether a screenshot should be taken at the end of this frame */
 extern cc_bool Game_ScreenshotRequested;

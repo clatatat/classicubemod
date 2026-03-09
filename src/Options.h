@@ -111,6 +111,7 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_SPRITE_CULL_DIST "gfx-spritecull"
 #define OPT_TEXTURE_LOD_DIST "gfx-texturelod"
 #define OPT_USE_DROPDOWNS "use-dropdowns"
+#define OPT_ALT_STAT_POS "alt-stat-position"
 #define OPT_GEN_TYPE "gen-type"
 #define OPT_GEN_THEME "gen-theme"
 

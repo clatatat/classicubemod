@@ -84,6 +84,7 @@ int     Player_Air    = PLAYER_MAX_AIR;
 cc_bool Game_Anaglyph3D;
 
 cc_bool Game_ViewBobbing, Game_HideGui;
+cc_bool Game_AltStatPos;
 cc_bool Game_BreakableLiquids, Game_ScreenshotRequested;
 struct GameVersion Game_Version;
 
@@ -418,6 +419,7 @@ static void LoadOptions(void) {
 #endif
 	
 	Game_AllowCustomBlocks   = true;
+	Game_AltStatPos          = Options_GetBool(OPT_ALT_STAT_POS,       false);
 	Game_SimpleArmsAnim      = Options_GetBool(OPT_SIMPLE_ARMS_ANIM,   false);
 	Game_BreakableLiquids    = Options_GetBool(OPT_MODIFIABLE_LIQUIDS, false);
 	Game_AllowServerTextures = Options_GetBool(OPT_SERVER_TEXTURES,    true);

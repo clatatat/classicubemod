@@ -97,6 +97,7 @@ static void Menu_RenderBounds(void) {
 
 	if (MainMenu_Active) {
 		Menu_RenderDirtBackground();
+		return;
 	}
 
 	/* Simple flat red tint when player is dead */
@@ -639,16 +640,13 @@ static void MainMenuScreen_Render(void* screen, float delta) {
 	/* Draw logo centered near top */
 	if (MainMenu_LogoTex) {
 		struct Texture logoTex;
-		int logoW = 400, logoH = 400;
-		/* Scale logo for very small screens */
-		if (Window_UI.Width < 500) { logoW = 200; logoH = 200; }
+		int logoSize = Window_UI.Height;
 
 		logoTex.ID     = MainMenu_LogoTex;
-		logoTex.x      = (Window_UI.Width - logoW) / 2;
-		logoTex.y      = Window_UI.Height / 8 - logoH / 2;
-		if (logoTex.y < 5) logoTex.y = 5;
-		logoTex.width  = logoW;
-		logoTex.height = logoH;
+		logoTex.x      = (Window_UI.Width - logoSize) / 2;
+		logoTex.y      = 0;
+		logoTex.width  = logoSize;
+		logoTex.height = logoSize;
 		logoTex.uv.u1  = 0; logoTex.uv.v1 = 0;
 		logoTex.uv.u2  = 1; logoTex.uv.v2 = 1;
 		Texture_Render(&logoTex);
@@ -2405,7 +2403,9 @@ static void LoadLevelScreen_Layout(void* screen) {
 }
 
 static void LoadLevelScreen_ContextRecreated(void* screen) {
+	struct ListScreen* s = (struct ListScreen*)screen;
 	ListScreen_ContextRecreated(screen);
+	if (MainMenu_Active) ButtonWidget_SetConst(&s->done, "Cancel", &s->font);
 	LoadLevel_UpdateDeleteBtn(&ListScreen.font);
 }
 

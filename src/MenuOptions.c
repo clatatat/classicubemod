@@ -126,12 +126,13 @@ static struct MenuOptionsScreen {
 	struct FontDesc titleFont, textFont;
 	struct TextGroupWidget extHelp;
 	struct Texture extHelpTextures[5]; /* max lines is 5 */
-	struct ButtonWidget buttons[MENUOPTS_MAX_OPTS], done;
+	struct ButtonWidget buttons[MENUOPTS_MAX_OPTS], done, cancel;
+	cc_bool hasCancel;
 	const char* extHelpDesc;
 } MenuOptionsScreen_Instance;
 
 static union  MenuOptionMeta menuOpts_meta[MENUOPTS_MAX_OPTS];
-static struct Widget* menuOpts_widgets[MENUOPTS_MAX_OPTS + 1];
+static struct Widget* menuOpts_widgets[MENUOPTS_MAX_OPTS + 2];
 
 static void MenuOptionsScreen_Update(struct MenuOptionsScreen* s, struct ButtonWidget* btn) {
 	struct MenuOptionMetaBool* meta = (struct MenuOptionMetaBool*)btn->meta.ptr;
@@ -255,7 +256,7 @@ static void MenuOptionsScreen_EndButtons(struct MenuOptionsScreen* s, int half, 
 		row = 50 * (begRow + (i < half ? i : (i - half)));
 		Widget_SetLocation(btn, ANCHOR_CENTRE, ANCHOR_CENTRE, col, row);
 	}
-	ButtonWidget_Add(s, &s->done, 400, backClick);
+	ButtonWidget_Add(s, &s->done, s->hasCancel ? 200 : 400, backClick);
 }
 
 
@@ -463,7 +464,7 @@ static void MenuOptionsScreen_Init(void* screen) {
 
 	s->widgets    = menuOpts_widgets;
 	s->numWidgets = 0;
-	s->maxWidgets = MENUOPTS_MAX_OPTS + 1; /* always have back button */
+	s->maxWidgets = MENUOPTS_MAX_OPTS + 2; /* done + optional cancel */
 
 	/* The various menu options screens might have different number of widgets */
 	for (i = 0; i < MENUOPTS_MAX_OPTS; i++) { 
@@ -514,7 +515,12 @@ static void MenuOptionsScreen_Free(void* screen) {
 static void MenuOptionsScreen_Layout(void* screen) {
 	struct MenuOptionsScreen* s = (struct MenuOptionsScreen*)screen;
 	Screen_Layout(s);
-	Menu_LayoutBack(&s->done);
+	if (s->hasCancel) {
+		Widget_SetLocation(&s->done,   ANCHOR_CENTRE, ANCHOR_MAX, -110, 25);
+		Widget_SetLocation(&s->cancel, ANCHOR_CENTRE, ANCHOR_MAX,  110, 25);
+	} else {
+		Menu_LayoutBack(&s->done);
+	}
 	MenuOptionsScreen_LayoutExtHelp(s);
 }
 
@@ -538,7 +544,8 @@ static void MenuOptionsScreen_ContextRecreated(void* screen) {
 		if (s->widgets[i]) MenuOptionsScreen_Update(s, &s->buttons[i]); 
 	}
 
-	ButtonWidget_SetConst(&s->done, "Done", &s->titleFont);
+	ButtonWidget_SetConst(&s->done, s->hasCancel ? "Continue" : "Done", &s->titleFont);
+	if (s->hasCancel) ButtonWidget_SetConst(&s->cancel, "Cancel", &s->titleFont);
 	if (s->DoRecreateExtra) s->DoRecreateExtra(s);
 	TextGroupWidget_SetFont(&s->extHelp, &s->textFont);
 	TextGroupWidget_RedrawAll(&s->extHelp); /* TODO: SetFont should redrawall implicitly */
@@ -582,6 +589,7 @@ void MenuOptionsScreen_Show(InitMenuOptions init) {
 	s->DoInit          = init;
 	s->DoRecreateExtra = NULL;
 	s->OnHacksChanged  = NULL;
+	s->hasCancel       = false;
 	Gui_Add((struct Screen*)s, GUI_PRIORITY_MENU);
 }
 
@@ -1649,6 +1657,12 @@ static void MiO_SetSensitivity(int v) {
 static cc_bool MiO_GetDropdowns(void) { return Options_GetBool(OPT_USE_DROPDOWNS, true); }
 static void    MiO_SetDropdowns(cc_bool v) { Options_SetBool(OPT_USE_DROPDOWNS, v); }
 
+static cc_bool MiO_GetAltStatPos(void) { return Game_AltStatPos; }
+static void    MiO_SetAltStatPos(cc_bool v) {
+	Game_AltStatPos = v;
+	Options_SetBool(OPT_ALT_STAT_POS, v);
+}
+
 static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1693,6 +1707,11 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eopen a dropdown menu on click.\n"
 			"&eIf &fOFF&e, left-click cycles forward and\n"
 			"&eright-click cycles backward instead.");
+		MenuOptionsScreen_AddBool(s, "Alt. stat position",
+			MiO_GetAltStatPos, MiO_SetAltStatPos,
+			"&eIf &fON&e, the health bar is moved to the\n"
+			"&etop-left of the screen and the drowning\n"
+			"&eindicator renders below the health bar.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchOptions);
 
@@ -1850,6 +1869,10 @@ static void GameplayScreen_SwitchBack(void* a, void* b) {
 	}
 }
 
+static void GameplayScreen_Cancel(void* a, void* b) {
+	MainMenuScreen_Show();
+}
+
 static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1878,7 +1901,12 @@ static void GameplayOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddButton(s, "Mob behaviors...",
 			Menu_SwitchMobBehaviors, NULL, NULL, NULL);
 	}
+	if (MainMenu_Active) s->hasCancel = true;
 	MenuOptionsScreen_EndButtons(s, -1, GameplayScreen_SwitchBack);
+
+	if (MainMenu_Active) {
+		ButtonWidget_Add(s, &s->cancel, 200, GameplayScreen_Cancel);
+	}
 }
 
 void GameplayOptionsScreen_Show(void) {

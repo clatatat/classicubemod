@@ -159,6 +159,17 @@ static void HUDScreen_BuildPosition(struct HUDScreen* s, struct VertexTextured* 
 	TextAtlas_AddInt(atlas, pos.z, &cur);
 	TextAtlas_Add(atlas,       14, &cur);
 
+	/* Shift position text to right side when alt stat position is enabled */
+	if (Game_AltStatPos) {
+		int totalWidth = atlas->curX - (2 + DisplayInfo.ContentOffsetX);
+		int shift = Window_Main.Width - 2 - DisplayInfo.ContentOffsetX - totalWidth
+		          - (2 + DisplayInfo.ContentOffsetX);
+		struct VertexTextured* v;
+		for (v = data; v < cur; v++) {
+			v->x += shift;
+		}
+	}
+
 	s->lastX = pos.x;
 	s->lastY = pos.y;
 	s->lastZ = pos.z;
@@ -238,13 +249,14 @@ static void HUDScreen_Layout(void* screen) {
 	struct HUDScreen* s = (struct HUDScreen*)screen;
 	struct TextWidget* line1 = &s->line1;
 	struct TextWidget* line2 = &s->line2;
+	cc_uint8 horAnchor = Game_AltStatPos ? ANCHOR_MAX : ANCHOR_MIN;
 	int posY;
 
-	Widget_SetLocation(line1, ANCHOR_MIN, ANCHOR_MIN, 
+	Widget_SetLocation(line1, horAnchor, ANCHOR_MIN, 
 						2 + DisplayInfo.ContentOffsetX, 2 + DisplayInfo.ContentOffsetY);
 	posY = line1->y + line1->height;
 	s->posAtlas.tex.y = posY;
-	Widget_SetLocation(line2, ANCHOR_MIN, ANCHOR_MIN, 
+	Widget_SetLocation(line2, horAnchor, ANCHOR_MIN, 
 						2 + DisplayInfo.ContentOffsetX, 0);
 
 	if (Game_ClassicMode) {
@@ -500,9 +512,14 @@ static void HUDScreen_BuildHeartsMesh(struct VertexTextured** ptr) {
 	heartSpacing = -1;
 	totalWidth   = 10 * heartSize + 9 * heartSpacing;
 
-	/* Position hearts left-aligned with hotbar */
-	startX = s->hotbar.x;
-	startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	/* Position hearts left-aligned with hotbar, or top-left if alt stat position */
+	if (Game_AltStatPos) {
+		startX = (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleX);
+		startY = (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	} else {
+		startX = s->hotbar.x;
+		startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	}
 
 	tex.width  = heartSize;
 	tex.height = heartSize;
@@ -575,12 +592,18 @@ static void HUDScreen_BuildBubblesMesh(struct VertexTextured** ptr) {
 	if (fullBubbles < 0) fullBubbles = 0;
 	if (partBubbles < 0) partBubbles = 0;
 
-	/* Scale and position: one row above hearts */
+	/* Scale and position: one row above hearts, or below hearts if alt stat position */
 	heartSize    = (int)(9.0f * s->hotbar.scale * DisplayInfo.ScaleY);
 	heartSpacing = -1;
-	startX = s->hotbar.x;
-	startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY)
-	       - heartSize; /* one row above hearts */
+	if (Game_AltStatPos) {
+		startX = (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleX);
+		startY = (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY)
+		       + heartSize; /* one row below hearts */
+	} else {
+		startX = s->hotbar.x;
+		startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY)
+		       - heartSize; /* one row above hearts */
+	}
 
 	tex.width  = heartSize;
 	tex.height = heartSize;
