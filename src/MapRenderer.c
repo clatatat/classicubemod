@@ -46,6 +46,10 @@ static cc_uint32* distances;
 int MapRenderer_MaxChunkUpdates;
 /* Whether occlusion culling is enabled. */
 cc_bool MapRenderer_OcclusionCulling;
+int MapRenderer_SpriteCullDist;
+int MapRenderer_TextureLODDist;
+static int spriteCullDistSq;
+static int textureLODDistSq;
 /* Cached number of chunks in the world */
 static int chunksCount;
 /* Queue for occlusion culling flood-fill */
@@ -135,16 +139,35 @@ if (drawMin && drawMax) { \
 	Game_Vertices += part.counts[maxFace]; \
 }
 
-static void RenderNormalBatch(int batch) {
+/* Computes squared horizontal (XZ) distance from camera to nearest edge of a chunk */
+static int ChunkNearEdgeDistSq(struct ChunkInfo* info) {
+	int dx = (int)info->centreX - (int)Camera.CurrentPos.x;
+	int dz = (int)info->centreZ - (int)Camera.CurrentPos.z;
+	int nearDx, nearDz;
+	if (dx < 0) dx = -dx;
+	if (dz < 0) dz = -dz;
+	nearDx = dx > HALF_CHUNK_SIZE ? dx - HALF_CHUNK_SIZE : 0;
+	nearDz = dz > HALF_CHUNK_SIZE ? dz - HALF_CHUNK_SIZE : 0;
+	return nearDx * nearDx + nearDz * nearDz;
+}
+
+/* mode: 0 = all chunks (no LOD), 1 = near only, 2 = far only (skip sprites) */
+static void RenderNormalBatch(int batch, int mode) {
 	int batchOffset = chunksCount * batch;
 	struct ChunkInfo* info;
 	struct ChunkPartInfo part;
 	cc_bool drawMin, drawMax;
-	int i, offset, count;
+	int i, offset, count, nearDistSq;
 
 	for (i = 0; i < renderChunksCount; i++) {
 		info = renderChunks[i];
 		if (!info->normalParts) continue;
+
+		nearDistSq = ChunkNearEdgeDistSq(info);
+
+		/* LOD distance filtering: near pass skips far chunks, far pass skips near */
+		if (mode == 1 && nearDistSq >= textureLODDistSq) continue;
+		if (mode == 2 && nearDistSq <  textureLODDistSq) continue;
 
 		part = info->normalParts[batchOffset];
 		if (part.offset < 0) continue;
@@ -169,7 +192,12 @@ static void RenderNormalBatch(int batch) {
 		drawMax = info->drawYMax && part.counts[FACE_YMAX];
 		DrawNormalFaces(FACE_YMIN, FACE_YMAX);
 
+		if (mode == 2) continue; /* far pass: skip sprites entirely */
 		if (!part.spriteCount) continue;
+
+		/* Sprite cull distance check */
+		if (spriteCullDistSq > 0 && nearDistSq > spriteCullDistSq) continue;
+
 		offset = part.offset;
 		count  = part.spriteCount >> 2; /* 4 per sprite */
 
@@ -205,6 +233,14 @@ void MapRenderer_RenderNormal(float delta) {
 	int batch;
 	if (!mapChunks) return;
 
+	/* Recompute squared distance caches (input is in chunks, convert to blocks) */
+	{
+		int spriteCullBlocks = MapRenderer_SpriteCullDist * CHUNK_SIZE;
+		int textureLODBlocks = MapRenderer_TextureLODDist * CHUNK_SIZE;
+		spriteCullDistSq = spriteCullBlocks * spriteCullBlocks;
+		textureLODDistSq = textureLODBlocks * textureLODBlocks;
+	}
+
 	Gfx_SetVertexFormat(VERTEX_FORMAT_TEXTURED);
 	Gfx_SetAlphaTest(true);
 	
@@ -213,8 +249,17 @@ void MapRenderer_RenderNormal(float delta) {
 	{
 		if (normPartsCount[batch] <= 0) continue;
 		if (hasNormParts[batch] || checkNormParts[batch]) {
-			Atlas1D_Bind(batch);
-			RenderNormalBatch(batch);
+			if (textureLODDistSq > 0) {
+				/* Near pass: full-detail textures */
+				Atlas1D_Bind(batch);
+				RenderNormalBatch(batch, 1);
+				/* Far pass: flat-color textures, no sprites */
+				Atlas1D_BindFlat(batch);
+				RenderNormalBatch(batch, 2);
+			} else {
+				Atlas1D_Bind(batch);
+				RenderNormalBatch(batch, 0);
+			}
 			checkNormParts[batch] = false;
 		}
 	}
@@ -374,6 +419,15 @@ static void DeleteChunk(struct ChunkInfo* info) {
 static void BuildChunk(struct ChunkInfo* info, int* chunkUpdates) {
 	struct ChunkPartInfo* ptr;
 	int i;
+
+	/* Decide whether to skip detail blocks for this chunk */
+	if (spriteCullDistSq > 0) {
+		int nearDistSq = ChunkNearEdgeDistSq(info);
+		Builder_SkipDetailBlocks = nearDistSq > spriteCullDistSq;
+	} else {
+		Builder_SkipDetailBlocks = false;
+	}
+	info->builtWithDetail = !Builder_SkipDetailBlocks;
 
 	Game.ChunkUpdates++;
 	(*chunkUpdates)++;
@@ -581,6 +635,12 @@ static int UpdateChunksAndVisibility(int* chunkUpdates) {
 			DeleteChunk(info); continue;
 		}
 
+		/* Mark dirty if detail block state needs to change */
+		if (!info->noData && !info->dirty && spriteCullDistSq > 0) {
+			cc_bool shouldDetail = ChunkNearEdgeDistSq(info) <= spriteCullDistSq;
+			if (info->builtWithDetail != shouldDetail) info->dirty = true;
+		}
+
 		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget) {
 			DeleteChunk(info);
 			BuildChunk(info, chunkUpdates);
@@ -610,6 +670,12 @@ static int UpdateChunksStill(int* chunkUpdates) {
 		/* Auto unload chunks far away chunks */
 		if (!info->noData && distSqr >= buildDistSqr + 32 * 16) {
 			DeleteChunk(info); continue;
+		}
+
+		/* Mark dirty if detail block state needs to change */
+		if (!info->noData && !info->dirty && spriteCullDistSq > 0) {
+			cc_bool shouldDetail = ChunkNearEdgeDistSq(info) <= spriteCullDistSq;
+			if (info->builtWithDetail != shouldDetail) info->dirty = true;
 		}
 
 		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget) {
@@ -891,6 +957,14 @@ static void OnInit(void) {
 	chunkPos   = IVec3_MaxValue();
 	MapRenderer_MaxChunkUpdates = Options_GetInt(OPT_MAX_CHUNK_UPDATES, 4, 1024, 30);
 	MapRenderer_OcclusionCulling = Options_GetBool(OPT_OCCLUSION_CULLING, false);
+	MapRenderer_SpriteCullDist = Options_GetInt(OPT_SPRITE_CULL_DIST, 0, 128, 0);
+	MapRenderer_TextureLODDist = Options_GetInt(OPT_TEXTURE_LOD_DIST, 0, 128, 0);
+	{
+		int scb = MapRenderer_SpriteCullDist * CHUNK_SIZE;
+		int tlb = MapRenderer_TextureLODDist * CHUNK_SIZE;
+		spriteCullDistSq = scb * scb;
+		textureLODDistSq = tlb * tlb;
+	}
 	CalcViewDists();
 }
 

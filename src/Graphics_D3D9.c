@@ -77,11 +77,22 @@ static void CreateD3D9Instance(void) {
 }
 
 static void FindCompatibleViewFormat(void) {
-	static const D3DFORMAT formats[] = { D3DFMT_X8R8G8B8, D3DFMT_R8G8B8, D3DFMT_R5G6B5, D3DFMT_X1R5G5B5 };
+	static const D3DFORMAT formats32[] = { D3DFMT_X8R8G8B8, D3DFMT_R8G8B8, D3DFMT_R5G6B5, D3DFMT_X1R5G5B5 };
+	static const D3DFORMAT formats16[] = { D3DFMT_R5G6B5, D3DFMT_X1R5G5B5, D3DFMT_X8R8G8B8, D3DFMT_R8G8B8 };
+	const D3DFORMAT* formats;
+	int count, depthOpt, i;
 	cc_result res;
-	int i;
 
-	for (i = 0; i < Array_Elems(formats); i++) {
+	depthOpt = Options_GetInt(OPT_COLOR_DEPTH, 0, 2, 0);
+	if (depthOpt == 1) { /* 16-bit */
+		formats = formats16;
+		count   = Array_Elems(formats16);
+	} else { /* 32-bit (default) or 256 color (uses 32-bit surface) */
+		formats = formats32;
+		count   = Array_Elems(formats32);
+	}
+
+	for (i = 0; i < count; i++) {
 		viewFormat = formats[i];
 		res = IDirect3D9_CheckDeviceType(d3d, D3DADAPTER_DEFAULT, D3DDEVTYPE_HAL, viewFormat, viewFormat, true);
 		if (!res) return;

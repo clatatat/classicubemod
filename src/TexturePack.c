@@ -65,6 +65,7 @@ static void LoadFallbackAtlas(void) {
 struct _Atlas2DData Atlas2D;
 struct _Atlas1DData Atlas1D;
 int TexturePack_ReqID;
+GfxResourceID Atlas1D_FlatTexIds[ATLAS1D_MAX_ATLASES];
 
 TextureRec Atlas1D_TexRec(TextureLoc texLoc, int uCount, int* index) {
 	TextureRec rec;
@@ -127,6 +128,57 @@ void Atlas1D_Bind(int index) {
 	Gfx_BindTexture(Atlas1D.TexIds[index]);
 }
 
+void Atlas1D_BindFlat(int index) {
+	Gfx_BindTexture(Atlas1D_FlatTexIds[index] ? Atlas1D_FlatTexIds[index] : Atlas1D.TexIds[index]);
+}
+
+static BitmapCol ComputeTileAvgColor(int atlasX, int atlasY, int tileSize) {
+	int totalR = 0, totalG = 0, totalB = 0, count = 0;
+	int px, py;
+
+	for (py = 0; py < tileSize; py++) {
+		BitmapCol* row = Bitmap_GetRow(&Atlas2D.Bmp, atlasY + py);
+		for (px = 0; px < tileSize; px++) {
+			BitmapCol c = row[atlasX + px];
+			int a = BitmapCol_A(c);
+			if (a < 128) continue;
+			totalR += BitmapCol_R(c);
+			totalG += BitmapCol_G(c);
+			totalB += BitmapCol_B(c);
+			count++;
+		}
+	}
+	if (count == 0) return BitmapCol_Make(0, 0, 0, 0);
+	return BitmapCol_Make(totalR / count, totalG / count, totalB / count, 255);
+}
+
+static void Atlas1D_LoadFlat(int index, struct Bitmap* atlas1D) {
+	int tileSize      = Atlas2D.TileSize;
+	int tilesPerAtlas = Atlas1D.TilesPerAtlas;
+	int y, tile = index * tilesPerAtlas;
+	int atlasX, atlasY, px, py;
+	BitmapCol avg;
+
+	for (y = 0; y < tilesPerAtlas; y++, tile++) {
+		atlasX = Atlas2D_TileX(tile) * tileSize;
+		atlasY = Atlas2D_TileY(tile) * tileSize;
+
+		if (atlasY + tileSize > (int)Atlas2D.Bmp.height) {
+			avg = BitmapCol_Make(0, 0, 0, 0);
+		} else {
+			avg = ComputeTileAvgColor(atlasX, atlasY, tileSize);
+		}
+
+		for (py = 0; py < tileSize; py++) {
+			BitmapCol* row = Bitmap_GetRow(atlas1D, y * tileSize + py);
+			for (px = 0; px < tileSize; px++) {
+				row[px] = avg;
+			}
+		}
+	}
+	Gfx_RecreateTexture(&Atlas1D_FlatTexIds[index], atlas1D, TEXTURE_FLAG_MANAGED | TEXTURE_FLAG_DYNAMIC, false);
+}
+
 static void Atlas_Convert2DTo1D(void) {
 	int tileSize      = Atlas2D.TileSize;
 	int tilesPerAtlas = Atlas1D.TilesPerAtlas;
@@ -136,10 +188,14 @@ static void Atlas_Convert2DTo1D(void) {
 
 	Platform_Log2("Loaded terrain atlas: %i bmps, %i per bmp", &atlasesCount, &tilesPerAtlas);
 	Bitmap_Allocate(&atlas1D, tileSize, tilesPerAtlas * tileSize);
-	
-	for (i = 0; i < atlasesCount; i++) 
-	{
+
+	for (i = 0; i < atlasesCount; i++) {
 		Atlas1D_Load(i, &atlas1D);
+	}
+
+	/* Also generate flat-color atlas for LOD rendering */
+	for (i = 0; i < atlasesCount; i++) {
+		Atlas1D_LoadFlat(i, &atlas1D);
 	}
 	Mem_Free(atlas1D.scan0);
 }
@@ -204,6 +260,7 @@ static void Atlas1D_Free(void) {
 	int i;
 	for (i = 0; i < Atlas1D.Count; i++) {
 		Gfx_DeleteTexture(&Atlas1D.TexIds[i]);
+		Gfx_DeleteTexture(&Atlas1D_FlatTexIds[i]);
 	}
 }
 

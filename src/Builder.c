@@ -42,6 +42,18 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 #define IsCropBlock(b)  ((b) >= BLOCK_WHEAT_0 && (b) <= BLOCK_WHEAT_7)
 #define IsRailBlock(b)  ((b) == BLOCK_RAIL || ((b) >= BLOCK_RAIL_EW && (b) <= BLOCK_RAIL_CURVE_NE))
 
+/* Non-sprite detail blocks that can be skipped in far chunks */
+#define IsDetailBlock(b) ( \
+	(b) == BLOCK_RED_ORE_DUST || (b) == BLOCK_LIT_RED_ORE_DUST || \
+	(b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON || \
+	(b) == BLOCK_BUTTON || (b) == BLOCK_BUTTON_PRESSED || \
+	(b) == BLOCK_PRESSURE_PLATE || (b) == BLOCK_PRESSURE_PLATE_PRESSED || \
+	(b) == BLOCK_STONE_PLATE || (b) == BLOCK_STONE_PLATE_PRESSED || \
+	(b) == BLOCK_LADDER || \
+	(b) == BLOCK_SIGN_WALL || (b) == BLOCK_SIGN_FLOOR)
+
+cc_bool Builder_SkipDetailBlocks;
+
 static BlockID* Builder_Chunk;
 static cc_uint8* Builder_Counts;
 static int* Builder_BitFlags;
@@ -242,6 +254,17 @@ static void PrepareChunk(int x1, int y1, int z1) {
 				b = Builder_Chunk[cIndex];
 				if (Blocks.Draw[b] == DRAW_GAS) continue;
 				index = Builder_PackCount(xx, yy, zz);
+
+				/* Skip detail blocks in far chunks - zero counts to prevent stale 1s */
+				if (Builder_SkipDetailBlocks && IsDetailBlock(b)) {
+					Builder_Counts[index]     = 0;
+					Builder_Counts[index + 1] = 0;
+					Builder_Counts[index + 2] = 0;
+					Builder_Counts[index + 3] = 0;
+					Builder_Counts[index + 4] = 0;
+					Builder_Counts[index + 5] = 0;
+					continue;
+				}
 
 				/* Sprites can't be stretched, nor can then be they hidden by other blocks. */
 				/* Note sprites are drawn using DrawSprite and not with any of the DrawXFace. */
@@ -532,6 +555,7 @@ void Builder_MakeChunk(struct ChunkInfo* info) {
 			for (x = x1, xx = 0; x < xMax; x++, xx++, cIndex++) {
 				Builder_Block = chunk[cIndex];
 				if (Blocks.Draw[Builder_Block] == DRAW_GAS) continue;
+				if (Builder_SkipDetailBlocks && IsDetailBlock(Builder_Block)) continue;
 
 				index = Builder_PackCount(xx, yy, zz);
 				Builder_ChunkIndex = cIndex;

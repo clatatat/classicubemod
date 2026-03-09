@@ -78,6 +78,10 @@ cc_bool Atlas_TryChange(struct Bitmap* bmp);
 /* index is set to the index of the 1D atlas that the tile is in. */
 TextureRec Atlas1D_TexRec(TextureLoc texLoc, int uCount, int* index);
 void Atlas1D_Bind(int index);
+/* Binds the flat-color (LOD) version of the given 1D atlas texture. */
+void Atlas1D_BindFlat(int index);
+/* Flat-color (LOD) texture IDs for each 1D atlas. */
+extern GfxResourceID Atlas1D_FlatTexIds[ATLAS1D_MAX_ATLASES];
 
 /* Whether the given URL is in list of accepted URLs. */
 cc_bool TextureUrls_HasAccepted(const cc_string* url);

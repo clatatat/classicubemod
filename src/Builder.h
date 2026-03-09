@@ -18,6 +18,8 @@ extern struct IGameComponent Builder_Component;
 extern int Builder_SidesLevel, Builder_EdgeLevel;
 /* Whether smooth/advanced lighting mesh builder is used. */
 extern cc_bool Builder_SmoothLighting;
+/* Whether to skip detail blocks (levers, buttons, plates, etc.) when building. */
+extern cc_bool Builder_SkipDetailBlocks;
 
 /* Builds the mesh of vertices for the given chunk. */
 void Builder_MakeChunk(struct ChunkInfo* info);

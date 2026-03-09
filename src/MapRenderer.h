@@ -43,6 +43,7 @@ struct ChunkInfo {
 	cc_uint8 dirty : 1;   /* Whether chunk is pending being rebuilt */
 	cc_uint8 allAir : 1;  /* Whether chunk is completely air */
 	cc_uint8 noData : 1;  /* Whether the chunk is currently empty of data, but may have data if built */
+	cc_uint8 builtWithDetail : 1; /* Whether chunk was built including detail blocks */
 	cc_uint8 : 0;         /* pad to next byte*/
 
 	cc_uint8 drawXMin : 1;
@@ -82,6 +83,10 @@ void MapRenderer_Refresh(void);
 void MapRenderer_InvalidateSortOrder(void);
 /* Whether occlusion culling is enabled. */
 extern cc_bool MapRenderer_OcclusionCulling;
+/* Distance (in chunks) at which detail blocks stop being rendered. 0 = disabled. */
+extern int MapRenderer_SpriteCullDist;
+/* Distance (in chunks) at which block textures are replaced with flat colors. 0 = disabled. */
+extern int MapRenderer_TextureLODDist;
 
 CC_END_HEADER
 #endif

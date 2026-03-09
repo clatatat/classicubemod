@@ -1153,6 +1153,12 @@ static void    GrO_SetMipmaps(cc_bool v) {
 	TexturePack_ExtractCurrent(true);
 }
 
+static void GrO_SwitchPage2(void* a, void* b) { GraphicsOptionsScreen2_Show(); }
+
+static void GraphicsOptionsScreen_RecreateExtra(struct MenuOptionsScreen* s) {
+	ButtonWidget_SetConst(&s->buttons[s->numButtons], "Next page...", &s->titleFont);
+}
+
 static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1219,6 +1225,68 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddBool(s, "Mipmaps",
 			GrO_GetMipmaps,    GrO_SetMipmaps, NULL);
 		}
+	};
+	MenuOptionsScreen_EndButtons(s, -1, GrO_SwitchBack);
+	s->DoRecreateExtra = GraphicsOptionsScreen_RecreateExtra;
+	GrO_InitialResIdx = GrO_GetRes();
+
+	ButtonWidget_Add(s, &s->buttons[s->numButtons], 400, GrO_SwitchPage2);
+	Widget_SetLocation(&s->buttons[s->numButtons], ANCHOR_CENTRE, ANCHOR_MAX, 0, 95);
+}
+
+void GraphicsOptionsScreen_Show(void) {
+	MenuOptionsScreen_Show(GraphicsOptionsScreen_InitWidgets);
+}
+
+
+/*########################################################################################################################*
+*-----------------------------------------------GraphicsOptionsScreen2----------------------------------------------------*
+*#########################################################################################################################*/
+static const char* const GrO2_DepthNames[] = { "32-bit", "16-bit", "256 color" };
+#define GRO2_DEPTH_COUNT 3
+
+static int  GrO2_GetDepth(void) { return Options_GetInt(OPT_COLOR_DEPTH, 0, 2, 0); }
+static void GrO2_SetDepth(int v) { Options_SetInt(OPT_COLOR_DEPTH, v); }
+
+static int  GrO2_GetSpriteCull(void) { return Options_GetInt(OPT_SPRITE_CULL_DIST, 0, 128, 0); }
+static void GrO2_SetSpriteCull(int v) {
+	Options_SetInt(OPT_SPRITE_CULL_DIST, v);
+	MapRenderer_SpriteCullDist = v;
+}
+
+static int  GrO2_GetTextureLOD(void) { return Options_GetInt(OPT_TEXTURE_LOD_DIST, 0, 128, 0); }
+static void GrO2_SetTextureLOD(int v) {
+	Options_SetInt(OPT_TEXTURE_LOD_DIST, v);
+	MapRenderer_TextureLODDist = v;
+}
+
+static void GrO2_SwitchBack(void* a, void* b) { GraphicsOptionsScreen_Show(); }
+
+static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
+	MenuOptionsScreen_BeginButtons(s);
+	{
+		MenuOptionsScreen_AddEnum(s, "Color depth", GrO2_DepthNames, GRO2_DEPTH_COUNT,
+			GrO2_GetDepth,      GrO2_SetDepth,
+			"&eColor depth for rendering.\n" \
+			"&e32-bit: &fFull color (default).\n" \
+			"&e16-bit: &fReduced color, better perf.\n" \
+			"&e256 color: &f8-bit palette mode.\n" \
+			"&cRequires restart to take effect.");
+		MenuOptionsScreen_AddInt(s, "Detail cull (chunks)",
+			0, 128, 0,
+			GrO2_GetSpriteCull, GrO2_SetSpriteCull,
+			"&eChunks away to stop rendering small\n" \
+			"&edetail blocks (sprites, torches,\n" \
+			"&elevers, buttons, plates, signs, etc).\n" \
+			"&f0 = disabled (render all detail).\n" \
+			"&cReduces geometry at distance.");
+		MenuOptionsScreen_AddInt(s, "LOD dist (chunks)",
+			0, 128, 0,
+			GrO2_GetTextureLOD, GrO2_SetTextureLOD,
+			"&eChunks away to switch to\n" \
+			"&esingle-color block textures.\n" \
+			"&f0 = disabled (full textures always).\n" \
+			"&cReduces per-pixel texture cost.");
 
 		MenuOptionsScreen_AddBool(s, "3D anaglyph",
 			ClO_GetAnaglyph,   ClO_SetAnaglyph, NULL);
@@ -1228,13 +1296,12 @@ static void GraphicsOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eDesktop: &fUses desktop resolution.\n" \
 			"&eOther: &fChanges display resolution.\n" \
 			"&cLow res may break GUI display.");
-	};
-	MenuOptionsScreen_EndButtons(s, -1, GrO_SwitchBack);
-	GrO_InitialResIdx = GrO_GetRes();
+	}
+	MenuOptionsScreen_EndButtons(s, -1, GrO2_SwitchBack);
 }
 
-void GraphicsOptionsScreen_Show(void) {
-	MenuOptionsScreen_Show(GraphicsOptionsScreen_InitWidgets);
+void GraphicsOptionsScreen2_Show(void) {
+	MenuOptionsScreen_Show(GraphicsOptionsScreen2_InitWidgets);
 }
 
 
