@@ -546,7 +546,9 @@ static void Hotbar_RenderCounts(struct HotbarWidget* w) {
 
 		/* Position at bottom-right of hotbar slot */
 		tex.x = x + (int)(w->slotWidth / 2) - tex.width;
-		tex.y = y + (int)(w->elemSize / 2) - tex.height + 10;
+		tex.y = y + (int)(w->elemSize / 2) - tex.height + 
+			(Window_Main.Width >= 640 && Window_Main.Height >= 480 ? 13 :
+			 Window_Main.Width <= 320 && Window_Main.Height <= 240 ? 8 : 10);
 		Texture_Render(&tex);
 	}
 }

@@ -1269,7 +1269,21 @@ static void GrO2_SetTextureLOD(int v) {
 	MapRenderer_TextureLODDist = v;
 }
 
-static void GrO2_SwitchBack(void* a, void* b) { GraphicsOptionsScreen_Show(); }
+static void GrO2_SwitchBack(void* a, void* b) {
+	int curRes = GrO_GetRes();
+	/* Apply resolution change on Done if in fullscreen and setting changed */
+	if (Window_GetWindowState() == WINDOW_STATE_FULLSCREEN && curRes != GrO_InitialResIdx) {
+		if (curRes > 0) {
+			Window_SetDisplayResolution(GrO_ResWidths[curRes], GrO_ResHeights[curRes]);
+			GraphicsOptionsScreen_Show();
+			ResolutionConfirmOverlay_Show(GrO_ResWidths[curRes], GrO_ResHeights[curRes]);
+			return;
+		} else {
+			Window_RestoreDisplayResolution();
+		}
+	}
+	GraphicsOptionsScreen_Show();
+}
 
 static int  GrO2_GetParticles(void) { return Particles_Mode; }
 static void GrO2_SetParticles(int v) {
@@ -1462,6 +1476,9 @@ static void    GuO_SetUseFont(cc_bool v) {
 	Drawer2D.BitmappedText = true;
 }
 
+static cc_bool MiO_GetAltStatPos(void);
+static void    MiO_SetAltStatPos(cc_bool v);
+
 static void GuiOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1485,6 +1502,11 @@ static void GuiOptionsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			GuO_GetUseFont,   GuO_SetUseFont, NULL);
 		MenuOptionsScreen_AddButton(s, "Select system font", Menu_SwitchFont,
 			NULL,             NULL, NULL);
+		MenuOptionsScreen_AddBool(s, "Alt. stat position",
+			MiO_GetAltStatPos, MiO_SetAltStatPos,
+			"&eIf &fON&e, the health bar is moved to the\n"
+			"&etop-left of the screen and the drowning\n"
+			"&eindicator renders below the health bar.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchOptions);
 }
@@ -1769,11 +1791,6 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eopen a dropdown menu on click.\n"
 			"&eIf &fOFF&e, left-click cycles forward and\n"
 			"&eright-click cycles backward instead.");
-		MenuOptionsScreen_AddBool(s, "Alt. stat position",
-			MiO_GetAltStatPos, MiO_SetAltStatPos,
-			"&eIf &fON&e, the health bar is moved to the\n"
-			"&etop-left of the screen and the drowning\n"
-			"&eindicator renders below the health bar.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, Menu_SwitchOptions);
 
