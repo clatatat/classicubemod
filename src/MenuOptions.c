@@ -1676,6 +1676,20 @@ static void    MiO_SetAltStatPos(cc_bool v) {
 	Options_SetBool(OPT_ALT_STAT_POS, v);
 }
 
+static int  MiO_GetAudioQuality(void) {
+	return Options_GetInt(OPT_AUDIO_QUALITY, 0, AUDIO_QUALITY_COUNT - 1, DEFAULT_AUDIO_QUALITY);
+}
+static void MiO_SetAudioQuality(int v) {
+	int musicVol = Audio_MusicVolume;
+	Options_SetInt(OPT_AUDIO_QUALITY, v);
+	Audio_MaxSampleRate = AudioQuality_Rates[v];
+	/* Restart music so it re-opens the device at the new rate */
+	if (musicVol) {
+		Audio_SetMusic(0);
+		Audio_SetMusic(musicVol);
+	}
+}
+
 static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1692,6 +1706,13 @@ static void MiscSettingsScreen_InitWidgets(struct MenuOptionsScreen* s) {
 		MenuOptionsScreen_AddInt(s,  "Sounds volume",
 			   0, 100,  DEFAULT_SOUNDS_VOLUME,
 			MiO_GetSounds,  MiO_SetSounds, NULL);
+		MenuOptionsScreen_AddEnum(s, "Audio quality", AudioQuality_Names, AUDIO_QUALITY_COUNT,
+			MiO_GetAudioQuality, MiO_SetAudioQuality,
+			"&eMaximum sample rate for audio playback.\n"
+			"&eLow: &f11025 Hz\n"
+			"&eMedium: &f22050 Hz\n"
+			"&eHigh: &f44100 Hz (default)\n"
+			"&cLower values may help on old soundcards.");
 
 		MenuOptionsScreen_AddBool(s, "Block physics",
 			MiO_GetPhysics, MiO_SetPhysics, NULL);

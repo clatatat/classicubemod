@@ -43,6 +43,18 @@ extern int Audio_SoundsVolume;
 /* Volume music is played at, from 0-100. */
 /* NOTE: Use Audio_SetMusic, don't change this directly. */
 extern int Audio_MusicVolume;
+/* Maximum sample rate for audio playback. */
+extern int Audio_MaxSampleRate;
+
+enum AudioQuality_ {
+	AUDIO_QUALITY_LOW,    /* 11025 Hz */
+	AUDIO_QUALITY_MEDIUM, /* 22050 Hz */
+	AUDIO_QUALITY_HIGH,   /* 44100 Hz */
+	AUDIO_QUALITY_COUNT
+};
+extern const char* const AudioQuality_Names[AUDIO_QUALITY_COUNT];
+extern const int AudioQuality_Rates[AUDIO_QUALITY_COUNT];
+#define DEFAULT_AUDIO_QUALITY AUDIO_QUALITY_HIGH
 extern const cc_string Sounds_ZipPathMC;
 extern const cc_string Sounds_ZipPathCC;
 
@@ -84,6 +96,12 @@ void Audio_Warn(cc_result res, const char* action);
 
 cc_result AudioPool_Play(struct AudioData* data);
 void AudioPool_Close(void);
+
+/* Downsample 16-bit PCM audio using nearest-neighbor resampling.            */
+/* dst can equal src for in-place operation (writes are always <= reads).     */
+/* Returns new size in bytes.                                                */
+cc_uint32 Audio_Downsample(cc_int16* dst, const cc_int16* src,
+		int srcFrames, int channels, int srcRate, int dstRate);
 
 
 /*########################################################################################################################*

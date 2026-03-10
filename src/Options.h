@@ -13,6 +13,7 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_FORCE_OPENAL "forceopenal"
 #define OPT_MIN_MUSIC_DELAY "music-mindelay"
 #define OPT_MAX_MUSIC_DELAY "music-maxdelay"
+#define OPT_AUDIO_QUALITY "audio-quality"
 
 #define OPT_VIEW_DISTANCE "viewdist"
 #define OPT_OCCLUSION_CULLING "gfx-occlcull"

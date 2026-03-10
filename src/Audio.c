@@ -19,6 +19,25 @@
 #endif
 
 int Audio_SoundsVolume, Audio_MusicVolume;
+int Audio_MaxSampleRate = 44100;
+
+const int AudioQuality_Rates[AUDIO_QUALITY_COUNT] = { 11025, 22050, 44100 };
+const char* const AudioQuality_Names[AUDIO_QUALITY_COUNT] = { "Low", "Medium", "High" };
+
+cc_uint32 Audio_Downsample(cc_int16* dst, const cc_int16* src,
+		int srcFrames, int channels, int srcRate, int dstRate) {
+	int dstFrames = (int)((cc_int64)srcFrames * dstRate / srcRate);
+	int i, j, srcIdx;
+
+	for (i = 0; i < dstFrames; i++) {
+		srcIdx = (int)((cc_int64)i * srcRate / dstRate);
+		if (srcIdx >= srcFrames) srcIdx = srcFrames - 1;
+		for (j = 0; j < channels; j++) {
+			dst[i * channels + j] = src[srcIdx * channels + j];
+		}
+	}
+	return dstFrames * channels * 2;
+}
 
 const char* const Sound_Names[SOUND_COUNT] = {
 	"none", "wood", "gravel", "grass", "stone",
@@ -763,6 +782,14 @@ static cc_result Music_Buffer(struct AudioChunk* chunk, int maxSamples, struct V
 	}
 
 	chunk->size = samples * 2;
+
+	/* Downsample in-place if music sample rate exceeds Audio_MaxSampleRate */
+	if (ctx->sampleRate > Audio_MaxSampleRate && chunk->size > 0) {
+		int srcFrames = samples / ctx->channels;
+		chunk->size = Audio_Downsample(data, data, srcFrames,
+			ctx->channels, ctx->sampleRate, Audio_MaxSampleRate);
+	}
+
 	res2 = StreamContext_Enqueue(&music_ctx, chunk);
 	if (res2) { music_stopping = true; return res2; }
 	return res;
@@ -793,7 +820,10 @@ static cc_result Music_PlayOgg(struct Stream* source) {
 	
 	channels   = vorbis->channels;
 	sampleRate = vorbis->sampleRate;
-	if ((res = StreamContext_SetFormat(&music_ctx, channels, sampleRate, 100))) goto cleanup;
+	{
+		int deviceRate = sampleRate > Audio_MaxSampleRate ? Audio_MaxSampleRate : sampleRate;
+		if ((res = StreamContext_SetFormat(&music_ctx, channels, deviceRate, 100))) goto cleanup;
+	}
 
 	/* largest possible vorbis frame decodes to blocksize1 * channels samples, */
 	/*  so can end up decoding slightly over a second of audio */
@@ -986,7 +1016,11 @@ void Audio_SetMusic(int volume) {
 }
 
 static void OnInit(void) {
+	int quality;
 	Utils_EnsureDirectory("audio");
+
+	quality = Options_GetInt(OPT_AUDIO_QUALITY, 0, AUDIO_QUALITY_COUNT - 1, DEFAULT_AUDIO_QUALITY);
+	Audio_MaxSampleRate = AudioQuality_Rates[quality];
 
 	Sounds_Init();
 	Music_Init();

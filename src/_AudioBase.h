@@ -118,13 +118,20 @@ struct AudioContext music_ctx;
 #define POOL_MAX_CONTEXTS 8
 #endif
 static struct AudioContext context_pool[POOL_MAX_CONTEXTS];
+static void*    _resampleBufs[POOL_MAX_CONTEXTS];
+static cc_uint32 _resampleSizes[POOL_MAX_CONTEXTS];
 
 #ifndef CC_BUILD_NOSOUNDS
 cc_result AudioPool_Play(struct AudioData* data) {
 	struct AudioContext* ctx;
+	struct AudioData resampled;
 	cc_bool isBusy;
 	cc_result res;
-	int i;
+	int i, effectiveRate, srcFrames;
+	cc_uint32 newSize;
+	void* buf;
+
+	effectiveRate = Audio_AdjustSampleRate(data->sampleRate, data->rate);
 
 	/* Try to play on a context that doesn't need to be recreated */
 	for (i = 0; i < POOL_MAX_CONTEXTS; i++) 
@@ -134,8 +141,31 @@ cc_result AudioPool_Play(struct AudioData* data) {
 
 		if ((res = SoundContext_PollBusy(ctx, &isBusy))) return res;
 		if (isBusy) continue;
-		if (!SoundContext_FastPlay(ctx, data)) continue;
 
+		if (effectiveRate > Audio_MaxSampleRate) {
+			resampled = *data;
+			srcFrames = data->chunk.size / (data->channels * 2);
+			newSize   = (cc_uint32)((cc_int64)srcFrames * Audio_MaxSampleRate / effectiveRate) * data->channels * 2;
+
+			if (_resampleSizes[i] < newSize) {
+				buf = _resampleBufs[i] ? Mem_TryRealloc(_resampleBufs[i], newSize, 1)
+				                       : Mem_TryAlloc(newSize, 1);
+				if (!buf) return ERR_OUT_OF_MEMORY;
+				_resampleBufs[i]  = buf;
+				_resampleSizes[i] = newSize;
+			}
+			resampled.chunk.size = Audio_Downsample((cc_int16*)_resampleBufs[i],
+				(const cc_int16*)data->chunk.data, srcFrames, data->channels, effectiveRate, Audio_MaxSampleRate);
+			resampled.chunk.data = _resampleBufs[i];
+			resampled.sampleRate = Audio_MaxSampleRate;
+			resampled.rate       = 100;
+
+			if (!SoundContext_FastPlay(ctx, &resampled)) continue;
+			Audio_SetVolume(ctx, resampled.volume);
+			return SoundContext_PlayData(ctx, &resampled);
+		}
+
+		if (!SoundContext_FastPlay(ctx, data)) continue;
 		Audio_SetVolume(ctx, data->volume);
 		return SoundContext_PlayData(ctx, data);
 	}
@@ -149,6 +179,28 @@ cc_result AudioPool_Play(struct AudioData* data) {
 		if (res) return res;
 		if (isBusy) continue;
 
+		if (effectiveRate > Audio_MaxSampleRate) {
+			resampled = *data;
+			srcFrames = data->chunk.size / (data->channels * 2);
+			newSize   = (cc_uint32)((cc_int64)srcFrames * Audio_MaxSampleRate / effectiveRate) * data->channels * 2;
+
+			if (_resampleSizes[i] < newSize) {
+				buf = _resampleBufs[i] ? Mem_TryRealloc(_resampleBufs[i], newSize, 1)
+				                       : Mem_TryAlloc(newSize, 1);
+				if (!buf) return ERR_OUT_OF_MEMORY;
+				_resampleBufs[i]  = buf;
+				_resampleSizes[i] = newSize;
+			}
+			resampled.chunk.size = Audio_Downsample((cc_int16*)_resampleBufs[i],
+				(const cc_int16*)data->chunk.data, srcFrames, data->channels, effectiveRate, Audio_MaxSampleRate);
+			resampled.chunk.data = _resampleBufs[i];
+			resampled.sampleRate = Audio_MaxSampleRate;
+			resampled.rate       = 100;
+
+			Audio_SetVolume(ctx, resampled.volume);
+			return SoundContext_PlayData(ctx, &resampled);
+		}
+
 		Audio_SetVolume(ctx, data->volume);
 		return SoundContext_PlayData(ctx, data);
 	}
@@ -160,6 +212,9 @@ void AudioPool_Close(void) {
 	for (i = 0; i < POOL_MAX_CONTEXTS; i++)
 	{
 		Audio_Close(&context_pool[i]);
+		Mem_Free(_resampleBufs[i]);
+		_resampleBufs[i]  = NULL;
+		_resampleSizes[i] = 0;
 	}
 }
 #endif
