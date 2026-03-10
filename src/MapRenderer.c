@@ -130,9 +130,7 @@ static void CheckWeather(float delta) {
 
 #define DrawNormalFaces(minFace, maxFace) \
 if (drawMin && drawMax) { \
-	Gfx_SetFaceCulling(true); \
 	DrawFaces(minFace, maxFace, offset); \
-	Gfx_SetFaceCulling(false); \
 	Game_Vertices += (part.counts[minFace] + part.counts[maxFace]); \
 } else if (drawMin) { \
 	DrawFace(minFace, offset); \
@@ -159,8 +157,7 @@ static void RenderNormalBatch(int batch, int mode) {
 	int batchOffset = chunksCount * batch;
 	struct ChunkInfo* info;
 	struct ChunkPartInfo part;
-	cc_bool drawMin, drawMax;
-	int i, offset, count, nearDistSq;
+	int i, offset, nearDistSq, totalFaceVerts;
 
 	for (i = 0; i < renderChunksCount; i++) {
 		info = renderChunks[i];
@@ -176,24 +173,41 @@ static void RenderNormalBatch(int batch, int mode) {
 		if (part.offset < 0) continue;
 		hasNormParts[batch] = true;
 
-#if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_GL11
+		{
+			cc_bool drawMin, drawMax;
+			Gfx_SetFaceCulling(true);
+
+			offset  = part.offset + part.spriteCount;
+			drawMin = info->drawXMin && part.counts[FACE_XMIN];
+			drawMax = info->drawXMax && part.counts[FACE_XMAX];
+			DrawNormalFaces(FACE_XMIN, FACE_XMAX);
+
+			offset  += part.counts[FACE_XMIN] + part.counts[FACE_XMAX];
+			drawMin = info->drawZMin && part.counts[FACE_ZMIN];
+			drawMax = info->drawZMax && part.counts[FACE_ZMAX];
+			DrawNormalFaces(FACE_ZMIN, FACE_ZMAX);
+
+			offset  += part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX];
+			drawMin = info->drawYMin && part.counts[FACE_YMIN];
+			drawMax = info->drawYMax && part.counts[FACE_YMAX];
+			DrawNormalFaces(FACE_YMIN, FACE_YMAX);
+
+			Gfx_SetFaceCulling(false);
+		}
+#else
+		/* Merged draw: draw ALL faces in one call to minimize API overhead */
+		/* Hardware face culling handles back-facing triangles cheaply */
 		Gfx_BindVb_Textured(info->vb);
+		totalFaceVerts = part.counts[FACE_XMIN] + part.counts[FACE_XMAX]
+		               + part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX]
+		               + part.counts[FACE_YMIN] + part.counts[FACE_YMAX];
+		if (totalFaceVerts > 0) {
+			offset = part.offset + part.spriteCount;
+			Gfx_DrawIndexedTris_T2fC4b(totalFaceVerts, offset);
+			Game_Vertices += totalFaceVerts;
+		}
 #endif
-
-		offset  = part.offset + part.spriteCount;
-		drawMin = info->drawXMin && part.counts[FACE_XMIN];
-		drawMax = info->drawXMax && part.counts[FACE_XMAX];
-		DrawNormalFaces(FACE_XMIN, FACE_XMAX);
-
-		offset  += part.counts[FACE_XMIN] + part.counts[FACE_XMAX];
-		drawMin = info->drawZMin && part.counts[FACE_ZMIN];
-		drawMax = info->drawZMax && part.counts[FACE_ZMAX];
-		DrawNormalFaces(FACE_ZMIN, FACE_ZMAX);
-
-		offset  += part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX];
-		drawMin = info->drawYMin && part.counts[FACE_YMIN];
-		drawMax = info->drawYMax && part.counts[FACE_YMAX];
-		DrawNormalFaces(FACE_YMIN, FACE_YMAX);
 
 		if (mode == 2) continue; /* far pass: skip sprites entirely */
 		if (!part.spriteCount) continue;
@@ -201,34 +215,15 @@ static void RenderNormalBatch(int batch, int mode) {
 		/* Sprite cull distance check */
 		if (spriteCullDistSq > 0 && nearDistSq > spriteCullDistSq) continue;
 
-		offset = part.offset;
-		count  = part.spriteCount >> 2; /* 4 per sprite */
-
-		Gfx_SetFaceCulling(true);
-		/* TODO: fix to not render them all */
 #if CC_GFX_BACKEND == CC_GFX_BACKEND_GL11
 		Gfx_BindVb(part.vbs[FACE_COUNT]);
 		Gfx_DrawIndexedTris_T2fC4b(0, 0);
-		Game_Vertices += count * 4;
-		Gfx_SetFaceCulling(false);
-		continue;
+		Game_Vertices += part.spriteCount;
+#else
+		/* Merged sprite draw: draw all sprites in one call */
+		Gfx_DrawIndexedTris_T2fC4b(part.spriteCount, part.offset);
+		Game_Vertices += part.spriteCount;
 #endif
-		if (info->drawXMax || info->drawZMin) {
-			Gfx_DrawIndexedTris_T2fC4b(count, offset); Game_Vertices += count;
-		} offset += count;
-
-		if (info->drawXMin || info->drawZMax) {
-			Gfx_DrawIndexedTris_T2fC4b(count, offset); Game_Vertices += count;
-		} offset += count;
-
-		if (info->drawXMin || info->drawZMin) {
-			Gfx_DrawIndexedTris_T2fC4b(count, offset); Game_Vertices += count;
-		} offset += count;
-
-		if (info->drawXMax || info->drawZMax) {
-			Gfx_DrawIndexedTris_T2fC4b(count, offset); Game_Vertices += count;
-		}
-		Gfx_SetFaceCulling(false);
 	}
 }
 
@@ -291,8 +286,7 @@ static void RenderTranslucentBatch(int batch) {
 	int batchOffset = chunksCount * batch;
 	struct ChunkInfo* info;
 	struct ChunkPartInfo part;
-	cc_bool drawMin, drawMax;
-	int i, offset;
+	int i, totalFaceVerts;
 
 	for (i = 0; i < renderChunksCount; i++) {
 		info = renderChunks[i];
@@ -302,24 +296,35 @@ static void RenderTranslucentBatch(int batch) {
 		if (part.offset < 0) continue;
 		hasTranParts[batch] = true;
 
-#if CC_GFX_BACKEND != CC_GFX_BACKEND_GL11
+#if CC_GFX_BACKEND == CC_GFX_BACKEND_GL11
+		{
+			cc_bool drawMin, drawMax;
+			int offset = part.offset;
+			drawMin = (inTranslucent || info->drawXMin) && part.counts[FACE_XMIN];
+			drawMax = (inTranslucent || info->drawXMax) && part.counts[FACE_XMAX];
+			DrawTranslucentFaces(FACE_XMIN, FACE_XMAX);
+
+			offset  += part.counts[FACE_XMIN] + part.counts[FACE_XMAX];
+			drawMin = (inTranslucent || info->drawZMin) && part.counts[FACE_ZMIN];
+			drawMax = (inTranslucent || info->drawZMax) && part.counts[FACE_ZMAX];
+			DrawTranslucentFaces(FACE_ZMIN, FACE_ZMAX);
+
+			offset  += part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX];
+			drawMin = (inTranslucent || info->drawYMin) && part.counts[FACE_YMIN];
+			drawMax = (inTranslucent || info->drawYMax) && part.counts[FACE_YMAX];
+			DrawTranslucentFaces(FACE_YMIN, FACE_YMAX);
+		}
+#else
+		/* Merged draw: draw ALL translucent faces in one call */
 		Gfx_BindVb_Textured(info->vb);
+		totalFaceVerts = part.counts[FACE_XMIN] + part.counts[FACE_XMAX]
+		               + part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX]
+		               + part.counts[FACE_YMIN] + part.counts[FACE_YMAX];
+		if (totalFaceVerts > 0) {
+			Gfx_DrawIndexedTris_T2fC4b(totalFaceVerts, part.offset);
+			Game_Vertices += totalFaceVerts;
+		}
 #endif
-
-		offset  = part.offset;
-		drawMin = (inTranslucent || info->drawXMin) && part.counts[FACE_XMIN];
-		drawMax = (inTranslucent || info->drawXMax) && part.counts[FACE_XMAX];
-		DrawTranslucentFaces(FACE_XMIN, FACE_XMAX);
-
-		offset  += part.counts[FACE_XMIN] + part.counts[FACE_XMAX];
-		drawMin = (inTranslucent || info->drawZMin) && part.counts[FACE_ZMIN];
-		drawMax = (inTranslucent || info->drawZMax) && part.counts[FACE_ZMAX];
-		DrawTranslucentFaces(FACE_ZMIN, FACE_ZMAX);
-
-		offset  += part.counts[FACE_ZMIN] + part.counts[FACE_ZMAX];
-		drawMin = (inTranslucent || info->drawYMin) && part.counts[FACE_YMIN];
-		drawMax = (inTranslucent || info->drawYMax) && part.counts[FACE_YMAX];
-		DrawTranslucentFaces(FACE_YMIN, FACE_YMAX);
 	}
 }
 
