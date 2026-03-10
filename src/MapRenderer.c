@@ -48,8 +48,11 @@ int MapRenderer_MaxChunkUpdates;
 cc_bool MapRenderer_OcclusionCulling;
 int MapRenderer_SpriteCullDist;
 int MapRenderer_TextureLODDist;
+int MapRenderer_GeoBudgetMB;
+int MapRenderer_YCullDist;
 static int spriteCullDistSq;
 static int textureLODDistSq;
+static int totalVertexCount;
 /* Cached number of chunks in the world */
 static int chunksCount;
 /* Queue for occlusion culling flood-fill */
@@ -370,6 +373,30 @@ void MapRenderer_RenderTranslucent(float delta) {
 /*########################################################################################################################*
 *---------------------------------------------------Chunk functionality---------------------------------------------------*
 *#########################################################################################################################*/
+/* Counts the total number of vertices stored in a chunk's part infos */
+static int ChunkVertexCount(struct ChunkInfo* info) {
+	struct ChunkPartInfo* ptr;
+	int total = 0, i;
+
+	if (info->normalParts) {
+		ptr = info->normalParts;
+		for (i = 0; i < MapRenderer_1DUsedCount; i++, ptr += chunksCount) {
+			if (ptr->offset < 0) continue;
+			total += ptr->spriteCount + ptr->counts[0] + ptr->counts[1]
+				+ ptr->counts[2] + ptr->counts[3] + ptr->counts[4] + ptr->counts[5];
+		}
+	}
+	if (info->translucentParts) {
+		ptr = info->translucentParts;
+		for (i = 0; i < MapRenderer_1DUsedCount; i++, ptr += chunksCount) {
+			if (ptr->offset < 0) continue;
+			total += ptr->spriteCount + ptr->counts[0] + ptr->counts[1]
+				+ ptr->counts[2] + ptr->counts[3] + ptr->counts[4] + ptr->counts[5];
+		}
+	}
+	return total;
+}
+
 /* Deletes vertex buffer associated with the given chunk and updates internal state */
 static void DeleteChunk(struct ChunkInfo* info) {
 	struct ChunkPartInfo* ptr;
@@ -379,6 +406,8 @@ static void DeleteChunk(struct ChunkInfo* info) {
 #else
 	Gfx_DeleteVb(&info->vb);
 #endif
+
+	totalVertexCount -= ChunkVertexCount(info);
 
 	info->empty  = false; 
 	info->allAir = false;
@@ -432,6 +461,8 @@ static void BuildChunk(struct ChunkInfo* info, int* chunkUpdates) {
 	Game.ChunkUpdates++;
 	(*chunkUpdates)++;
 	Builder_MakeChunk(info);
+
+	totalVertexCount += ChunkVertexCount(info);
 
 	info->dirty  = false;
 	info->noData = !info->normalParts && !info->translucentParts;
@@ -545,6 +576,7 @@ static void DeleteChunks(void) {
 	{
 		DeleteChunk(&mapChunks[i]);
 	}
+	totalVertexCount = 0;
 	ResetPartCounts();
 }
 
@@ -617,21 +649,37 @@ static void CalcViewDists(void) {
 	renderDistSquared = AdjustDist(Game_ViewDistance);
 }
 
+/* 1 MB / 24 bytes per vertex ~ 43690 vertices per MB */
+#define GEO_BUDGET_VERTS_PER_MB 43690
+
 static int UpdateChunksAndVisibility(int* chunkUpdates) {
 	int renderDistSqr = renderDistSquared;
 	int buildDistSqr  = buildDistSquared;
+	int yCullBlocks   = MapRenderer_YCullDist * CHUNK_SIZE;
+	int geoBudgetMax  = MapRenderer_GeoBudgetMB > 0
+		? MapRenderer_GeoBudgetMB * GEO_BUDGET_VERTS_PER_MB : 0;
+	int camY = (int)Camera.CurrentPos.y;
 
 	struct ChunkInfo* info;
-	int i, j = 0, distSqr;
+	int i, j = 0, distSqr, dy;
+	cc_bool yCulled;
 
 	for (i = 0; i < chunksCount; i++) 
 	{
 		info = sortedChunks[i];
 		if (info->empty) continue;
 		distSqr = distances[i];
-		
-		/* Auto unload chunks far away chunks */
-		if (!info->noData && distSqr >= buildDistSqr + 32 * 16) {
+
+		/* Y-cull: check if chunk is too far above/below camera */
+		yCulled = false;
+		if (yCullBlocks > 0) {
+			dy = (int)info->centreY - camY;
+			if (dy < 0) dy = -dy;
+			yCulled = dy > yCullBlocks;
+		}
+
+		/* Auto unload chunks far away or Y-culled */
+		if (!info->noData && (distSqr >= buildDistSqr + 32 * 16 || yCulled)) {
 			DeleteChunk(info); continue;
 		}
 
@@ -641,7 +689,9 @@ static int UpdateChunksAndVisibility(int* chunkUpdates) {
 			if (info->builtWithDetail != shouldDetail) info->dirty = true;
 		}
 
-		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget) {
+		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget
+			&& (!MapRenderer_OcclusionCulling || !info->occluded)
+			&& (geoBudgetMax <= 0 || totalVertexCount < geoBudgetMax)) {
 			DeleteChunk(info);
 			BuildChunk(info, chunkUpdates);
 		}
@@ -657,9 +707,14 @@ static int UpdateChunksAndVisibility(int* chunkUpdates) {
 static int UpdateChunksStill(int* chunkUpdates) {
 	int renderDistSqr = renderDistSquared;
 	int buildDistSqr  = buildDistSquared;
+	int yCullBlocks   = MapRenderer_YCullDist * CHUNK_SIZE;
+	int geoBudgetMax  = MapRenderer_GeoBudgetMB > 0
+		? MapRenderer_GeoBudgetMB * GEO_BUDGET_VERTS_PER_MB : 0;
+	int camY = (int)Camera.CurrentPos.y;
 
 	struct ChunkInfo* info;
-	int i, j = 0, distSqr;
+	int i, j = 0, distSqr, dy;
+	cc_bool yCulled;
 
 	for (i = 0; i < chunksCount; i++) 
 	{
@@ -667,8 +722,16 @@ static int UpdateChunksStill(int* chunkUpdates) {
 		if (info->empty) continue;
 		distSqr = distances[i];
 
-		/* Auto unload chunks far away chunks */
-		if (!info->noData && distSqr >= buildDistSqr + 32 * 16) {
+		/* Y-cull: check if chunk is too far above/below camera */
+		yCulled = false;
+		if (yCullBlocks > 0) {
+			dy = (int)info->centreY - camY;
+			if (dy < 0) dy = -dy;
+			yCulled = dy > yCullBlocks;
+		}
+
+		/* Auto unload chunks far away or Y-culled */
+		if (!info->noData && (distSqr >= buildDistSqr + 32 * 16 || yCulled)) {
 			DeleteChunk(info); continue;
 		}
 
@@ -678,7 +741,9 @@ static int UpdateChunksStill(int* chunkUpdates) {
 			if (info->builtWithDetail != shouldDetail) info->dirty = true;
 		}
 
-		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget) {
+		if (info->dirty && distSqr <= buildDistSqr && *chunkUpdates < chunksTarget
+			&& (!MapRenderer_OcclusionCulling || !info->occluded)
+			&& (geoBudgetMax <= 0 || totalVertexCount < geoBudgetMax)) {
 			DeleteChunk(info);
 			BuildChunk(info, chunkUpdates);
 
@@ -714,6 +779,17 @@ static void UpdateChunks(float delta) {
 	lastCamPos = Camera.CurrentPos;
 	lastPitch  = p->Base.Pitch;
 	lastYaw    = p->Base.Yaw;
+
+	/* VRAM budget: evict farthest chunks if over budget */
+	if (MapRenderer_GeoBudgetMB > 0) {
+		int maxVerts = MapRenderer_GeoBudgetMB * GEO_BUDGET_VERTS_PER_MB;
+		int k;
+		for (k = chunksCount - 1; k >= 0 && totalVertexCount > maxVerts; k--) {
+			struct ChunkInfo* ci = sortedChunks[k];
+			if (ci->noData || ci->empty || ci->allAir) continue;
+			DeleteChunk(ci);
+		}
+	}
 
 	if (!samePos || chunkUpdates) ResetPartFlags();
 }
@@ -959,6 +1035,8 @@ static void OnInit(void) {
 	MapRenderer_OcclusionCulling = Options_GetBool(OPT_OCCLUSION_CULLING, false);
 	MapRenderer_SpriteCullDist = Options_GetInt(OPT_SPRITE_CULL_DIST, 0, 128, 0);
 	MapRenderer_TextureLODDist = Options_GetInt(OPT_TEXTURE_LOD_DIST, 0, 128, 0);
+	MapRenderer_GeoBudgetMB    = Options_GetInt(OPT_GEO_BUDGET_MB,   0, 16384, 0);
+	MapRenderer_YCullDist      = Options_GetInt(OPT_YCULL_DIST,      0, 64, 0);
 	{
 		int scb = MapRenderer_SpriteCullDist * CHUNK_SIZE;
 		int tlb = MapRenderer_TextureLODDist * CHUNK_SIZE;

@@ -1278,6 +1278,18 @@ static void GrO2_SetParticles(int v) {
 	Options_Set(OPT_PARTICLES, &str);
 }
 
+static int  GrO2_GetGeoBudget(void) { return Options_GetInt(OPT_GEO_BUDGET_MB, 0, 16384, 0); }
+static void GrO2_SetGeoBudget(int v) {
+	Options_SetInt(OPT_GEO_BUDGET_MB, v);
+	MapRenderer_GeoBudgetMB = v;
+}
+
+static int  GrO2_GetYCull(void) { return Options_GetInt(OPT_YCULL_DIST, 0, 64, 0); }
+static void GrO2_SetYCull(int v) {
+	Options_SetInt(OPT_YCULL_DIST, v);
+	MapRenderer_YCullDist = v;
+}
+
 static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1316,6 +1328,22 @@ static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eNone: &fNo particles at all.\n" \
 			"&eMinimal: &fDefault particle effects.\n" \
 			"&eAll: &fExtra particle effects.");
+		MenuOptionsScreen_AddInt(s, "Geo budget (MB)",
+			0, 16384, 0,
+			GrO2_GetGeoBudget, GrO2_SetGeoBudget,
+			"&eMax VRAM for chunk geometry.\n" \
+			"&f0 = unlimited (default).\n" \
+			"&fFar chunks auto-unload when over.\n" \
+			"&cReduce if running out of VRAM.\n" \
+			"&e12-16 for old GPUs, 2000+ for modern.");
+		MenuOptionsScreen_AddInt(s, "Y-cull (chunks)",
+			0, 64, 0,
+			GrO2_GetYCull, GrO2_SetYCull,
+			"&eMax vertical chunk distance to render.\n" \
+			"&f0 = unlimited (default).\n" \
+			"&fCulls chunks far above/below camera.\n" \
+			"&cHides underground/sky at distance.\n" \
+			"&e2-4 for old PCs, 8+ for modern.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, GrO2_SwitchBack);
 }

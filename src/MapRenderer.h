@@ -87,6 +87,10 @@ extern cc_bool MapRenderer_OcclusionCulling;
 extern int MapRenderer_SpriteCullDist;
 /* Distance (in chunks) at which block textures are replaced with flat colors. 0 = disabled. */
 extern int MapRenderer_TextureLODDist;
+/* Max VRAM (in MB) for chunk geometry vertex buffers. 0 = unlimited. */
+extern int MapRenderer_GeoBudgetMB;
+/* Max vertical distance (in chunks) to render/build chunks. 0 = unlimited. */
+extern int MapRenderer_YCullDist;
 
 CC_END_HEADER
 #endif

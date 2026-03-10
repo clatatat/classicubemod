@@ -112,6 +112,8 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_COLOR_DEPTH "gfx-colordepth"
 #define OPT_SPRITE_CULL_DIST "gfx-spritecull"
 #define OPT_TEXTURE_LOD_DIST "gfx-texturelod"
+#define OPT_GEO_BUDGET_MB "gfx-geobudget"
+#define OPT_YCULL_DIST "gfx-ycullchunks"
 #define OPT_USE_DROPDOWNS "use-dropdowns"
 #define OPT_ALT_STAT_POS "alt-stat-position"
 #define OPT_GEN_TYPE "gen-type"
