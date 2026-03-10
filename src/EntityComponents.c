@@ -528,7 +528,17 @@ static cc_bool Collisions_CanSlideThrough(struct AABB* adjFinalBB) {
 			for (x = bbMin.x; x <= bbMax.x; x++) { v.x = (float)x;
 
 				block = World_GetPhysicsBlock(x, y, z);
-				
+				if (Blocks.Collide[block] != COLLIDE_SOLID) continue;
+
+				/* Stairs have two sub-block collision AABBs */
+				if (Block_IsStairBlock(block)) {
+					struct AABB sb0, sb1;
+					Block_GetStairBBs(block, x, y, z, &sb0, &sb1);
+					if (AABB_Intersects(&sb0, adjFinalBB)) return false;
+					if (AABB_Intersects(&sb1, adjFinalBB)) return false;
+					continue;
+				}
+
 				Vec3_Add(&blockBB.Min, &v, &Blocks.MinBB[block]);
 				Vec3_Add(&blockBB.Max, &v, &Blocks.MaxBB[block]);
 
@@ -640,11 +650,20 @@ static void Collisions_CollideWithReachableBlocks(struct CollisionsComp* comp, i
 	for (i = 0; i < count; i++) {
 		/* Unpack the block and coordinate data */
 		state  = Searcher_States[i];
-		bPos.x = state.x >> 3; bPos.y = state.y >> 4; bPos.z = state.z >> 3;
-		block  = (state.x & 0x7) | (state.y & 0xF) << 3 | (state.z & 0x7) << 7;
+		bPos.x = (float)(state.x >> 3); bPos.y = (float)(state.y >> 4); bPos.z = (float)(state.z >> 4);
+		block  = (state.x & 0x7) | ((state.y & 0xF) << 3) | ((state.z & 0xF) << 7);
 
-		Vec3_Add(&blockBB.Min, &Blocks.MinBB[block], &bPos);
-		Vec3_Add(&blockBB.Max, &Blocks.MaxBB[block], &bPos);
+		/* For stair blocks, use the correct sub-block AABB */
+		if (Block_IsStairBlock(block & 0x3FF)) {
+			int subIdx = block >> 10;
+			struct AABB sb0, sb1;
+			block = block & 0x3FF;
+			Block_GetStairBBs(block, (int)bPos.x, (int)bPos.y, (int)bPos.z, &sb0, &sb1);
+			blockBB = subIdx ? sb1 : sb0;
+		} else {
+			Vec3_Add(&blockBB.Min, &Blocks.MinBB[block], &bPos);
+			Vec3_Add(&blockBB.Max, &Blocks.MaxBB[block], &bPos);
+		}
 		if (!AABB_Intersects(extentBB, &blockBB)) continue;
 
 		/* Recheck time to collide with block (as colliding with blocks modifies this) */

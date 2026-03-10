@@ -180,6 +180,7 @@ void IsometricDrawer_AddBatch(BlockID block, float size, float x, float y) {
 	if (itemTile >= 0) {
 		IsometricDrawer_FlatItem(itemTile, size);
 	} else if (Blocks.Draw[block] == DRAW_SPRITE || block == BLOCK_LADDER || IsRail(block)
+		|| Block_IsStairBlock(block)
 #if defined EXTENDED_BLOCKS
 		|| (block >= BLOCK_LADDER_S && block <= BLOCK_LADDER_W)
 #endif

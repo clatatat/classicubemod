@@ -174,6 +174,7 @@ int Searcher_FindReachableBlocks(struct Entity* entity, struct AABB* entityBB, s
 	IVec3_Floor(&min, &entityExtentBB->Min);
 	IVec3_Floor(&max, &entityExtentBB->Max);
 	elements = (max.x - min.x + 1) * (max.y - min.y + 1) * (max.z - min.z + 1);
+	elements *= 2; /* stairs can emit 2 entries per block */
 
 	if (elements > searcherCapacity) {
 		Searcher_Free();
@@ -189,6 +190,39 @@ int Searcher_FindReachableBlocks(struct Entity* entity, struct AABB* entityBB, s
 				block = World_GetPhysicsBlock(x, y, z);
 				if (Blocks.Collide[block] != COLLIDE_SOLID) continue;
 
+				/* Stairs emit 2 sub-block collision entries */
+				if (Block_IsStairBlock(block)) {
+					struct AABB sb0, sb1;
+					int encoded;
+					Block_GetStairBBs(block, x, y, z, &sb0, &sb1);
+
+					/* Sub-block 0 (step half) */
+					if (AABB_Intersects(entityExtentBB, &sb0)) {
+						Searcher_CalcTime(&vel, entityBB, &sb0, &tx, &ty, &tz);
+						if (tx <= 1.0f && ty <= 1.0f && tz <= 1.0f) {
+							encoded = block;
+							curState->x = (x << 3) | (encoded  & 0x007);
+							curState->y = (y << 4) | ((encoded & 0x078) >> 3);
+							curState->z = (z << 4) | ((encoded & 0x780) >> 7);
+							curState->tSquared = tx * tx + ty * ty + tz * tz;
+							curState++;
+						}
+					}
+					/* Sub-block 1 (full half) - set bit 10 */
+					if (AABB_Intersects(entityExtentBB, &sb1)) {
+						Searcher_CalcTime(&vel, entityBB, &sb1, &tx, &ty, &tz);
+						if (tx <= 1.0f && ty <= 1.0f && tz <= 1.0f) {
+							encoded = block | 0x400;
+							curState->x = (x << 3) | (encoded  & 0x007);
+							curState->y = (y << 4) | ((encoded & 0x078) >> 3);
+							curState->z = (z << 4) | ((encoded & 0x780) >> 7);
+							curState->tSquared = tx * tx + ty * ty + tz * tz;
+							curState++;
+						}
+					}
+					continue;
+				}
+
 				xx = (float)x; yy = (float)y; zz = (float)z;
 				blockBB.Min = Blocks.MinBB[block];
 				blockBB.Min.x += xx; blockBB.Min.y += yy; blockBB.Min.z += zz;
@@ -201,7 +235,7 @@ int Searcher_FindReachableBlocks(struct Entity* entity, struct AABB* entityBB, s
 
 				curState->x = (x << 3) | (block  & 0x007);
 				curState->y = (y << 4) | ((block & 0x078) >> 3);
-				curState->z = (z << 3) | ((block & 0x380) >> 7);
+				curState->z = (z << 4) | ((block & 0x780) >> 7);
 				curState->tSquared = tx * tx + ty * ty + tz * tz;
 				curState++;
 			}

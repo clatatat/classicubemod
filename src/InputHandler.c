@@ -1133,6 +1133,10 @@ static void BreakBlockNow(IVec3 pos, BlockID old) {
 					dropBlock = BLOCK_LADDER; /* Ladder variants drop as base ladder */
 				} else if (old >= BLOCK_TORCH_S && old <= BLOCK_TORCH_W) {
 					dropBlock = BLOCK_TORCH; /* Torch wall variants drop as base torch */
+				} else if (old >= BLOCK_WOOD_STAIRS_0 && old <= BLOCK_WOOD_STAIRS_3) {
+					dropBlock = BLOCK_WOOD_STAIRS; /* Wood stair variants drop as base */
+				} else if (old >= BLOCK_COBBLE_STAIRS_0 && old <= BLOCK_COBBLE_STAIRS_3) {
+					dropBlock = BLOCK_COBBLE_STAIRS; /* Cobble stair variants drop as base */
 #endif
 				} else if (old >= BLOCK_WHEAT_0 && old <= BLOCK_WHEAT_7) {
 					/* Wheat crops: drop seeds and wheat based on growth stage */
@@ -2337,6 +2341,22 @@ static void InputHandler_PlaceBlock(void) {
 	}
 
 	if (!CheckIsFree(block)) return;
+
+	/* Stairs: MC Alpha 1.2.6 BlockStairs.onBlockPlacedBy exact port.
+	   CC yaw 0=north, MC yaw 0=south, offset by 180 degrees.
+	   Convert base stair block to directional variant for world placement. */
+	if (block == BLOCK_WOOD_STAIRS || block == BLOCK_COBBLE_STAIRS) {
+		static const cc_uint8 mc_meta[4] = {2, 1, 3, 0};
+		float mc_yaw = LocalPlayer_Instances[0].Base.Yaw + 180.0f;
+		int var6 = ((int)Math_Floor((mc_yaw * 4.0f / 360.0f) + 0.5f)) & 3;
+		cc_uint8 facing = mc_meta[var6];
+#if defined EXTENDED_BLOCKS
+		if (block == BLOCK_WOOD_STAIRS)
+			block = BLOCK_WOOD_STAIRS_0 + facing;
+		else
+			block = BLOCK_COBBLE_STAIRS_0 + facing;
+#endif
+	}
 
 	Game_ChangeBlock(pos.x, pos.y, pos.z, block);
 	Event_RaiseBlock(&UserEvents.BlockChanged, pos, old, block);
@@ -3559,6 +3579,8 @@ static int DropItem_GetItemTex(BlockID block) {
 /* Returns terrain.png tile index for blocks that should render as 2D terrain sprites, -1 otherwise */
 static int DropItem_GetTerrainTile(BlockID block) {
 	if (IsRail(block))                  return 128; /* straight N-S rail (terrain.png tile 128) */
+	if (block == BLOCK_WOOD_STAIRS)     return 4;   /* plank texture */
+	if (block == BLOCK_COBBLE_STAIRS)   return 16;  /* cobblestone texture */
 	return -1;
 }
 

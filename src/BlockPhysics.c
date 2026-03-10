@@ -3901,6 +3901,10 @@ static void Physics_DeleteDoubleChest(int index, BlockID block) {
 static cc_bool Block_IsFlammable(BlockID b) {
 	return b == BLOCK_WOOD || b == BLOCK_LOG || b == BLOCK_LEAVES ||
 	       b == BLOCK_BOOKSHELF || b == BLOCK_COBWEB ||
+	       b == BLOCK_WOOD_STAIRS ||
+#if defined EXTENDED_BLOCKS
+	       (b >= BLOCK_WOOD_STAIRS_0 && b <= BLOCK_WOOD_STAIRS_3) ||
+#endif
 	       (b >= BLOCK_RED && b <= BLOCK_WHITE); /* All wool colors */
 }
 

@@ -31,6 +31,16 @@ static int directionalCount = 0;
 static cc_bool directionalFacing_Enabled = true;
 static cc_uint8 torch_placement_hint = 255; /* 255 = no hint */
 
+/* Check if a block is a stair block */
+static cc_bool IsStairBlock(BlockID block) {
+#if defined EXTENDED_BLOCKS
+	return block == BLOCK_WOOD_STAIRS || block == BLOCK_COBBLE_STAIRS
+		|| (block >= BLOCK_WOOD_STAIRS_0 && block <= BLOCK_COBBLE_STAIRS_3);
+#else
+	return block == BLOCK_WOOD_STAIRS || block == BLOCK_COBBLE_STAIRS;
+#endif
+}
+
 /*########################################################################################################################*
 *---------------------------------------------------Default properties----------------------------------------------------*
 *#########################################################################################################################*/
@@ -78,6 +88,8 @@ static const struct SimpleBlockDef ladder_variant_def = {"Ladder", 83, 83, 83, 1
 static const struct SimpleBlockDef door_variant_def = {"Door", 97, 97, 97, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
 static const struct SimpleBlockDef iron_door_variant_def = {"Iron Door", 55, 55, 55, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT_THICK, COLLIDE_SOLID, SOUND_METAL, SOUND_METAL};
 static const struct SimpleBlockDef torch_wall_def = {"Torch Wall", 80, 80, 80, 10, FOG_NONE, 0, BRIT_FULL, false, 100, DRAW_SPRITE, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef wood_stairs_def = {"Wood Stairs", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_WOOD, SOUND_WOOD};
+static const struct SimpleBlockDef cobble_stairs_def = {"Cobblestone Stairs", 16, 16, 16, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_STONE, SOUND_STONE};
 #endif
 static const struct SimpleBlockDef farmland_wet_def = {"Wet Farmland", 131, 2, 2, 15, FOG_NONE, 0, BRIT_NONE, true, 100, DRAW_TRANSPARENT, COLLIDE_SOLID, SOUND_GRAVEL, SOUND_GRAVEL};
 static const struct SimpleBlockDef sign_wall_def = {"Sign", 4, 4, 4, 16, FOG_NONE, 0, BRIT_NONE, false, 100, DRAW_TRANSPARENT, COLLIDE_NONE, SOUND_WOOD, SOUND_WOOD};
@@ -1801,6 +1813,10 @@ void Block_ResetProps(BlockID block) {
 		def = &iron_door_variant_def;
 	} else if (block >= BLOCK_TORCH_S && block <= BLOCK_TORCH_W) {
 		def = &torch_wall_def;
+	} else if (block == BLOCK_WOOD_STAIRS || (block >= BLOCK_WOOD_STAIRS_0 && block <= BLOCK_WOOD_STAIRS_3)) {
+		def = &wood_stairs_def;
+	} else if (block == BLOCK_COBBLE_STAIRS || (block >= BLOCK_COBBLE_STAIRS_0 && block <= BLOCK_COBBLE_STAIRS_3)) {
+		def = &cobble_stairs_def;
 #endif
 	} else {
 		def = block <= Game_Version.MaxCoreBlock ? &core_blockDefs[block] : &invalid_blockDef;
@@ -2445,6 +2461,50 @@ static void OnBlockChanged(void* obj, IVec3 coords, BlockID old, BlockID now) {
 
 void DirectionalBlock_SetPlacementHint(cc_uint8 facing) {
 	torch_placement_hint = facing;
+}
+
+cc_uint8 Block_GetStairFacing(BlockID block) {
+#if defined EXTENDED_BLOCKS
+	if (block >= BLOCK_WOOD_STAIRS_0 && block <= BLOCK_WOOD_STAIRS_3)
+		return block - BLOCK_WOOD_STAIRS_0;
+	if (block >= BLOCK_COBBLE_STAIRS_0 && block <= BLOCK_COBBLE_STAIRS_3)
+		return block - BLOCK_COBBLE_STAIRS_0;
+#endif
+	return 0;
+}
+
+cc_uint8 Block_GetStairBBs(BlockID block, int x, int y, int z, struct AABB* bb0, struct AABB* bb1) {
+	cc_uint8 facing = Block_GetStairFacing(block);
+	float bx = (float)x, by = (float)y, bz = (float)z;
+
+	/* MC Alpha 1.2.6 BlockStairs.getCollidingBoundingBoxes - exact port */
+	switch (facing) {
+		case 0: /* MC meta 0: step on -X half, full on +X half */
+			bb0->Min.x = bx;       bb0->Min.y = by;       bb0->Min.z = bz;
+			bb0->Max.x = bx + 0.5f; bb0->Max.y = by + 0.5f; bb0->Max.z = bz + 1;
+			bb1->Min.x = bx + 0.5f; bb1->Min.y = by;       bb1->Min.z = bz;
+			bb1->Max.x = bx + 1;   bb1->Max.y = by + 1;   bb1->Max.z = bz + 1;
+			break;
+		case 1: /* MC meta 1: full on -X half, step on +X half */
+			bb0->Min.x = bx;       bb0->Min.y = by;       bb0->Min.z = bz;
+			bb0->Max.x = bx + 0.5f; bb0->Max.y = by + 1;   bb0->Max.z = bz + 1;
+			bb1->Min.x = bx + 0.5f; bb1->Min.y = by;       bb1->Min.z = bz;
+			bb1->Max.x = bx + 1;   bb1->Max.y = by + 0.5f; bb1->Max.z = bz + 1;
+			break;
+		case 2: /* MC meta 2: step on -Z half, full on +Z half */
+			bb0->Min.x = bx;       bb0->Min.y = by;       bb0->Min.z = bz;
+			bb0->Max.x = bx + 1;   bb0->Max.y = by + 0.5f; bb0->Max.z = bz + 0.5f;
+			bb1->Min.x = bx;       bb1->Min.y = by;       bb1->Min.z = bz + 0.5f;
+			bb1->Max.x = bx + 1;   bb1->Max.y = by + 1;   bb1->Max.z = bz + 1;
+			break;
+		default: /* MC meta 3: full on -Z half, step on +Z half */
+			bb0->Min.x = bx;       bb0->Min.y = by;       bb0->Min.z = bz;
+			bb0->Max.x = bx + 1;   bb0->Max.y = by + 1;   bb0->Max.z = bz + 0.5f;
+			bb1->Min.x = bx;       bb1->Min.y = by;       bb1->Min.z = bz + 0.5f;
+			bb1->Max.x = bx + 1;   bb1->Max.y = by + 0.5f; bb1->Max.z = bz + 1;
+			break;
+	}
+	return facing;
 }
 
 static void OnNewMap(void* obj) {

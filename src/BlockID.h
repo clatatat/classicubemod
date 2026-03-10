@@ -87,6 +87,8 @@ enum BLOCKID {
 	BLOCK_SIGN_WALL = 72, /* Wall-mounted wooden sign (orientation from directional cache) */
 	BLOCK_SIGN_FLOOR = 73, /* Floor-mounted sign post (16-angle rotation stored in SignData) */
 	BLOCK_RAIL = 74, /* Minecart rail - connects to adjacent rails, curves at corners */
+	BLOCK_WOOD_STAIRS = 75,   /* Wooden plank stairs (inventory/craftable base block) */
+	BLOCK_COBBLE_STAIRS = 76, /* Cobblestone stairs (inventory/craftable base block) */
 
 	/* Max block ID used in original classic */
 	BLOCK_MAX_ORIGINAL = BLOCK_OBSIDIAN,
@@ -170,58 +172,69 @@ enum BLOCKID {
 	BLOCK_RAIL_CURVE_NE = 255, /* NE curve rail (meta 9, tex 145) */
 
 #if defined EXTENDED_BLOCKS
+	/* Stair directional variants (placed in world, not in inventory) */
+	/* Named by MC Alpha facing metadata: 0=step -X, 1=step +X, 2=step -Z, 3=step +Z */
+	BLOCK_WOOD_STAIRS_0   = 256, /* Wooden stairs, step on -X half */
+	BLOCK_WOOD_STAIRS_1   = 257, /* Wooden stairs, step on +X half */
+	BLOCK_WOOD_STAIRS_2   = 258, /* Wooden stairs, step on -Z half */
+	BLOCK_WOOD_STAIRS_3   = 259, /* Wooden stairs, step on +Z half */
+	BLOCK_COBBLE_STAIRS_0 = 260, /* Cobblestone stairs, step on -X half */
+	BLOCK_COBBLE_STAIRS_1 = 261, /* Cobblestone stairs, step on +X half */
+	BLOCK_COBBLE_STAIRS_2 = 262, /* Cobblestone stairs, step on -Z half */
+	BLOCK_COBBLE_STAIRS_3 = 263, /* Cobblestone stairs, step on +Z half */
+
 	/* Ladder directional variants (placed in world, not in inventory) */
 	/* Named by the wall the ladder attaches to (where support block is) */
-	BLOCK_LADDER_S = 256, /* Attached to south wall (+Z), 2/16 thick at +Z edge */
-	BLOCK_LADDER_N = 257, /* Attached to north wall (-Z), 2/16 thick at -Z edge */
-	BLOCK_LADDER_E = 258, /* Attached to east wall (+X), 2/16 thick at +X edge */
-	BLOCK_LADDER_W = 259, /* Attached to west wall (-X), 2/16 thick at -X edge */
+	BLOCK_LADDER_S = 264, /* Attached to south wall (+Z), 2/16 thick at +Z edge */
+	BLOCK_LADDER_N = 265, /* Attached to north wall (-Z), 2/16 thick at -Z edge */
+	BLOCK_LADDER_E = 266, /* Attached to east wall (+X), 2/16 thick at +X edge */
+	BLOCK_LADDER_W = 267, /* Attached to west wall (-X), 2/16 thick at -X edge */
 
 	/* Wooden door 4-direction variants (MC Alpha 1.2.6 style)
 	   Layout per direction: closed_bottom, closed_top, open_bottom, open_top
 	   XOR 2 toggles open/closed, XOR 1 toggles bottom/top
 	   Dir d closed wall = (d+3)&3, open wall = d
 	   Walls: 0=Z-(north), 1=X+(east), 2=Z+(south), 3=X-(west) */
-	BLOCK_DOOR_D0_BOTTOM      = 260, /* Dir 0 (facing S) closed, X- wall */
-	BLOCK_DOOR_D0_TOP         = 261,
-	BLOCK_DOOR_D0_OPEN_BOTTOM = 262, /* Dir 0 open, Z- wall */
-	BLOCK_DOOR_D0_OPEN_TOP    = 263,
-	BLOCK_DOOR_D1_BOTTOM      = 264, /* Dir 1 (facing W) closed, Z- wall */
-	BLOCK_DOOR_D1_TOP         = 265,
-	BLOCK_DOOR_D1_OPEN_BOTTOM = 266, /* Dir 1 open, X+ wall */
-	BLOCK_DOOR_D1_OPEN_TOP    = 267,
-	BLOCK_DOOR_D2_BOTTOM      = 268, /* Dir 2 (facing N) closed, X+ wall */
-	BLOCK_DOOR_D2_TOP         = 269,
-	BLOCK_DOOR_D2_OPEN_BOTTOM = 270, /* Dir 2 open, Z+ wall */
-	BLOCK_DOOR_D2_OPEN_TOP    = 271,
-	BLOCK_DOOR_D3_BOTTOM      = 272, /* Dir 3 (facing E) closed, Z+ wall */
-	BLOCK_DOOR_D3_TOP         = 273,
-	BLOCK_DOOR_D3_OPEN_BOTTOM = 274, /* Dir 3 open, X- wall */
-	BLOCK_DOOR_D3_OPEN_TOP    = 275,
+	BLOCK_DOOR_D0_BOTTOM      = 268, /* Dir 0 (facing S) closed, X- wall */
+	BLOCK_DOOR_D0_TOP         = 269,
+	BLOCK_DOOR_D0_OPEN_BOTTOM = 270, /* Dir 0 open, Z- wall */
+	BLOCK_DOOR_D0_OPEN_TOP    = 271,
+	BLOCK_DOOR_D1_BOTTOM      = 272, /* Dir 1 (facing W) closed, Z- wall */
+	BLOCK_DOOR_D1_TOP         = 273,
+	BLOCK_DOOR_D1_OPEN_BOTTOM = 274, /* Dir 1 open, X+ wall */
+	BLOCK_DOOR_D1_OPEN_TOP    = 275,
+	BLOCK_DOOR_D2_BOTTOM      = 276, /* Dir 2 (facing N) closed, X+ wall */
+	BLOCK_DOOR_D2_TOP         = 277,
+	BLOCK_DOOR_D2_OPEN_BOTTOM = 278, /* Dir 2 open, Z+ wall */
+	BLOCK_DOOR_D2_OPEN_TOP    = 279,
+	BLOCK_DOOR_D3_BOTTOM      = 280, /* Dir 3 (facing E) closed, Z+ wall */
+	BLOCK_DOOR_D3_TOP         = 281,
+	BLOCK_DOOR_D3_OPEN_BOTTOM = 282, /* Dir 3 open, X- wall */
+	BLOCK_DOOR_D3_OPEN_TOP    = 283,
 
 	/* Iron door 4-direction variants (same layout as wooden) */
-	BLOCK_IRON_DOOR_D0_BOTTOM      = 276, /* Dir 0 closed, X- wall */
-	BLOCK_IRON_DOOR_D0_TOP         = 277,
-	BLOCK_IRON_DOOR_D0_OPEN_BOTTOM = 278, /* Dir 0 open, Z- wall */
-	BLOCK_IRON_DOOR_D0_OPEN_TOP    = 279,
-	BLOCK_IRON_DOOR_D1_BOTTOM      = 280, /* Dir 1 closed, Z- wall */
-	BLOCK_IRON_DOOR_D1_TOP         = 281,
-	BLOCK_IRON_DOOR_D1_OPEN_BOTTOM = 282, /* Dir 1 open, X+ wall */
-	BLOCK_IRON_DOOR_D1_OPEN_TOP    = 283,
-	BLOCK_IRON_DOOR_D2_BOTTOM      = 284, /* Dir 2 closed, X+ wall */
-	BLOCK_IRON_DOOR_D2_TOP         = 285,
-	BLOCK_IRON_DOOR_D2_OPEN_BOTTOM = 286, /* Dir 2 open, Z+ wall */
-	BLOCK_IRON_DOOR_D2_OPEN_TOP    = 287,
-	BLOCK_IRON_DOOR_D3_BOTTOM      = 288, /* Dir 3 closed, Z+ wall */
-	BLOCK_IRON_DOOR_D3_TOP         = 289,
-	BLOCK_IRON_DOOR_D3_OPEN_BOTTOM = 290, /* Dir 3 open, X- wall */
-	BLOCK_IRON_DOOR_D3_OPEN_TOP    = 291,
+	BLOCK_IRON_DOOR_D0_BOTTOM      = 284, /* Dir 0 closed, X- wall */
+	BLOCK_IRON_DOOR_D0_TOP         = 285,
+	BLOCK_IRON_DOOR_D0_OPEN_BOTTOM = 286, /* Dir 0 open, Z- wall */
+	BLOCK_IRON_DOOR_D0_OPEN_TOP    = 287,
+	BLOCK_IRON_DOOR_D1_BOTTOM      = 288, /* Dir 1 closed, Z- wall */
+	BLOCK_IRON_DOOR_D1_TOP         = 289,
+	BLOCK_IRON_DOOR_D1_OPEN_BOTTOM = 290, /* Dir 1 open, X+ wall */
+	BLOCK_IRON_DOOR_D1_OPEN_TOP    = 291,
+	BLOCK_IRON_DOOR_D2_BOTTOM      = 292, /* Dir 2 closed, X+ wall */
+	BLOCK_IRON_DOOR_D2_TOP         = 293,
+	BLOCK_IRON_DOOR_D2_OPEN_BOTTOM = 294, /* Dir 2 open, Z+ wall */
+	BLOCK_IRON_DOOR_D2_OPEN_TOP    = 295,
+	BLOCK_IRON_DOOR_D3_BOTTOM      = 296, /* Dir 3 closed, Z+ wall */
+	BLOCK_IRON_DOOR_D3_TOP         = 297,
+	BLOCK_IRON_DOOR_D3_OPEN_BOTTOM = 298, /* Dir 3 open, X- wall */
+	BLOCK_IRON_DOOR_D3_OPEN_TOP    = 299,
 
 	/* Wall-mounted regular torch variants - named by direction to attach block */
-	BLOCK_TORCH_S = 292, /* Attached to block at z+1 (south) */
-	BLOCK_TORCH_N = 293, /* Attached to block at z-1 (north) */
-	BLOCK_TORCH_E = 294, /* Attached to block at x+1 (east) */
-	BLOCK_TORCH_W = 295, /* Attached to block at x-1 (west) */
+	BLOCK_TORCH_S = 300, /* Attached to block at z+1 (south) */
+	BLOCK_TORCH_N = 301, /* Attached to block at z-1 (north) */
+	BLOCK_TORCH_E = 302, /* Attached to block at x+1 (east) */
+	BLOCK_TORCH_W = 303, /* Attached to block at x-1 (west) */
 
 	BLOCK_MAX_DEFINED = 0x2FF,
 #elif defined CC_BUILD_TINYMEM

@@ -173,6 +173,16 @@ cc_bool Entity_TouchesAny(struct AABB* bounds, Entity_TouchesCondition condition
 			for (x = bbMin.x; x <= bbMax.x; x++) { v.x = (float)x;
 
 				block = World_GetBlock(x, y, z);
+
+				/* Stairs have two sub-block collision AABBs */
+				if (Block_IsStairBlock(block) && condition(block)) {
+					struct AABB sb0, sb1;
+					Block_GetStairBBs(block, x, y, z, &sb0, &sb1);
+					if (AABB_Intersects(&sb0, bounds)) return true;
+					if (AABB_Intersects(&sb1, bounds)) return true;
+					continue;
+				}
+
 				Vec3_Add(&blockBB.Min, &v, &Blocks.MinBB[block]);
 				Vec3_Add(&blockBB.Max, &v, &Blocks.MaxBB[block]);
 

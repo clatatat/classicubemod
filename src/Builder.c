@@ -41,6 +41,11 @@ int Builder_SidesLevel, Builder_EdgeLevel;
 #define IsLeverBlock(b) ((b) == BLOCK_LEVER || (b) == BLOCK_LEVER_ON)
 #define IsCropBlock(b)  ((b) >= BLOCK_WHEAT_0 && (b) <= BLOCK_WHEAT_7)
 #define IsRailBlock(b)  ((b) == BLOCK_RAIL || ((b) >= BLOCK_RAIL_EW && (b) <= BLOCK_RAIL_CURVE_NE))
+#if defined EXTENDED_BLOCKS
+#define IsStairBlock(b) ((b) == BLOCK_WOOD_STAIRS || (b) == BLOCK_COBBLE_STAIRS || ((b) >= BLOCK_WOOD_STAIRS_0 && (b) <= BLOCK_COBBLE_STAIRS_3))
+#else
+#define IsStairBlock(b) ((b) == BLOCK_WOOD_STAIRS || (b) == BLOCK_COBBLE_STAIRS)
+#endif
 
 /* Non-sprite detail blocks that can be skipped in far chunks */
 #define IsDetailBlock(b) ( \
@@ -283,6 +288,24 @@ static void PrepareChunk(int x1, int y1, int z1) {
 					Builder_Counts[index + FACE_ZMAX] = 0;
 					Builder_Counts[index + FACE_YMIN] = 0;
 					AddVertices(b, FACE_YMAX);
+					continue;
+				}
+				
+				/* Stairs use custom rendering (two sub-blocks per stair).
+				   Zero all face counts and add 2x vertices per face for both sub-blocks. */
+				if (IsStairBlock(b)) {
+					Builder_Counts[index + FACE_XMIN] = 0;
+					Builder_Counts[index + FACE_XMAX] = 0;
+					Builder_Counts[index + FACE_ZMIN] = 0;
+					Builder_Counts[index + FACE_ZMAX] = 0;
+					Builder_Counts[index + FACE_YMIN] = 0;
+					Builder_Counts[index + FACE_YMAX] = 0;
+					AddVertices(b, FACE_XMIN); AddVertices(b, FACE_XMIN);
+					AddVertices(b, FACE_XMAX); AddVertices(b, FACE_XMAX);
+					AddVertices(b, FACE_ZMIN); AddVertices(b, FACE_ZMIN);
+					AddVertices(b, FACE_ZMAX); AddVertices(b, FACE_ZMAX);
+					AddVertices(b, FACE_YMIN); AddVertices(b, FACE_YMIN);
+					AddVertices(b, FACE_YMAX); AddVertices(b, FACE_YMAX);
 					continue;
 				}
 				
@@ -1435,6 +1458,97 @@ static cc_bool HasSnowAbove(int x, int y, int z) {
 	return above == BLOCK_SNOW || above == BLOCK_SNOW_BLOCK;
 }
 
+/* Renders a stair block as two sub-blocks (MC Alpha 1.2.6 style).
+   Uses the directional cache to determine which direction the step faces.
+   Facing 0=North(-Z step), 1=South(+Z step), 2=West(-X step), 3=East(+X step)
+   For each facing, there's a bottom half-slab on the step side and a full-height block on the back. */
+static void Builder_DrawStairs(int x, int y, int z) {
+	cc_uint8 facing;
+	int baseOffset, lightFlags, f;
+	TextureLoc loc;
+	PackedCol col;
+	struct Builder1DPart* part;
+
+	/* Two sub-block bounds: A = slab (step), B = full (back) */
+	float ax1, ay1, az1, ax2, ay2, az2;
+	float bx1, by1, bz1, bx2, by2, bz2;
+	Vec3 aMin, aMax, bMin, bMax;
+
+	facing = Block_GetStairFacing(Builder_Block);
+	baseOffset = (Blocks.Draw[Builder_Block] == DRAW_TRANSLUCENT) * ATLAS1D_MAX_ATLASES;
+	lightFlags = Blocks.LightOffset[Builder_Block];
+
+	Drawer.Tinted  = Blocks.Tinted[Builder_Block];
+	Drawer.TintCol = Blocks.FogCol[Builder_Block];
+
+	/* MC Alpha 1.2.6 RenderBlocks.renderBlockStairs - exact port */
+	switch (facing) {
+		case 0: /* MC meta 0: step on -X half, full on +X half */
+			Vec3_Set(aMin, 0, 0, 0);     Vec3_Set(aMax, 0.5f, 0.5f, 1);
+			Vec3_Set(bMin, 0.5f, 0, 0);  Vec3_Set(bMax, 1, 1, 1);
+			break;
+		case 1: /* MC meta 1: full on -X half, step on +X half */
+			Vec3_Set(aMin, 0, 0, 0);     Vec3_Set(aMax, 0.5f, 1, 1);
+			Vec3_Set(bMin, 0.5f, 0, 0);  Vec3_Set(bMax, 1, 0.5f, 1);
+			break;
+		case 2: /* MC meta 2: step on -Z half, full on +Z half */
+			Vec3_Set(aMin, 0, 0, 0);     Vec3_Set(aMax, 1, 0.5f, 0.5f);
+			Vec3_Set(bMin, 0, 0, 0.5f);  Vec3_Set(bMax, 1, 1, 1);
+			break;
+		default: /* MC meta 3: full on -Z half, step on +Z half */
+			Vec3_Set(aMin, 0, 0, 0);     Vec3_Set(aMax, 1, 1, 0.5f);
+			Vec3_Set(bMin, 0, 0, 0.5f);  Vec3_Set(bMax, 1, 0.5f, 1);
+			break;
+	}
+
+	/* Get texture - stairs use same texture on all faces */
+	loc = Block_Tex(Builder_Block, FACE_YMAX);
+
+	/* Render both sub-blocks using the Drawer functions */
+	/* Sub-block A */
+	ax1 = x + aMin.x; ay1 = y + aMin.y; az1 = z + aMin.z;
+	ax2 = x + aMax.x; ay2 = y + aMax.y; az2 = z + aMax.z;
+
+	Drawer.MinBB = aMin; Drawer.MinBB.y = 1.0f - Drawer.MinBB.y;
+	Drawer.MaxBB = aMax; Drawer.MaxBB.y = 1.0f - Drawer.MaxBB.y;
+	Drawer.X1 = ax1; Drawer.Y1 = ay1; Drawer.Z1 = az1;
+	Drawer.X2 = ax2; Drawer.Y2 = ay2; Drawer.Z2 = az2;
+
+	part = &Builder_Parts[baseOffset + Atlas1D_Index(loc)];
+	for (f = FACE_XMIN; f <= FACE_YMAX; f++) {
+		col = Blocks.Brightness[Builder_Block] ? PACKEDCOL_WHITE : Normal_LightColor(x, y, z, f, Builder_Block);
+		switch (f) {
+			case FACE_XMIN: Drawer_XMin(1, col, loc, &part->faces.vertices[FACE_XMIN]); break;
+			case FACE_XMAX: Drawer_XMax(1, col, loc, &part->faces.vertices[FACE_XMAX]); break;
+			case FACE_ZMIN: Drawer_ZMin(1, col, loc, &part->faces.vertices[FACE_ZMIN]); break;
+			case FACE_ZMAX: Drawer_ZMax(1, col, loc, &part->faces.vertices[FACE_ZMAX]); break;
+			case FACE_YMIN: Drawer_YMin(1, col, loc, &part->faces.vertices[FACE_YMIN]); break;
+			case FACE_YMAX: Drawer_YMax(1, col, loc, &part->faces.vertices[FACE_YMAX]); break;
+		}
+	}
+
+	/* Sub-block B */
+	bx1 = x + bMin.x; by1 = y + bMin.y; bz1 = z + bMin.z;
+	bx2 = x + bMax.x; by2 = y + bMax.y; bz2 = z + bMax.z;
+
+	Drawer.MinBB = bMin; Drawer.MinBB.y = 1.0f - Drawer.MinBB.y;
+	Drawer.MaxBB = bMax; Drawer.MaxBB.y = 1.0f - Drawer.MaxBB.y;
+	Drawer.X1 = bx1; Drawer.Y1 = by1; Drawer.Z1 = bz1;
+	Drawer.X2 = bx2; Drawer.Y2 = by2; Drawer.Z2 = bz2;
+
+	for (f = FACE_XMIN; f <= FACE_YMAX; f++) {
+		col = Blocks.Brightness[Builder_Block] ? PACKEDCOL_WHITE : Normal_LightColor(x, y, z, f, Builder_Block);
+		switch (f) {
+			case FACE_XMIN: Drawer_XMin(1, col, loc, &part->faces.vertices[FACE_XMIN]); break;
+			case FACE_XMAX: Drawer_XMax(1, col, loc, &part->faces.vertices[FACE_XMAX]); break;
+			case FACE_ZMIN: Drawer_ZMin(1, col, loc, &part->faces.vertices[FACE_ZMIN]); break;
+			case FACE_ZMAX: Drawer_ZMax(1, col, loc, &part->faces.vertices[FACE_ZMAX]); break;
+			case FACE_YMIN: Drawer_YMin(1, col, loc, &part->faces.vertices[FACE_YMIN]); break;
+			case FACE_YMAX: Drawer_YMax(1, col, loc, &part->faces.vertices[FACE_YMAX]); break;
+		}
+	}
+}
+
 /* Draws a rail block as a flat or sloped quad on the YMAX face.
    Each rail orientation is its own block ID with its own texture.
    No UV rotation needed - textures are pre-oriented in terrain.png. */
@@ -1629,6 +1743,11 @@ static void NormalBuilder_RenderBlock(int index, int x, int y, int z) {
 	/* Rails use custom rendering with UV rotation for the top face */
 	if (IsRailBlock(Builder_Block)) {
 		Builder_DrawRail(index, x, y, z); return;
+	}
+
+	/* Stairs use custom rendering as two sub-blocks */
+	if (IsStairBlock(Builder_Block)) {
+		Builder_DrawStairs(x, y, z); return;
 	}
 
 	count_XMin = Builder_Counts[index + FACE_XMIN];
@@ -2233,6 +2352,11 @@ static void Adv_RenderBlock(int index, int x, int y, int z) {
 		Builder_DrawRail(index, x, y, z); return;
 	}
 
+	/* Stairs use custom rendering as two sub-blocks */
+	if (IsStairBlock(Builder_Block)) {
+		Builder_DrawStairs(x, y, z); return;
+	}
+
 	count_XMin = Builder_Counts[index + FACE_XMIN];
 	count_XMax = Builder_Counts[index + FACE_XMAX];
 	count_ZMin = Builder_Counts[index + FACE_ZMIN];
@@ -2625,6 +2749,11 @@ static void Modern_RenderBlock(int index, int x, int y, int z) {
 	/* Rails use custom rendering with UV rotation for the top face */
 	if (IsRailBlock(Builder_Block)) {
 		Builder_DrawRail(index, x, y, z); return;
+	}
+
+	/* Stairs use custom rendering as two sub-blocks */
+	if (IsStairBlock(Builder_Block)) {
+		Builder_DrawStairs(x, y, z); return;
 	}
 
 	count_XMin = Builder_Counts[index + FACE_XMIN];

@@ -591,6 +591,16 @@ static const struct CraftRecipe craftRecipes[] = {
 	           CB(BLOCK_SAND), CI(ITEM_SULPHUR), CB(BLOCK_SAND),
 	           CI(ITEM_SULPHUR), CB(BLOCK_SAND), CI(ITEM_SULPHUR) }, BLOCK_TNT, ITEM_NONE, 1 },
 
+	/* Wooden Stairs: 6 Planks in staircase (3x3) -> 4 */
+	{ 3, 3, { CB(BLOCK_WOOD), 0,              0,
+	           CB(BLOCK_WOOD), CB(BLOCK_WOOD), 0,
+	           CB(BLOCK_WOOD), CB(BLOCK_WOOD), CB(BLOCK_WOOD) }, BLOCK_WOOD_STAIRS, ITEM_NONE, 4 },
+
+	/* Cobblestone Stairs: 6 Cobblestone in staircase (3x3) -> 4 */
+	{ 3, 3, { CB(BLOCK_COBBLE), 0,               0,
+	           CB(BLOCK_COBBLE), CB(BLOCK_COBBLE), 0,
+	           CB(BLOCK_COBBLE), CB(BLOCK_COBBLE), CB(BLOCK_COBBLE) }, BLOCK_COBBLE_STAIRS, ITEM_NONE, 4 },
+
 	/* ===== Armor recipes (5 material tiers) ===== */
 	/* Cloth armor (material = BLOCK_WHITE / wool) */
 	HELMET_RECIPE(CB(BLOCK_WHITE), 1),
@@ -1606,6 +1616,10 @@ static void OnReset(void) {
 	/* Remove 4-direction door variants from inventory (auto-placed by placement code) */
 	{ int di; for (di = BLOCK_DOOR_D0_BOTTOM; di <= BLOCK_DOOR_D3_OPEN_TOP; di++) Inventory_Remove(di); }
 	{ int di; for (di = BLOCK_IRON_DOOR_D0_BOTTOM; di <= BLOCK_IRON_DOOR_D3_OPEN_TOP; di++) Inventory_Remove(di); }
+	
+	/* Remove stair directional variants from inventory (auto-placed by placement code) */
+	{ int di; for (di = BLOCK_WOOD_STAIRS_0; di <= BLOCK_WOOD_STAIRS_3; di++) Inventory_Remove(di); }
+	{ int di; for (di = BLOCK_COBBLE_STAIRS_0; di <= BLOCK_COBBLE_STAIRS_3; di++) Inventory_Remove(di); }
 #endif
 
 	/* Remove wheat stages from inventory (grown on farmland) */
@@ -1615,11 +1629,10 @@ static void OnReset(void) {
 	Inventory_AddDefault(BLOCK_SIGN_WALL);
 	Inventory_AddDefault(BLOCK_SIGN_FLOOR);
 
-	/* Add portal to inventory */
-	Inventory_AddDefault(BLOCK_PORTAL);
-
 	/* Add survival-mode blocks to inventory (IDs above CPE range) */
 	Inventory_AddDefault(BLOCK_RAIL);
+	Inventory_AddDefault(BLOCK_WOOD_STAIRS);
+	Inventory_AddDefault(BLOCK_COBBLE_STAIRS);
 
 	Inventory.CanChangeSelected = true;
 	Mem_Set(HotbarItems, 0, sizeof(HotbarItems));

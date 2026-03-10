@@ -8,6 +8,7 @@
    Also performs automatic rotation of directional blocks.
    Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 */
+struct AABB;
 CC_BEGIN_HEADER
 
 struct IGameComponent;
@@ -158,6 +159,21 @@ cc_uint8 DirectionalBlock_GetFacing(int x, int y, int z);
 /* Set a placement hint for the next regular torch being placed by the player.
    facing: 0=attached z+1, 1=attached z-1, 2=attached x+1, 3=attached x-1, 4=ground, 255=no hint */
 void DirectionalBlock_SetPlacementHint(cc_uint8 facing);
+
+/* Check if a block is a stair block (base or directional variant) */
+#if defined EXTENDED_BLOCKS
+#define Block_IsStairBlock(b) ( \
+	(b) == BLOCK_WOOD_STAIRS || (b) == BLOCK_COBBLE_STAIRS || \
+	((b) >= BLOCK_WOOD_STAIRS_0 && (b) <= BLOCK_COBBLE_STAIRS_3))
+#else
+#define Block_IsStairBlock(b) ((b) == BLOCK_WOOD_STAIRS || (b) == BLOCK_COBBLE_STAIRS)
+#endif
+/* Get facing (0-3) from a stair block ID. Returns 0 for base blocks. */
+cc_uint8 Block_GetStairFacing(BlockID block);
+/* Get the two collision sub-AABBs for a stair block.
+   Populates bb0 (step half) and bb1 (full half) in world coordinates.
+   Returns the facing direction (0-3). */
+cc_uint8 Block_GetStairBBs(BlockID block, int x, int y, int z, struct AABB* bb0, struct AABB* bb1);
 
 /* Get rail texture and rotation for a specific face at a world position.
    Returns encoded value: (textureLoc << 2) | rotation
