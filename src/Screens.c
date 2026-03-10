@@ -88,6 +88,7 @@ static struct HUDScreen {
 	float airDrainAccum;         /* fraction of next air unit to drain */
 	float drownDamageTimer;      /* seconds accumulated toward next drowning damage tick */
 	cc_bool headInWater;         /* whether player head is currently submerged */
+	int lastArmor;               /* last rendered armor value, for dirty detection */
 	struct HotbarWidget hotbar;
 } HUDScreen_Instance CC_BIG_VAR;
 
@@ -95,7 +96,7 @@ static struct HUDScreen {
 #define POSITION_VAL_CHARS 11
 /* [PREFIX] [(] [X] [,] [Y] [,] [Z] [)] */
 #define POSITION_HUD_CHARS (1 + 1 + POSITION_VAL_CHARS + 1 + POSITION_VAL_CHARS + 1 + POSITION_VAL_CHARS + 1)
-#define HUD_MAX_VERTICES (4 + TEXTWIDGET_MAX * 2 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4 + 10 * 4)
+#define HUD_MAX_VERTICES (4 + TEXTWIDGET_MAX * 2 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4 + 10 * 4 + 10 * 4)
 
 static void HUDScreen_RemakeLine1(struct HUDScreen* s) {
 	cc_string status; char statusBuffer[STRING_SIZE * 2];
@@ -238,6 +239,8 @@ static void HUDScreen_ContextRecreated(void* screen) {
 	HUDScreen_RemakeLine2(s);
 }
 
+static int HUDScreen_GetArmorPoints(void);
+
 int HUDScreen_LayoutHotbar(void) {
 	struct HUDScreen* s = &HUDScreen_Instance;
 	s->hotbar.scale     = Gui_GetHotbarScale();
@@ -252,8 +255,16 @@ static void HUDScreen_Layout(void* screen) {
 	cc_uint8 horAnchor = Game_AltStatPos ? ANCHOR_MAX : ANCHOR_MIN;
 	int posY;
 
-	Widget_SetLocation(line1, horAnchor, ANCHOR_MIN, 
-						2 + DisplayInfo.ContentOffsetX, 2 + DisplayInfo.ContentOffsetY);
+	{
+		/* In alt stat mode, push text below armor bar if it would be shown */
+		int armorOffset = 0;
+		if (Game_AltStatPos && Game_SurvivalMode && HUDScreen_GetArmorPoints() > 0) {
+			int heartSize = (int)(9.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+			armorOffset = heartSize + (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+		}
+		Widget_SetLocation(line1, horAnchor, ANCHOR_MIN, 
+							2 + DisplayInfo.ContentOffsetX, 2 + DisplayInfo.ContentOffsetY + armorOffset);
+	}
 	posY = line1->y + line1->height;
 	s->posAtlas.tex.y = posY;
 	Widget_SetLocation(line2, horAnchor, ANCHOR_MIN, 
@@ -325,6 +336,7 @@ static void HUDScreen_NeedRedrawing(void* obj) {
 
 static int heartsCount;  /* Number of heart quads actually built (0 if not survival) */
 static int bubblesCount; /* Number of bubble quads actually built (0 if not underwater) */
+static int armorCount;   /* Number of armor quads actually built (0 if no armor) */
 static RNGState heartsRng; /* RNG for low-health heart shaking */
 #define LOW_HEALTH_THRESHOLD 4 /* shake when health <= 4 (2 hearts) */
 
@@ -457,6 +469,18 @@ static void HUDScreen_Update(void* screen, float delta) {
 	/* Keep rebuilding when low health so hearts shake */
 	if (Player_Health > 0 && Player_Health <= LOW_HEALTH_THRESHOLD && Game_SurvivalMode) {
 		s->dirty = true;
+	}
+	/* Rebuild HUD when armor value changes */
+	{
+		int curArmor = HUDScreen_GetArmorPoints();
+		if (curArmor != s->lastArmor) {
+			/* Re-layout text when armor appears/disappears in alt stat mode */
+			if (Game_AltStatPos && ((curArmor > 0) != (s->lastArmor > 0))) {
+				HUDScreen_Layout(s);
+			}
+			s->lastArmor = curArmor;
+			s->dirty     = true;
+		}
 	}
 }
 
@@ -621,6 +645,72 @@ static void HUDScreen_BuildBubblesMesh(struct VertexTextured** ptr) {
 	}
 }
 
+/* Sum defense points from all equipped armor pieces (mirrors Player_GetArmorPoints in InputHandler.c) */
+static int HUDScreen_GetArmorPoints(void) {
+	int total = 0, i, itemId;
+	for (i = 0; i < 4; i++) {
+		itemId = SurvInv_Armor[i].itemId;
+		if (itemId > ITEM_NONE && itemId < ITEM_COUNT)
+			total += ItemArmorPoints[itemId];
+	}
+	return total;
+}
+
+/* Armor icon tile indices in icons.png row 1 (y=9), each 9px wide starting at x=16 */
+#define ICON_ARMOR_FULL  0  /* x=16: full armor */
+#define ICON_ARMOR_HALF  1  /* x=25: half armor */
+#define ICON_ARMOR_EMPTY 2  /* x=34: empty armor outline */
+
+static void HUDScreen_BuildArmorMesh(struct VertexTextured** ptr) {
+	struct HUDScreen* s = &HUDScreen_Instance;
+	struct Texture tex;
+	float u1, v1, u2, v2;
+	int i, heartSize, heartSpacing, startX, startY;
+	int armor = HUDScreen_GetArmorPoints();
+
+	armorCount = 0;
+	if (!Game_SurvivalMode) return;
+	if (armor <= 0) return;
+
+	/* Scale to match hearts */
+	heartSize    = (int)(9.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	heartSpacing = -1;
+
+	/* Position: right-aligned with hotbar, same row as hearts (mirrors Alpha 1.2.6) */
+	if (Game_AltStatPos) {
+		startX = Window_Main.Width - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleX)
+		       - 10 * (heartSize + heartSpacing) + heartSpacing;
+		startY = (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	} else {
+		startX = s->hotbar.x + s->hotbar.width - 10 * (heartSize + heartSpacing) + heartSpacing;
+		startY = s->hotbar.y - heartSize - (int)(2.0f * s->hotbar.scale * DisplayInfo.ScaleY);
+	}
+
+	tex.width  = heartSize;
+	tex.height = heartSize;
+
+	for (i = 0; i < 10; i++) {
+		int ap = armor - i * 2;
+		int tileIndex;
+
+		if (ap >= 2) {
+			tileIndex = ICON_ARMOR_FULL;
+		} else if (ap == 1) {
+			tileIndex = ICON_ARMOR_HALF;
+		} else {
+			tileIndex = ICON_ARMOR_EMPTY;
+		}
+
+		Icon_GetHeartUV(tileIndex, 1, &u1, &v1, &u2, &v2);
+		tex.x = startX + i * (heartSize + heartSpacing);
+		tex.y = startY;
+		tex.uv.u1 = u1; tex.uv.v1 = v1;
+		tex.uv.u2 = u2; tex.uv.v2 = v2;
+		Gfx_Make2DQuad(&tex, PACKEDCOL_WHITE, ptr);
+		armorCount++;
+	}
+}
+
 static void HUDScreen_BuildCrosshairsMesh(struct VertexTextured** ptr) {
 	/* Full icons.png (256x256), crosshair is 15x15 pixels from top-left */
 	static struct Texture tex = { 0, Tex_Rect(0,0,0,0), Tex_UV(0.0f,0.0f, 15/256.0f,15/256.0f) };
@@ -638,6 +728,7 @@ static void HUDScreen_BuildCrosshairsMesh(struct VertexTextured** ptr) {
 static void HUDScreen_BuildMesh(void* screen) {
 	struct HUDScreen* s = (struct HUDScreen*)screen;
 	struct VertexTextured* data;
+	struct VertexTextured* base;
 	struct VertexTextured** ptr;
 
 	data = Screen_LockVb(s);
@@ -648,12 +739,20 @@ static void HUDScreen_BuildMesh(void* screen) {
 	Widget_BuildMesh(&s->line2,  ptr);
 	Widget_BuildMesh(&s->hotbar, ptr);
 
+	/* Save base after widgets — all fixed offsets below are relative to this */
+	base = data;
+
 	if (!Game_ClassicMode) 
 		HUDScreen_BuildPosition(s, data);
-	/* Advance ptr past position area to place hearts after it */
-	*ptr = data + POSITION_HUD_CHARS * 4;
-	HUDScreen_BuildHeartsMesh(ptr);  /* always writes exactly 10 quads in survival mode */
-	HUDScreen_BuildBubblesMesh(ptr); /* writes after hearts; nop in non-survival mode */
+	/* Place hearts at fixed offset after position area */
+	*ptr = base + POSITION_HUD_CHARS * 4;
+	HUDScreen_BuildHeartsMesh(ptr);
+	/* Place bubbles at fixed offset after hearts (10 quads) */
+	*ptr = base + POSITION_HUD_CHARS * 4 + 10 * 4;
+	HUDScreen_BuildBubblesMesh(ptr);
+	/* Place armor at fixed offset after bubbles (10 quads) */
+	*ptr = base + POSITION_HUD_CHARS * 4 + 10 * 4 + 10 * 4;
+	HUDScreen_BuildArmorMesh(ptr);
 	Gfx_UnlockDynamicVb(s->vb);
 }
 
@@ -699,6 +798,13 @@ static void HUDScreen_Render(void* screen, float delta) {
 			Gfx_BindDynamicVb(s->vb);
 			Gfx_DrawVb_IndexedTris_Range(bubblesCount * 4,
 				12 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4, DRAW_HINT_SPRITE);
+		}
+		/* Render armor bar (survival mode, when player has armor equipped) */
+		if (armorCount > 0 && Gui.IconsTex && !Gui.HideHotbar && !SurvInv_IsScreenOpen()) {
+			Gfx_BindTexture(Gui.IconsTex);
+			Gfx_BindDynamicVb(s->vb);
+			Gfx_DrawVb_IndexedTris_Range(armorCount * 4,
+				12 + HOTBAR_MAX_VERTICES + POSITION_HUD_CHARS * 4 + 10 * 4 + 10 * 4, DRAW_HINT_SPRITE);
 		}
 	}
 

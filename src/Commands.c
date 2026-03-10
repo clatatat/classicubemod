@@ -799,7 +799,7 @@ static struct ChatCommand BlockEditCommand = {
 *------------------------------------------------------/cheat Command-----------------------------------------------------*
 *#########################################################################################################################*/
 static void CheatCommand_Execute(const cc_string* args, int argsCount) {
-	static const cc_string msgOn  = String_FromConst("&eCheats &aenabled &7(invincible)");
+	static const cc_string msgOn  = String_FromConst("&eCheats &aenabled &7");
 	static const cc_string msgOff = String_FromConst("&eCheats &cdisabled");
 	static const cc_string msgCreative = String_FromConst("&eCheats are always on in creative mode.");
 
