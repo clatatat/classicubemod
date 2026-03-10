@@ -31,13 +31,20 @@
 #define ADV_SHADE_YMIN  3
 #define ADV_SHADE_COUNT 4
 
-/* Per-block light level arrays (0-15 each) */
-static cc_uint8* adv_skylight;
-static cc_uint8* adv_blocklight;
+/* Nibble-packed light array: upper nibble = sky (0-15), lower nibble = block (0-15) */
+static cc_uint8* adv_light;
+
+#define ADV_GET_SKY(packed) ((packed) >> 4)
+#define ADV_GET_BLK(packed) ((packed) & 0x0F)
+#define ADV_SET_SKY(ptr, val) (*(ptr) = (*(ptr) & 0x0F) | ((val) << 4))
+#define ADV_SET_BLK(ptr, val) (*(ptr) = (*(ptr) & 0xF0) | (val))
 
 /* Pre-computed color palettes: sky light (changes with day/night) and block light (constant warm) */
 static PackedCol adv_sky_palette[ADV_SHADE_COUNT][FANCY_LIGHTING_LEVELS];
 static PackedCol adv_blk_palette[ADV_SHADE_COUNT][FANCY_LIGHTING_LEVELS];
+/* Pre-resolved combined palette: for each packed (sky<<4|block) byte, the final color per shade. */
+/* Eliminates per-vertex sky subtraction, double palette lookup, and BrighterCol comparison. */
+static PackedCol adv_combined[ADV_SHADE_COUNT][256];
 
 /* Pure white torch glow - stays constant regardless of day/night */
 #define ADV_TORCH_COL PackedCol_Make(255, 255, 255, 255)
@@ -126,6 +133,28 @@ static void Adv_InitAllPalettes(void) {
 	Adv_InitBlkPalette(ADV_SHADE_XSIDE, PACKEDCOL_SHADE_X);
 	Adv_InitBlkPalette(ADV_SHADE_ZSIDE, PACKEDCOL_SHADE_Z);
 	Adv_InitBlkPalette(ADV_SHADE_YMIN,  PACKEDCOL_SHADE_YMIN);
+
+	/* Build combined palette: pre-resolve BrighterCol(sky, block) for all 256 packed values */
+	{
+		int shade, sky, blk, effSky;
+		PackedCol skyCol, blkCol;
+		int sumSky, sumBlk;
+
+		for (shade = 0; shade < ADV_SHADE_COUNT; shade++) {
+			for (sky = 0; sky < FANCY_LIGHTING_LEVELS; sky++) {
+				effSky = sky - adv_sky_subtraction;
+				if (effSky < 0) effSky = 0;
+				skyCol = adv_sky_palette[shade][effSky];
+
+				for (blk = 0; blk < FANCY_LIGHTING_LEVELS; blk++) {
+					blkCol = adv_blk_palette[shade][blk];
+					sumSky = PackedCol_R(skyCol) + PackedCol_G(skyCol) + PackedCol_B(skyCol);
+					sumBlk = PackedCol_R(blkCol) + PackedCol_G(blkCol) + PackedCol_B(blkCol);
+					adv_combined[shade][(sky << 4) | blk] = sumSky >= sumBlk ? skyCol : blkCol;
+				}
+			}
+		}
+	}
 }
 
 
@@ -134,40 +163,20 @@ static void Adv_InitAllPalettes(void) {
 *#########################################################################################################################*/
 static cc_uint8 Adv_GetLight(int x, int y, int z) {
 	int idx;
-	cc_uint8 sky, blk;
+	cc_uint8 packed, sky, blk;
 
+	if (!adv_light) return 0;
 	idx = World_Pack(x, y, z);
-	sky = adv_skylight  ? adv_skylight[idx]  : 0;
-	blk = adv_blocklight ? adv_blocklight[idx] : 0;
+	packed = adv_light[idx];
+	sky = ADV_GET_SKY(packed);
+	blk = ADV_GET_BLK(packed);
 
 	return sky > blk ? sky : blk;
 }
 
-/* Returns the brighter of two PackedCols by R+G+B sum */
-static PackedCol Adv_BrighterCol(PackedCol a, PackedCol b) {
-	int sumA = PackedCol_R(a) + PackedCol_G(a) + PackedCol_B(a);
-	int sumB = PackedCol_R(b) + PackedCol_G(b) + PackedCol_B(b);
-	return sumA >= sumB ? a : b;
-}
-
-/* Look up color from separate sky and block palettes, return the brighter one */
+/* Look up pre-resolved color from combined palette (single array read + single lookup) */
 static PackedCol Adv_GetColor(int x, int y, int z, int shade) {
-	int idx, effSky;
-	cc_uint8 sky, blk;
-	PackedCol skyCol, blkCol;
-
-	idx = World_Pack(x, y, z);
-	sky = adv_skylight   ? adv_skylight[idx]   : 0;
-	blk = adv_blocklight ? adv_blocklight[idx] : 0;
-
-	/* Reduce effective sky light at night */
-	effSky = (int)sky - adv_sky_subtraction;
-	if (effSky < 0) effSky = 0;
-
-	skyCol = adv_sky_palette[shade][effSky];
-	blkCol = adv_blk_palette[shade][blk];
-
-	return Adv_BrighterCol(skyCol, blkCol);
+	return adv_combined[shade][adv_light[World_Pack(x, y, z)]];
 }
 
 /* Whether light can pass through a block */
@@ -187,7 +196,7 @@ static cc_bool Adv_CanLightPass(BlockID block) {
 static PackedCol Adv_Color(int x, int y, int z) {
 	if (!World_Contains(x, y, z))
 		return y >= Env.EdgeHeight ? Env.SunCol : Env.ShadowCol;
-	if (!adv_skylight)
+	if (!adv_light)
 		return ClassicLighting_IsLit(x, y, z) ? Env.SunCol : Env.ShadowCol;
 	return Adv_GetColor(x, y, z, ADV_SHADE_YMAX);
 }
@@ -195,37 +204,37 @@ static PackedCol Adv_Color(int x, int y, int z) {
 static PackedCol Adv_Color_XSide(int x, int y, int z) {
 	if (!World_Contains(x, y, z))
 		return y >= Env.EdgeHeight ? Env.SunXSide : Env.ShadowXSide;
-	if (!adv_skylight)
+	if (!adv_light)
 		return ClassicLighting_IsLit(x, y, z) ? Env.SunXSide : Env.ShadowXSide;
 	return Adv_GetColor(x, y, z, ADV_SHADE_XSIDE);
 }
 
 static PackedCol Adv_Color_Sprite_Fast(int x, int y, int z) {
-	if (!adv_skylight || !World_Contains(x, y, z))
+	if (!adv_light || !World_Contains(x, y, z))
 		return ClassicLighting_IsLit_Fast(x, y, z) ? Env.SunCol : Env.ShadowCol;
 	return Adv_GetColor(x, y, z, ADV_SHADE_YMAX);
 }
 
 static PackedCol Adv_Color_YMax_Fast(int x, int y, int z) {
-	if (!adv_skylight || !World_Contains(x, y, z))
+	if (!adv_light || !World_Contains(x, y, z))
 		return ClassicLighting_IsLit_Fast(x, y, z) ? Env.SunCol : Env.ShadowCol;
 	return Adv_GetColor(x, y, z, ADV_SHADE_YMAX);
 }
 
 static PackedCol Adv_Color_YMin_Fast(int x, int y, int z) {
-	if (!adv_skylight || !World_Contains(x, y, z))
+	if (!adv_light || !World_Contains(x, y, z))
 		return ClassicLighting_IsLit_Fast(x, y, z) ? Env.SunYMin : Env.ShadowYMin;
 	return Adv_GetColor(x, y, z, ADV_SHADE_YMIN);
 }
 
 static PackedCol Adv_Color_XSide_Fast(int x, int y, int z) {
-	if (!adv_skylight || !World_Contains(x, y, z))
+	if (!adv_light || !World_Contains(x, y, z))
 		return ClassicLighting_IsLit_Fast(x, y, z) ? Env.SunXSide : Env.ShadowXSide;
 	return Adv_GetColor(x, y, z, ADV_SHADE_XSIDE);
 }
 
 static PackedCol Adv_Color_ZSide_Fast(int x, int y, int z) {
-	if (!adv_skylight || !World_Contains(x, y, z))
+	if (!adv_light || !World_Contains(x, y, z))
 		return ClassicLighting_IsLit_Fast(x, y, z) ? Env.SunZSide : Env.ShadowZSide;
 	return Adv_GetColor(x, y, z, ADV_SHADE_ZSIDE);
 }
@@ -235,13 +244,13 @@ static PackedCol Adv_Color_ZSide_Fast(int x, int y, int z) {
 *-----------------------------------------------------IsLit--------------------------------------------------------------*
 *#########################################################################################################################*/
 static cc_bool Adv_IsLit(int x, int y, int z) {
-	if (!adv_skylight) return ClassicLighting_IsLit(x, y, z);
+	if (!adv_light) return ClassicLighting_IsLit(x, y, z);
 	if (!World_Contains(x, y, z)) return y >= Env.EdgeHeight;
 	return Adv_GetLight(x, y, z) > ADV_MOB_SPAWN_THRESHOLD;
 }
 
 static cc_bool Adv_IsLit_Fast(int x, int y, int z) {
-	if (!adv_skylight) return ClassicLighting_IsLit_Fast(x, y, z);
+	if (!adv_light) return ClassicLighting_IsLit_Fast(x, y, z);
 	if (!World_Contains(x, y, z)) return y >= Env.EdgeHeight;
 	return Adv_GetLight(x, y, z) > ADV_MOB_SPAWN_THRESHOLD;
 }
@@ -260,10 +269,10 @@ static void Adv_DrainSkyBFS(void) {
 		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
 		nIdx = World_Pack(cur.x, cur.y, cur.z);
 
-		if (adv_skylight[nIdx] >= cur.level) continue;
+		if (ADV_GET_SKY(adv_light[nIdx]) >= cur.level) continue;
 		if (cur.level == 0) continue;
 
-		adv_skylight[nIdx] = cur.level;
+		ADV_SET_SKY(&adv_light[nIdx], cur.level);
 		if (cur.level <= 1) continue;
 
 		for (d = 0; d < 6; d++) {
@@ -273,7 +282,7 @@ static void Adv_DrainSkyBFS(void) {
 			if (!World_Contains(nx, ny, nz)) continue;
 
 			nIdx = World_Pack(nx, ny, nz);
-			if (adv_skylight[nIdx] >= cur.level - 1) continue;
+			if (ADV_GET_SKY(adv_light[nIdx]) >= cur.level - 1) continue;
 
 			nb = World_GetBlock(nx, ny, nz);
 			if (!Adv_CanLightPass(nb)) continue;
@@ -299,7 +308,7 @@ static void Adv_PropagateSkyLight(void) {
 			y = h + 1;
 			if (y < 0) y = 0;
 			for (; y < World.Height; y++) {
-				adv_skylight[World_Pack(x, y, z)] = ADV_MAX_LEVEL;
+				ADV_SET_SKY(&adv_light[World_Pack(x, y, z)], ADV_MAX_LEVEL);
 			}
 		}
 	}
@@ -357,7 +366,7 @@ static void Adv_PropagateSkyLight(void) {
 					nb = World_GetBlock(nx, y, nz);
 					if (Adv_CanLightPass(nb)) {
 						nIdx = World_Pack(nx, y, nz);
-						if (adv_skylight[nIdx] < ADV_MAX_LEVEL - 1) {
+						if (ADV_GET_SKY(adv_light[nIdx]) < ADV_MAX_LEVEL - 1) {
 							entry.x = nx; entry.y = y; entry.z = nz;
 							entry.level = ADV_MAX_LEVEL - 1;
 							Queue_Enqueue(&adv_queue, &entry);
@@ -418,10 +427,10 @@ static void Adv_PropagateBlockLight(void) {
 		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
 		nIdx = World_Pack(cur.x, cur.y, cur.z);
 
-		if (adv_blocklight[nIdx] >= cur.level) continue;
+		if (ADV_GET_BLK(adv_light[nIdx]) >= cur.level) continue;
 		if (cur.level == 0) continue;
 
-		adv_blocklight[nIdx] = cur.level;
+		ADV_SET_BLK(&adv_light[nIdx], cur.level);
 
 		if (cur.level <= 1) continue;
 
@@ -433,7 +442,7 @@ static void Adv_PropagateBlockLight(void) {
 			if (!World_Contains(nx, ny, nz)) continue;
 
 			nIdx = World_Pack(nx, ny, nz);
-			if (adv_blocklight[nIdx] >= cur.level - 1) continue;
+			if (ADV_GET_BLK(adv_light[nIdx]) >= cur.level - 1) continue;
 
 			nb = World_GetBlock(nx, ny, nz);
 			if (!Adv_CanLightPass(nb)) continue;
@@ -468,7 +477,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 			for (x = minX; x <= maxX; x++) {
 				idx = World_Pack(x, y, z);
 				h = ClassicLighting_GetLightHeight(x, z);
-				adv_skylight[idx] = (y > h) ? ADV_MAX_LEVEL : 0;
+				ADV_SET_SKY(&adv_light[idx], (y > h) ? ADV_MAX_LEVEL : 0);
 			}
 
 	/* Seed BFS from sky=15 blocks that have underground transparent neighbors */
@@ -476,7 +485,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 		for (z = minZ; z <= maxZ; z++)
 			for (x = minX; x <= maxX; x++) {
 				idx = World_Pack(x, y, z);
-				if (adv_skylight[idx] != ADV_MAX_LEVEL) continue;
+				if (ADV_GET_SKY(adv_light[idx]) != ADV_MAX_LEVEL) continue;
 				/* Only transparent sky blocks should seed neighbors;
 				   solid blocks can get sky=15 from SHADES_FROM_BELOW offset */
 				if (!Adv_CanLightPass(World_GetBlock(x, y, z))) continue;
@@ -488,7 +497,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 					if (!World_Contains(nx, ny, nz)) continue;
 
 					idx = World_Pack(nx, ny, nz);
-					if (adv_skylight[idx] >= ADV_MAX_LEVEL - 1) continue;
+					if (ADV_GET_SKY(adv_light[idx]) >= ADV_MAX_LEVEL - 1) continue;
 
 					nb = World_GetBlock(nx, ny, nz);
 					if (Adv_CanLightPass(nb)) {
@@ -511,7 +520,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 				if (x > minX && x < maxX && y > minY && y < maxY && z > minZ && z < maxZ) continue;
 
 				idx = World_Pack(x, y, z);
-				sky = adv_skylight[idx];
+				sky = ADV_GET_SKY(adv_light[idx]);
 				if (sky <= 1) continue;
 				/* Don't seed from solid blocks that incorrectly have sky light */
 				if (!Adv_CanLightPass(World_GetBlock(x, y, z))) continue;
@@ -524,7 +533,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 					if (nx < minX || nx > maxX || ny < minY || ny > maxY || nz < minZ || nz > maxZ) continue;
 
 					idx = World_Pack(nx, ny, nz);
-					if (adv_skylight[idx] >= sky - 1) continue;
+					if (ADV_GET_SKY(adv_light[idx]) >= sky - 1) continue;
 
 					nb = World_GetBlock(nx, ny, nz);
 					if (Adv_CanLightPass(nb)) {
@@ -540,10 +549,10 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
 		idx = World_Pack(cur.x, cur.y, cur.z);
 
-		if (adv_skylight[idx] >= cur.level) continue;
+		if (ADV_GET_SKY(adv_light[idx]) >= cur.level) continue;
 		if (cur.level == 0) continue;
 
-		adv_skylight[idx] = cur.level;
+		ADV_SET_SKY(&adv_light[idx], cur.level);
 		if (cur.level <= 1) continue;
 
 		for (d = 0; d < 6; d++) {
@@ -553,7 +562,7 @@ static void Adv_UpdateSkyArea(int bx, int by, int bz) {
 			if (!World_Contains(nx, ny, nz)) continue;
 
 			idx = World_Pack(nx, ny, nz);
-			if (adv_skylight[idx] >= cur.level - 1) continue;
+			if (ADV_GET_SKY(adv_light[idx]) >= cur.level - 1) continue;
 
 			nb = World_GetBlock(nx, ny, nz);
 			if (!Adv_CanLightPass(nb)) continue;
@@ -584,7 +593,7 @@ static void Adv_UpdateBlockArea(int bx, int by, int bz) {
 	for (y = minY; y <= maxY; y++)
 		for (z = minZ; z <= maxZ; z++)
 			for (x = minX; x <= maxX; x++)
-				adv_blocklight[World_Pack(x, y, z)] = 0;
+				ADV_SET_BLK(&adv_light[World_Pack(x, y, z)], 0);
 
 	/* Re-seed from light sources in double-radius area */
 	sminX = max(bx - r2, 0); smaxX = min(bx + r2, World.MaxX);
@@ -610,7 +619,7 @@ static void Adv_UpdateBlockArea(int bx, int by, int bz) {
 				if (x >= minX && x <= maxX && y >= minY && y <= maxY && z >= minZ && z <= maxZ) continue;
 
 				idx = World_Pack(x, y, z);
-				blk = adv_blocklight[idx];
+				blk = ADV_GET_BLK(adv_light[idx]);
 				if (blk <= 1) continue;
 
 				for (d = 0; d < 6; d++) {
@@ -621,7 +630,7 @@ static void Adv_UpdateBlockArea(int bx, int by, int bz) {
 					if (nx < minX || nx > maxX || ny < minY || ny > maxY || nz < minZ || nz > maxZ) continue;
 
 					idx = World_Pack(nx, ny, nz);
-					if (adv_blocklight[idx] >= blk - 1) continue;
+					if (ADV_GET_BLK(adv_light[idx]) >= blk - 1) continue;
 
 					nb = World_GetBlock(nx, ny, nz);
 					if (Adv_CanLightPass(nb)) {
@@ -637,10 +646,10 @@ static void Adv_UpdateBlockArea(int bx, int by, int bz) {
 		cur = *(struct AdvLightNode*)Queue_Dequeue(&adv_queue);
 		idx = World_Pack(cur.x, cur.y, cur.z);
 
-		if (adv_blocklight[idx] >= cur.level) continue;
+		if (ADV_GET_BLK(adv_light[idx]) >= cur.level) continue;
 		if (cur.level == 0) continue;
 
-		adv_blocklight[idx] = cur.level;
+		ADV_SET_BLK(&adv_light[idx], cur.level);
 		if (cur.level <= 1) continue;
 
 		for (d = 0; d < 6; d++) {
@@ -650,7 +659,7 @@ static void Adv_UpdateBlockArea(int bx, int by, int bz) {
 			if (!World_Contains(nx, ny, nz)) continue;
 
 			idx = World_Pack(nx, ny, nz);
-			if (adv_blocklight[idx] >= cur.level - 1) continue;
+			if (ADV_GET_BLK(adv_light[idx]) >= cur.level - 1) continue;
 
 			nb = World_GetBlock(nx, ny, nz);
 			if (!Adv_CanLightPass(nb)) continue;
@@ -687,12 +696,12 @@ static void Adv_OnBlockChanged(int x, int y, int z, BlockID oldBlock, BlockID ne
 	lightPassChanged = Adv_CanLightPass(oldBlock) != Adv_CanLightPass(newBlock);
 
 	/* Update sky light if light transmission changed or a block was placed/removed */
-	if (adv_skylight && lightPassChanged) {
+	if (adv_light && lightPassChanged) {
 		Adv_UpdateSkyArea(x, y, z);
 	}
 
 	/* Update block light if torch/lava placed/removed or light passage changed */
-	if (adv_blocklight) {
+	if (adv_light) {
 		if (Adv_GetBlockEmission(oldBlock) > 0 || Adv_GetBlockEmission(newBlock) > 0 || lightPassChanged) {
 			Adv_UpdateBlockArea(x, y, z);
 		}
@@ -709,10 +718,8 @@ static void Adv_OnBlockChanged(int x, int y, int z, BlockID oldBlock, BlockID ne
 static void Adv_FreeState(void) {
 	ClassicLighting_FreeState();
 
-	Mem_Free(adv_skylight);
-	adv_skylight = NULL;
-	Mem_Free(adv_blocklight);
-	adv_blocklight = NULL;
+	Mem_Free(adv_light);
+	adv_light = NULL;
 	Queue_Clear(&adv_queue);
 }
 
@@ -722,19 +729,13 @@ static void Adv_AllocState(void) {
 
 	Queue_Init(&adv_queue, sizeof(struct AdvLightNode));
 
-	adv_skylight = (cc_uint8*)Mem_TryAlloc(World.Volume, 1);
-	adv_blocklight = (cc_uint8*)Mem_TryAlloc(World.Volume, 1);
+	adv_light = (cc_uint8*)Mem_TryAlloc(World.Volume, 1);
 
-	if (!adv_skylight || !adv_blocklight) {
-		Mem_Free(adv_skylight);
-		Mem_Free(adv_blocklight);
-		adv_skylight = NULL;
-		adv_blocklight = NULL;
+	if (!adv_light) {
 		return;
 	}
 
-	Mem_Set(adv_skylight, 0, World.Volume);
-	Mem_Set(adv_blocklight, 0, World.Volume);
+	Mem_Set(adv_light, 0, World.Volume);
 
 	Adv_PropagateSkyLight();
 	Adv_PropagateBlockLight();
@@ -743,10 +744,9 @@ static void Adv_AllocState(void) {
 static void Adv_Refresh(void) {
 	ClassicLighting_Refresh();
 	/* Re-propagate all lighting from scratch */
-	if (adv_skylight) Mem_Set(adv_skylight, 0, World.Volume);
-	if (adv_blocklight) Mem_Set(adv_blocklight, 0, World.Volume);
-	if (adv_skylight) Adv_PropagateSkyLight();
-	if (adv_blocklight) Adv_PropagateBlockLight();
+	if (adv_light) Mem_Set(adv_light, 0, World.Volume);
+	if (adv_light) Adv_PropagateSkyLight();
+	if (adv_light) Adv_PropagateBlockLight();
 }
 
 static void Adv_LightHint(int startX, int startY, int startZ) {
