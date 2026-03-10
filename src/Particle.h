@@ -14,6 +14,12 @@ struct VertexTextured;
 struct ScheduledTask;
 extern struct IGameComponent Particles_Component;
 
+enum ParticlesMode {
+	PARTICLES_MODE_NONE, PARTICLES_MODE_MINIMAL, PARTICLES_MODE_ALL, PARTICLES_MODE_COUNT
+};
+extern const char* const ParticlesMode_Names[PARTICLES_MODE_COUNT];
+extern cc_uint8 Particles_Mode;
+
 struct Particle {
 	Vec3 velocity;
 	float lifetime;
@@ -44,6 +50,7 @@ extern struct CustomParticleEffect Particles_CustomEffects[256];
 void Particle_DoRender(const Vec2* size, const Vec3* pos, const TextureRec* rec, PackedCol col, struct VertexTextured* vertices);
 void Particles_Render(float t);
 void Particles_BreakBlockEffect(IVec3 coords, BlockID oldBlock, BlockID block);
+void Particles_BlockHitEffect(IVec3 coords, BlockID block, Face face);
 void Particles_RainSnowEffect(float x, float y, float z);
 void Particles_CustomEffect(int effectID, float x, float y, float z, float originX, float originY, float originZ);
 void Particles_SmokeEffect(float x, float y, float z, float radius);

@@ -10,6 +10,11 @@
 #include "Game.h"
 #include "Event.h"
 #include "Audio.h"
+#include "Options.h"
+#include "Inventory.h"
+
+const char* const ParticlesMode_Names[PARTICLES_MODE_COUNT] = { "None", "Minimal", "All" };
+cc_uint8 Particles_Mode = PARTICLES_MODE_MINIMAL;
 
 #ifdef CC_BUILD_TINYMEM
 	#define PARTICLES_MAX 10
@@ -197,6 +202,8 @@ void Particles_RainSnowEffect(float x, float y, float z) {
 	struct Particle* p;
 	int i, type;
 
+	if (Particles_Mode == PARTICLES_MODE_NONE) return;
+
 	for (i = 0; i < 2; i++) {
 		if (rain_count == PARTICLES_MAX) Rain_RemoveAt(0);
 		p = &rain_Particles[rain_count++];
@@ -329,6 +336,8 @@ void Particles_BreakBlockEffect(IVec3 coords, BlockID old, BlockID now) {
 	struct TerrainParticle* p;
 	TextureLoc loc;
 	int texIndex;
+
+	if (Particles_Mode == PARTICLES_MODE_NONE) return;
 	TextureRec baseRec, rec;
 	Vec3 origin, minBB, maxBB;
 
@@ -403,6 +412,84 @@ void Particles_BreakBlockEffect(IVec3 coords, BlockID old, BlockID now) {
 				p->base.size = type >= 28 ? 12 : (type >= 25 ? 10 : 8);
 			}
 		}
+	}
+}
+
+void Particles_BlockHitEffect(IVec3 coords, BlockID block, Face face) {
+	struct TerrainParticle* p;
+	TextureLoc loc;
+	int texIndex, i;
+	TextureRec baseRec, rec;
+	Vec3 minBB, maxBB;
+	float uScale, vScale, maxU2, maxV2;
+	int minX, minZ, maxX, maxZ;
+	int minU, minV, maxU, maxV;
+	int maxUsedU, maxUsedV;
+	float x, y, z, margin;
+
+	if (Particles_Mode != PARTICLES_MODE_ALL) return;
+	if (Blocks.Draw[block] == DRAW_GAS) return;
+
+	loc = Block_Tex(block, FACE_XMIN);
+	baseRec = Atlas1D_TexRec(loc, 1, &texIndex);
+	uScale  = (1.0f/16.0f); vScale = (1.0f/16.0f) * Atlas1D.InvTileSize;
+
+	minBB = Blocks.MinBB[block]; maxBB = Blocks.MaxBB[block];
+	minX  = (int)(minBB.x * 16); maxX  = (int)(maxBB.x * 16);
+	minZ  = (int)(minBB.z * 16); maxZ  = (int)(maxBB.z * 16);
+
+	minU = min(minX, minZ); minV = (int)(16 - maxBB.y * 16);
+	maxU = min(maxX, maxZ); maxV = (int)(16 - minBB.y * 16);
+	maxUsedU = maxU; maxUsedV = maxV;
+	if (minU < 12 && maxU > 12) maxUsedU = 12;
+	if (minV < 12 && maxV > 12) maxUsedV = 12;
+
+	maxU2 = baseRec.u1 + maxU * uScale;
+	maxV2 = baseRec.v1 + maxV * vScale;
+	margin = 0.1f;
+
+	/* Spawn a few particles on the hit face, like Minecraft Alpha's func_1191_a */
+	for (i = 0; i < 3; i++) {
+		/* Random position within the block face bounds */
+		x = (float)coords.x + minBB.x + Random_Float(&rnd) * (maxBB.x - minBB.x - margin * 2) + margin;
+		y = (float)coords.y + minBB.y + Random_Float(&rnd) * (maxBB.y - minBB.y - margin * 2) + margin;
+		z = (float)coords.z + minBB.z + Random_Float(&rnd) * (maxBB.z - minBB.z - margin * 2) + margin;
+
+		/* Clamp to the specific face */
+		switch (face) {
+		case FACE_YMIN: y = (float)coords.y + minBB.y - margin; break;
+		case FACE_YMAX: y = (float)coords.y + maxBB.y + margin; break;
+		case FACE_ZMIN: z = (float)coords.z + minBB.z - margin; break;
+		case FACE_ZMAX: z = (float)coords.z + maxBB.z + margin; break;
+		case FACE_XMIN: x = (float)coords.x + minBB.x - margin; break;
+		case FACE_XMAX: x = (float)coords.x + maxBB.x + margin; break;
+		}
+
+		if (terrain_count == PARTICLES_MAX) Terrain_RemoveAt(0);
+		p = &terrain_particles[terrain_count++];
+
+		p->base.lastPos.x = x; p->base.lastPos.y = y; p->base.lastPos.z = z;
+		p->base.nextPos = p->base.lastPos;
+
+		/* Slow outward velocity (scaled down like Alpha's func_407_b(0.2f)) */
+		p->base.velocity.x = (Random_Float(&rnd) * 2.0f - 1.0f) * 0.08f;
+		p->base.velocity.y = (Random_Float(&rnd) * 2.0f - 1.0f) * 0.08f + 0.1f;
+		p->base.velocity.z = (Random_Float(&rnd) * 2.0f - 1.0f) * 0.08f;
+
+		p->base.lifetime = 0.3f + Random_Float(&rnd) * 0.6f;
+
+		rec = baseRec;
+		rec.u1 = baseRec.u1 + Random_Range(&rnd, minU, maxUsedU) * uScale;
+		rec.v1 = baseRec.v1 + Random_Range(&rnd, minV, maxUsedV) * vScale;
+		rec.u2 = rec.u1 + 4 * uScale;
+		rec.v2 = rec.v1 + 4 * vScale;
+		rec.u2 = min(rec.u2, maxU2) - 0.01f * uScale;
+		rec.v2 = min(rec.v2, maxV2) - 0.01f * vScale;
+
+		p->rec    = rec;
+		p->texLoc = loc;
+		p->block  = block;
+		p->base.size = 6; /* smaller than break particles (Alpha uses func_405_d(0.6f)) */
 	}
 }
 
@@ -510,6 +597,8 @@ void Particles_CustomEffect(int effectID, float x, float y, float z, float origi
 	struct CustomParticleEffect* e = &Particles_CustomEffects[effectID];
 	int i, count = e->particleCount;
 	Vec3 offset, delta, origin;
+
+	if (Particles_Mode == PARTICLES_MODE_NONE) return;
 	float d;
 
 	origin.x = originX; origin.y = originY; origin.z = originZ;
@@ -632,6 +721,8 @@ void Particles_SmokeEffect(float x, float y, float z, float radius) {
 	int i, count;
 	float dx, dy, dz, dist, speed;
 
+	if (Particles_Mode == PARTICLES_MODE_NONE) return;
+
 	/* Spawn particles throughout the explosion sphere */
 	count = (int)(radius * radius * 24); /* scale count with explosion size */
 	if (count > 400) count = 400;
@@ -669,10 +760,208 @@ void Particles_SmokeEffect(float x, float y, float z, float radius) {
 
 
 /*########################################################################################################################*
+*-------------------------------------------------------Flame particle----------------------------------------------------*
+*#########################################################################################################################*/
+#define FLAME_PARTICLES_MAX 200
+static struct Particle flame_Particles[FLAME_PARTICLES_MAX];
+static int flame_count;
+/* Flame texture at index 48 in particles.png: row 3, column 0 in 16x16 grid of 8x8 tiles */
+static TextureRec flame_rec = { 0.0f/128.0f, 24.0f/128.0f, 8.0f/128.0f, 32.0f/128.0f };
+
+static cc_bool FlameParticle_Tick(struct Particle* p, float delta) {
+	p->lastPos = p->nextPos;
+	p->nextPos.x += p->velocity.x * delta;
+	p->nextPos.y += p->velocity.y * delta;
+	p->nextPos.z += p->velocity.z * delta;
+	p->velocity.x *= 0.96f;
+	p->velocity.y *= 0.96f;
+	p->velocity.z *= 0.96f;
+	p->lifetime -= delta;
+	return p->lifetime < 0.0f;
+}
+
+static void FlameParticle_Render(struct Particle* p, float t, struct VertexTextured* vertices) {
+	Vec3 pos;
+	Vec2 size;
+	float lifeFrac;
+
+	Vec3_Lerp(&pos, &p->lastPos, &p->nextPos, t);
+	/* Flame shrinks over lifetime like Alpha's EntityFlameFX */
+	lifeFrac = 1.0f - (p->lifetime / p->size); /* size stores initial lifetime */
+	size.x = (1.0f - lifeFrac * lifeFrac * 0.5f) * 0.015625f * 16.0f;
+	size.y = size.x;
+
+	/* Fullbright - flames glow */
+	Particle_DoRender(&size, &pos, &flame_rec, PACKEDCOL_WHITE, vertices);
+}
+
+static void Flame_Render(float t) {
+	struct VertexTextured* data;
+	int i;
+	if (!flame_count) return;
+
+	data = (struct VertexTextured*)Gfx_LockDynamicVb(particles_VB,
+									VERTEX_FORMAT_TEXTURED, flame_count * 4);
+	for (i = 0; i < flame_count; i++) {
+		FlameParticle_Render(&flame_Particles[i], t, data);
+		data += 4;
+	}
+
+	Gfx_BindTexture(particles_TexId);
+	Gfx_UnlockDynamicVb(particles_VB);
+	Gfx_DrawVb_IndexedTris(flame_count * 4);
+}
+
+static void Flame_RemoveAt(int i) {
+	for (; i < flame_count - 1; i++) {
+		flame_Particles[i] = flame_Particles[i + 1];
+	}
+	flame_count--;
+}
+
+static void Flame_Tick(float delta) {
+	int i;
+	for (i = 0; i < flame_count; i++) {
+		if (FlameParticle_Tick(&flame_Particles[i], delta)) {
+			Flame_RemoveAt(i); i--;
+		}
+	}
+}
+
+static void Particles_SpawnFlame(float x, float y, float z) {
+	struct Particle* p;
+	if (flame_count >= FLAME_PARTICLES_MAX) Flame_RemoveAt(0);
+	p = &flame_Particles[flame_count++];
+
+	p->lastPos.x = x; p->lastPos.y = y; p->lastPos.z = z;
+	p->nextPos = p->lastPos;
+
+	/* Near-zero velocity with tiny drift, like Alpha's EntityFlameFX */
+	p->velocity.x = (Random_Float(&rnd) - Random_Float(&rnd)) * 0.05f * 0.01f;
+	p->velocity.y = (Random_Float(&rnd) - Random_Float(&rnd)) * 0.05f * 0.01f;
+	p->velocity.z = (Random_Float(&rnd) - Random_Float(&rnd)) * 0.05f * 0.01f;
+
+	/* lifetime stored in p->size for rendering fade, actual lifetime in p->lifetime */
+	p->lifetime = 0.4f + Random_Float(&rnd) * 0.32f;
+	p->size     = p->lifetime; /* store initial lifetime for fade calc */
+	p->color    = PACKEDCOL_WHITE;
+}
+
+/* Small wisp of smoke for torch/furnace (darker, smaller than explosion smoke) */
+static void Particles_SpawnTorchSmoke(float x, float y, float z) {
+	struct Particle* p;
+	if (smoke_count >= SMOKE_PARTICLES_MAX) Smoke_RemoveAt(0);
+	p = &smoke_Particles[smoke_count++];
+
+	p->lastPos.x = x; p->lastPos.y = y; p->lastPos.z = z;
+	p->nextPos = p->lastPos;
+
+	p->velocity.x = (Random_Float(&rnd) - 0.5f) * 0.1f * 0.01f;
+	p->velocity.y = 0.004f + Random_Float(&rnd) * 0.01f; /* gentle rise like Alpha */
+	p->velocity.z = (Random_Float(&rnd) - 0.5f) * 0.1f * 0.01f;
+
+	p->lifetime = 0.3f + Random_Float(&rnd) * 0.3f;
+	p->size = 3.0f;
+	p->color = PackedCol_Make((cc_uint8)(Random_Float(&rnd) * 76), 
+	                          (cc_uint8)(Random_Float(&rnd) * 76), 
+	                          (cc_uint8)(Random_Float(&rnd) * 76), 255);
+}
+
+/* Scans nearby blocks and spawns flame/smoke on torches and furnaces (All mode only) */
+static void Particles_TickTorchFlames(void) {
+	struct LocalPlayer* p = Entities.CurPlayer;
+	Vec3 pos;
+	int px, py, pz;
+	int x, y, z;
+	BlockID block;
+	float fx, fy, fz;
+	cc_uint8 facing;
+
+	if (!p) return;
+	if (Particles_Mode != PARTICLES_MODE_ALL) return;
+	if (!World.Loaded) return;
+
+	pos = p->Base.Position;
+	px = (int)pos.x; py = (int)pos.y; pz = (int)pos.z;
+
+	/* Scan blocks within 16-block range (like Minecraft's randomDisplayTick) */
+	/* But only check a random subset each tick to avoid checking 32^3 blocks */
+	{
+		int i;
+		for (i = 0; i < 256; i++) {
+			x = px + Random_Next(&rnd, 32) - 16;
+			y = py + Random_Next(&rnd, 32) - 16;
+			z = pz + Random_Next(&rnd, 32) - 16;
+
+			if (!World_Contains(x, y, z)) continue;
+			block = World_GetBlock(x, y, z);
+
+			if (block == BLOCK_TORCH || block == BLOCK_RED_ORE_TORCH) {
+				/* Ground torch: flame at center top */
+				facing = DirectionalBlock_GetFacing(x, y, z);
+				fx = (float)x + 0.5f;
+				fy = (float)y + 0.7f;
+				fz = (float)z + 0.5f;
+
+				if (facing == 0) {      /* attached z+1 (south wall) → tip toward +Z */
+					fz += 0.25f; fy = (float)y + 13.0f/16.0f;
+				} else if (facing == 1) { /* attached z-1 (north wall) → tip toward -Z */
+					fz -= 0.25f; fy = (float)y + 13.0f/16.0f;
+				} else if (facing == 2) { /* attached x+1 (east wall) → tip toward +X */
+					fx += 0.25f; fy = (float)y + 13.0f/16.0f;
+				} else if (facing == 3) { /* attached x-1 (west wall) → tip toward -X */
+					fx -= 0.25f; fy = (float)y + 13.0f/16.0f;
+				}
+				/* facing == 4 is ground torch, already at center top */
+
+				Particles_SpawnFlame(fx, fy, fz);
+				Particles_SpawnTorchSmoke(fx, fy, fz);
+			}
+#ifdef EXTENDED_BLOCKS
+			else if (block == BLOCK_TORCH_S) {
+				Particles_SpawnFlame((float)x + 0.5f, (float)y + 13.0f/16.0f, (float)z + 0.75f);
+				Particles_SpawnTorchSmoke((float)x + 0.5f, (float)y + 13.0f/16.0f, (float)z + 0.75f);
+			} else if (block == BLOCK_TORCH_N) {
+				Particles_SpawnFlame((float)x + 0.5f, (float)y + 13.0f/16.0f, (float)z + 0.25f);
+				Particles_SpawnTorchSmoke((float)x + 0.5f, (float)y + 13.0f/16.0f, (float)z + 0.25f);
+			} else if (block == BLOCK_TORCH_E) {
+				Particles_SpawnFlame((float)x + 0.75f, (float)y + 13.0f/16.0f, (float)z + 0.5f);
+				Particles_SpawnTorchSmoke((float)x + 0.75f, (float)y + 13.0f/16.0f, (float)z + 0.5f);
+			} else if (block == BLOCK_TORCH_W) {
+				Particles_SpawnFlame((float)x + 0.25f, (float)y + 13.0f/16.0f, (float)z + 0.5f);
+				Particles_SpawnTorchSmoke((float)x + 0.25f, (float)y + 13.0f/16.0f, (float)z + 0.5f);
+			}
+#endif
+			else if (block == BLOCK_FURNACE && Furnace_IsActiveAt(x, y, z)) {
+				/* Lit furnace: spawn flame on the front face */
+				facing = DirectionalBlock_GetFacing(x, y, z);
+				fx = (float)x + 0.5f;
+				fy = (float)y + Random_Float(&rnd) * 6.0f / 16.0f;
+				fz = (float)z + 0.5f;
+
+				if (facing == 0) {      /* North(-Z) */
+					fz -= 0.52f; fx += Random_Float(&rnd) * 0.6f - 0.3f;
+				} else if (facing == 1) { /* South(+Z) */
+					fz += 0.52f; fx += Random_Float(&rnd) * 0.6f - 0.3f;
+				} else if (facing == 2) { /* West(-X) */
+					fx -= 0.52f; fz += Random_Float(&rnd) * 0.6f - 0.3f;
+				} else if (facing == 3) { /* East(+X) */
+					fx += 0.52f; fz += Random_Float(&rnd) * 0.6f - 0.3f;
+				}
+
+				Particles_SpawnFlame(fx, fy, fz);
+				Particles_SpawnTorchSmoke(fx, fy, fz);
+			}
+		}
+	}
+}
+
+
+/*########################################################################################################################*
 *--------------------------------------------------------Particles--------------------------------------------------------*
 *#########################################################################################################################*/
 void Particles_Render(float t) {
-	if (!terrain_count && !rain_count && !custom_count && !smoke_count) return;
+	if (!terrain_count && !rain_count && !custom_count && !smoke_count && !flame_count) return;
 
 	if (Gfx.LostContext) return;
 	if (!particles_VB)
@@ -685,6 +974,7 @@ void Particles_Render(float t) {
 	Rain_Render(t);
 	Custom_Render(t);
 	Smoke_Render(t);
+	Flame_Render(t);
 
 	Gfx_SetAlphaTest(false);
 }
@@ -695,6 +985,8 @@ static void Particles_Tick(struct ScheduledTask* task) {
 	Rain_Tick(delta);
 	Custom_Tick(delta);
 	Smoke_Tick(delta);
+	Flame_Tick(delta);
+	Particles_TickTorchFlames();
 }
 
 
@@ -719,6 +1011,8 @@ static void Particles_SmotherEffect(float x, float y, float z) {
 	struct Particle* p;
 	int i;
 	float dx, dz;
+
+	if (Particles_Mode != PARTICLES_MODE_ALL) return;
 
 	for (i = 0; i < 12; i++) {
 		if (smoke_count >= SMOKE_PARTICLES_MAX) Smoke_RemoveAt(0);
@@ -752,6 +1046,8 @@ static void OnBreakBlockEffect_Handler(void* obj, IVec3 coords, BlockID old, Blo
 }
 
 static void OnInit(void) {
+	Particles_Mode = Options_GetEnum(OPT_PARTICLES, PARTICLES_MODE_MINIMAL,
+		ParticlesMode_Names, PARTICLES_MODE_COUNT);
 	ScheduledTask_Add(GAME_DEF_TICKS, Particles_Tick);
 	Random_SeedFromCurrentTime(&rnd);
 	TextureEntry_Register(&particles_entry);
@@ -762,7 +1058,7 @@ static void OnInit(void) {
 
 static void OnFree(void) { OnContextLost(NULL); }
 
-static void OnReset(void) { rain_count = 0; terrain_count = 0; custom_count = 0; smoke_count = 0; }
+static void OnReset(void) { rain_count = 0; terrain_count = 0; custom_count = 0; smoke_count = 0; flame_count = 0; }
 
 struct IGameComponent Particles_Component = {
 	OnInit,  /* Init  */

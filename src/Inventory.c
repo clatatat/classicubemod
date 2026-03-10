@@ -1639,8 +1639,27 @@ static void OnInit(void) {
 	}
 }
 
+static void OnNewMapLoaded(void) {
+	int i;
+	BlockID* inv = Inventory.Table;
+
+	/* Reinitialize hotbar based on current survival mode setting,
+	   since it may have changed via gameplay options after OnInit */
+	if (Game_SurvivalMode) {
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+			inv[i] = BLOCK_AIR;
+		}
+	} else {
+		for (i = 0; i < INVENTORY_BLOCKS_PER_HOTBAR; i++) {
+			inv[i] = Game_Version.Hotbar[i];
+		}
+	}
+}
+
 struct IGameComponent Inventory_Component = {
-	OnInit,  /* Init  */
-	NULL,    /* Free  */
-	OnReset, /* Reset */
+	OnInit,          /* Init  */
+	NULL,            /* Free  */
+	OnReset,         /* Reset */
+	NULL,            /* OnNewMap */
+	OnNewMapLoaded,  /* OnNewMapLoaded */
 };

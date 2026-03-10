@@ -107,6 +107,7 @@ Copyright 2014-2025 ClassiCube | Licensed under BSD-3
 #define OPT_FULLSCREEN_RES "gfx-fullscreenres"
 #define OPT_SIMPLE_FOG "gfx-simplefog"
 #define OPT_CLOUDS_ENABLED "gfx-clouds"
+#define OPT_PARTICLES "gfx-particles"
 #define OPT_COLOR_DEPTH "gfx-colordepth"
 #define OPT_SPRITE_CULL_DIST "gfx-spritecull"
 #define OPT_TEXTURE_LOD_DIST "gfx-texturelod"

@@ -2597,6 +2597,8 @@ void InputHandler_Tick(float delta) {
 				if (sndType == SOUND_GRASS || sndType == SOUND_SAND || sndType == SOUND_GRAVEL)
 					vol = vol / 2;
 				Audio_PlayStepSoundRate(sndType, 50, vol);
+				/* Spawn face hit particles (All mode, like Minecraft Alpha) */
+				Particles_BlockHitEffect(breaking_pos, breaking_block, Game_SelectedPos.closest);
 			}
 
 			/* Re-trigger swing animation periodically (dig anim lasts 0.233s, 1.5x faster) */
@@ -7004,44 +7006,74 @@ void DayNightCycle_Disable(void) {
 /*########################################################################################################################*
 *-----------------------------------------------Ambient fire sound tick---------------------------------------------------*
 *#########################################################################################################################*/
-/* Periodically check for nearby fire blocks and play fire.wav with distance-based volume */
+/* Cooldown timers for fire/furnace ambient sounds (in seconds) */
+static float fireAmbient_cooldown;
+static float furnaceAmbient_cooldown;
+
+/* Periodically check for nearby fire/furnace blocks and play fire.wav with distance-based volume */
 static void FireAmbient_Tick(struct ScheduledTask* task) {
 	struct Entity* pe = &Entities.CurPlayer->Base;
 	float px, py, pz;
-	int ix, iy, iz, radius, bestDistSq;
+	int ix, iy, iz, radius, bestDistSq, bestFurnaceDistSq;
 	int dx, dy, dz, distSq, vol, rate;
 
 	if (!World.Loaded) return;
-	px = pe->Position.x; py = pe->Position.y; pz = pe->Position.z;
 
-	/* Search within 16 blocks for the nearest fire */
+	/* Decrement cooldowns */
+	fireAmbient_cooldown    -= (float)task->interval;
+	furnaceAmbient_cooldown -= (float)task->interval;
+
+	px = pe->Position.x; py = pe->Position.y; pz = pe->Position.z;
 	radius = 16;
-	bestDistSq = radius * radius + 1;
+
+	/* Search within 16 blocks for nearest fire and nearest lit furnace */
+	bestDistSq        = radius * radius + 1;
+	bestFurnaceDistSq = radius * radius + 1;
 
 	for (iy = (int)py - radius; iy <= (int)py + radius; iy++) {
 		if (iy < 0 || iy > World.MaxY) continue;
 		for (iz = (int)pz - radius; iz <= (int)pz + radius; iz++) {
 			if (iz < 0 || iz > World.MaxZ) continue;
 			for (ix = (int)px - radius; ix <= (int)px + radius; ix++) {
+				BlockID block;
 				if (ix < 0 || ix > World.MaxX) continue;
-				if (World_GetBlock(ix, iy, iz) != BLOCK_FIRE) continue;
+				block = World_GetBlock(ix, iy, iz);
 
 				dx = ix - (int)px; dy = iy - (int)py; dz = iz - (int)pz;
 				distSq = dx * dx + dy * dy + dz * dz;
-				if (distSq < bestDistSq) bestDistSq = distSq;
+
+				if (block == BLOCK_FIRE && distSq < bestDistSq) {
+					bestDistSq = distSq;
+				}
+				if (block == BLOCK_FURNACE && Furnace_IsActiveAt(ix, iy, iz) && distSq < bestFurnaceDistSq) {
+					bestFurnaceDistSq = distSq;
+				}
 			}
 		}
 	}
 
-	if (bestDistSq > radius * radius) return; /* no fire nearby */
+	/* Play fire sound when cooldown expires */
+	if (bestDistSq <= radius * radius && fireAmbient_cooldown <= 0) {
+		vol = (int)(Audio_SoundsVolume * 1.5f * (1.0f - Math_SqrtF((float)bestDistSq) / (float)radius));
+		if (vol > Audio_SoundsVolume) vol = Audio_SoundsVolume;
+		if (vol > 0) {
+			rate = 80 + Random_Next(&mob_rng, 41); /* 0.8-1.2 speed */
+			Audio_PlayDigSoundRateVolume(SOUND_FIRE_AMBIENT, rate, vol);
+		}
+		fireAmbient_cooldown = 3.0f + Random_Float(&mob_rng) * 4.0f; /* 3-7 seconds */
+	}
 
-	/* Volume falls off with distance */
-	vol = (int)(Audio_SoundsVolume * 1.5f * (1.0f - Math_SqrtF((float)bestDistSq) / (float)radius));
-	if (vol > Audio_SoundsVolume) vol = Audio_SoundsVolume;
-	if (vol <= 0) return;
-
-	rate = 80 + Random_Next(&mob_rng, 41); /* 80-120 */
-	Audio_PlayDigSoundRateVolume(SOUND_FIRE_AMBIENT, rate, vol);
+	/* Play furnace fire sound at half volume when cooldown expires */
+	if (bestFurnaceDistSq <= radius * radius && furnaceAmbient_cooldown <= 0) {
+		vol = (int)(Audio_SoundsVolume * 1.5f * (1.0f - Math_SqrtF((float)bestFurnaceDistSq) / (float)radius));
+		if (vol > Audio_SoundsVolume) vol = Audio_SoundsVolume;
+		vol /= 2;
+		if (vol > 0) {
+			rate = 80 + Random_Next(&mob_rng, 41); /* 0.8-1.2 speed */
+			Audio_PlayDigSoundRateVolume(SOUND_FIRE_AMBIENT, rate, vol);
+		}
+		furnaceAmbient_cooldown = 3.0f + Random_Float(&mob_rng) * 4.0f; /* 3-7 seconds */
+	}
 }
 
 static void OnInit(void) {

@@ -36,6 +36,7 @@
 #include "SystemFonts.h"
 #include "EnvRenderer.h"
 #include "InputHandler.h"
+#include "Particle.h"
 
 typedef void (*Button_GetText)(struct ButtonWidget* btn, cc_string* raw);
 typedef void (*Button_SetText)(struct ButtonWidget* btn, const cc_string* raw);
@@ -1270,6 +1271,13 @@ static void GrO2_SetTextureLOD(int v) {
 
 static void GrO2_SwitchBack(void* a, void* b) { GraphicsOptionsScreen_Show(); }
 
+static int  GrO2_GetParticles(void) { return Particles_Mode; }
+static void GrO2_SetParticles(int v) {
+	cc_string str = String_FromReadonly(ParticlesMode_Names[v]);
+	Particles_Mode = v;
+	Options_Set(OPT_PARTICLES, &str);
+}
+
 static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
 	MenuOptionsScreen_BeginButtons(s);
 	{
@@ -1303,6 +1311,11 @@ static void GraphicsOptionsScreen2_InitWidgets(struct MenuOptionsScreen* s) {
 			"&eDesktop: &fUses desktop resolution.\n" \
 			"&eOther: &fChanges display resolution.\n" \
 			"&cLow res may break GUI display.");
+		MenuOptionsScreen_AddEnum(s, "Particles", ParticlesMode_Names, PARTICLES_MODE_COUNT,
+			GrO2_GetParticles, GrO2_SetParticles,
+			"&eNone: &fNo particles at all.\n" \
+			"&eMinimal: &fDefault particle effects.\n" \
+			"&eAll: &fExtra particle effects.");
 	}
 	MenuOptionsScreen_EndButtons(s, -1, GrO2_SwitchBack);
 }
